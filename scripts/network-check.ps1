@@ -28,6 +28,18 @@ function Invoke-SafeCommand {
     }
 }
 
+function Join-ValuesOrNone {
+    param([object[]]$Values)
+
+    $filteredValues = @($Values | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+
+    if ($filteredValues.Count -eq 0) {
+        return 'None'
+    }
+
+    return ($filteredValues -join ', ')
+}
+
 function Get-AdapterConfiguration {
     $netAdapterCommand = Get-Command -Name Get-NetAdapter -ErrorAction SilentlyContinue
 
@@ -46,11 +58,11 @@ function Get-AdapterConfiguration {
                     Name        = $adapter.Name
                     Description = $adapter.InterfaceDescription
                     Status      = $adapter.Status
-                    MacAddress  = $adapter.MacAddress
-                    IPv4        = if ($null -ne $ipConfig.IPv4Address) { ($ipConfig.IPv4Address.IPAddress -join ', ') } else { 'None' }
-                    IPv6        = if ($null -ne $ipConfig.IPv6Address) { ($ipConfig.IPv6Address.IPAddress -join ', ') } else { 'None' }
-                    Gateway     = if ($null -ne $ipConfig.IPv4DefaultGateway) { ($ipConfig.IPv4DefaultGateway.NextHop -join ', ') } else { 'None' }
-                    DnsServers  = if ($null -ne $ipConfig.DNSServer.ServerAddresses) { ($ipConfig.DNSServer.ServerAddresses -join ', ') } else { 'None' }
+                    MacAddress  = Join-ValuesOrNone -Values $adapter.MacAddress
+                    IPv4        = Join-ValuesOrNone -Values $ipConfig.IPv4Address.IPAddress
+                    IPv6        = Join-ValuesOrNone -Values $ipConfig.IPv6Address.IPAddress
+                    Gateway     = Join-ValuesOrNone -Values $ipConfig.IPv4DefaultGateway.NextHop
+                    DnsServers  = Join-ValuesOrNone -Values $ipConfig.DNSServer.ServerAddresses
                 }
             }
         }
@@ -65,11 +77,11 @@ function Get-AdapterConfiguration {
                     Name        = $_.Description
                     Description = $_.Description
                     Status      = 'Up'
-                    MacAddress  = $_.MACAddress
-                    IPv4        = if ($_.IPAddress) { ($_.IPAddress | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' }) -join ', ' } else { 'None' }
-                    IPv6        = if ($_.IPAddress) { ($_.IPAddress | Where-Object { $_ -notmatch '^\d{1,3}(\.\d{1,3}){3}$' }) -join ', ' } else { 'None' }
-                    Gateway     = if ($_.DefaultIPGateway) { $_.DefaultIPGateway -join ', ' } else { 'None' }
-                    DnsServers  = if ($_.DNSServerSearchOrder) { $_.DNSServerSearchOrder -join ', ' } else { 'None' }
+                    MacAddress  = Join-ValuesOrNone -Values $_.MACAddress
+                    IPv4        = Join-ValuesOrNone -Values ($_.IPAddress | Where-Object { $_ -match '^\d{1,3}(\.\d{1,3}){3}$' })
+                    IPv6        = Join-ValuesOrNone -Values ($_.IPAddress | Where-Object { $_ -notmatch '^\d{1,3}(\.\d{1,3}){3}$' })
+                    Gateway     = Join-ValuesOrNone -Values $_.DefaultIPGateway
+                    DnsServers  = Join-ValuesOrNone -Values $_.DNSServerSearchOrder
                 }
             }
     }
