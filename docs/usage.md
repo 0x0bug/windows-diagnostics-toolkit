@@ -1,0 +1,136 @@
+# Usage Guide
+
+This guide covers basic usage for Windows Diagnostics Toolkit. All scripts are
+read-only and safe to run from a normal PowerShell session.
+
+## Prerequisites
+
+- Windows 10 or Windows 11
+- Windows PowerShell 5.1 or PowerShell 7+
+- No third-party dependencies
+
+Open PowerShell in the repository root before running examples.
+
+## Run All Checks
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\system-info.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\network-check.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\disk-health.ps1
+```
+
+PowerShell 7 examples:
+
+```powershell
+pwsh -NoProfile -File .\scripts\system-info.ps1
+pwsh -NoProfile -File .\scripts\network-check.ps1
+pwsh -NoProfile -File .\scripts\disk-health.ps1
+```
+
+## System Information
+
+`scripts/system-info.ps1` prints operating system, CPU, memory, GPU, uptime, and
+system drive information.
+
+```powershell
+pwsh -NoProfile -File .\scripts\system-info.ps1
+```
+
+Use this script first when you need a quick summary of the local machine.
+
+## Network Diagnostics
+
+`scripts/network-check.ps1` prints active network adapters, IP addresses, DNS
+servers, gateways, and simple connectivity checks.
+
+```powershell
+pwsh -NoProfile -File .\scripts\network-check.ps1
+```
+
+Optional parameters:
+
+```powershell
+pwsh -NoProfile -File .\scripts\network-check.ps1 -DnsTestName github.com -InternetTestHost 8.8.8.8 -TimeoutSeconds 3
+```
+
+- `DnsTestName` controls the hostname used for DNS resolution.
+- `InternetTestHost` controls the host used for the internet reachability check.
+- `TimeoutSeconds` controls the timeout for PowerShell 7 `Test-Connection`.
+
+## Disk Health
+
+`scripts/disk-health.ps1` prints physical disk and volume information. It warns
+when a volume has less than 15% free space by default.
+
+```powershell
+pwsh -NoProfile -File .\scripts\disk-health.ps1
+```
+
+Use a custom warning threshold:
+
+```powershell
+pwsh -NoProfile -File .\scripts\disk-health.ps1 -LowFreeSpacePercent 20
+```
+
+## Syntax Verification
+
+Check all scripts with the PowerShell parser:
+
+```powershell
+$scripts = Get-ChildItem -Path .\scripts -Filter *.ps1
+foreach ($script in $scripts) {
+    $errors = $null
+    [System.Management.Automation.Language.Parser]::ParseFile(
+        $script.FullName,
+        [ref]$null,
+        [ref]$errors
+    ) | Out-Null
+
+    if ($errors.Count -gt 0) {
+        Write-Error "$($script.Name) has parser errors"
+        $errors | ForEach-Object { $_.Message }
+    }
+    else {
+        Write-Host "$($script.Name): syntax ok"
+    }
+}
+```
+
+## Real Co-Authored Commit
+
+Do not add a fake co-author. A `Co-authored-by` trailer should only be used when
+another person made a real contribution to the commit.
+
+A good small collaboration task for this repository is improving
+`docs/usage.md`, for example:
+
+- clarify a troubleshooting step
+- add an example from another Windows version
+- improve wording around elevated permissions
+
+Ask the collaborator for their GitHub noreply email, or tell them how to find it:
+
+1. Open GitHub settings.
+2. Go to **Emails**.
+3. Copy the noreply address shown by GitHub.
+
+For many accounts it looks like this:
+
+```text
+12345678+username@users.noreply.github.com
+```
+
+After the collaborator provides a real change, include a trailer in the commit
+message:
+
+```text
+Co-authored-by: Name <12345678+username@users.noreply.github.com>
+```
+
+Example commit command after staging the real shared change:
+
+```powershell
+git commit -m "docs: improve usage troubleshooting" -m "Co-authored-by: Name <12345678+username@users.noreply.github.com>"
+```
+
+Only use the collaborator's real name and GitHub email with their consent.
