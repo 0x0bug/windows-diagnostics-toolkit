@@ -26,12 +26,23 @@ a warning and continue where possible.
 
 ## Quick Start
 
-Clone the repository and run a script from the repository root:
+Clone the repository and create a support report from the repository root:
 
 ```powershell
 git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
 cd windows-diagnostics-toolkit
 
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Network -OutputDirectory .\reports
+```
+
+The wrapper writes `WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.txt` to the current
+directory by default. Use `-ExportMarkdown` to also create a Markdown report.
+
+You can also run individual scripts directly:
+
+```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\system-info.ps1
 pwsh -NoProfile -File .\scripts\network-check.ps1
 pwsh -NoProfile -File .\scripts\disk-health.ps1
@@ -42,6 +53,40 @@ above for that script run. The command does not change the machine-wide executio
 policy.
 
 ## Scripts
+
+### `Invoke-WindowsDiagnostics.ps1`
+
+Creates a support report by running the existing read-only diagnostics scripts.
+
+Run all checks and save a TXT report in the current directory:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1
+```
+
+Run all checks and also export Markdown:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
+```
+
+Run selected checks into a custom output directory:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Disk -OutputDirectory .\reports
+```
+
+Available parameters:
+
+- `-All` - run system, network, and disk checks
+- `-System` - run only system information unless combined with other selectors
+- `-Network` - run only network checks unless combined with other selectors
+- `-Disk` - run only disk checks unless combined with other selectors
+- `-OutputDirectory` - choose where report files are written
+- `-ExportMarkdown` - also write a `.md` report
+
+See [docs/report-example.md](docs/report-example.md) for an anonymized report
+example.
 
 ### `scripts/system-info.ps1`
 
