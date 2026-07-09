@@ -5,6 +5,7 @@ param(
     [switch]$Network,
     [switch]$Disk,
     [switch]$Events,
+    [switch]$Services,
     [string]$OutputDirectory = (Get-Location).Path,
     [switch]$ExportMarkdown
 )
@@ -185,7 +186,7 @@ function Add-MarkdownSection {
 }
 
 $repositoryRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$selectedAll = $All -or (-not $System -and -not $Network -and -not $Disk -and -not $Events)
+$selectedAll = $All -or (-not $System -and -not $Network -and -not $Disk -and -not $Events -and -not $Services)
 $selectedChecks = New-Object System.Collections.Generic.List[object]
 
 if ($selectedAll -or $System) {
@@ -213,6 +214,13 @@ if ($selectedAll -or $Events) {
     $selectedChecks.Add([pscustomobject]@{
         Title = 'Event Log Check'
         Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\event-log-check.ps1'
+    })
+}
+
+if ($selectedAll -or $Services) {
+    $selectedChecks.Add([pscustomobject]@{
+        Title = 'Services Check'
+        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\services-check.ps1'
     })
 }
 
