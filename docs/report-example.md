@@ -12,7 +12,7 @@ Created at    : 2026-07-09 10:15:30 +02:00
 Computer name : DESKTOP-EXAMPLE
 Mode          : read-only
 Output        : C:\Example\WindowsDiagnosticsReport-20260709-101530.txt
-Selected      : System Information, Network Check, Disk Health, Event Log Check, Services Check
+Selected      : System Information, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check
 
 == System Information ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\system-info.ps1
@@ -161,6 +161,56 @@ Skipped. Use -IncludeStartup to include read-only startup entry checks.
 
 == Scheduled Tasks With Non-Zero Last Result ==
 Skipped. Use -IncludeScheduledTasks to include read-only scheduled task checks.
+
+== Windows Update Check ==
+Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows-update-check.ps1
+Exit code: 0
+
+Windows Diagnostics Toolkit - Windows Update Check
+Mode: read-only
+
+== Summary ==
+Time window         : Last 30 day(s)
+Pending reboot     : No
+Recent updates     : 2
+Event log check    : Skipped
+Services checked   : 5
+
+== Windows Version ==
+Caption       : Microsoft Windows 11 Pro
+Version       : 10.0.26100
+BuildNumber   : 26100
+InstallDate   : 07/01/2026 10:00:00
+LastBootUpTime: 07/09/2026 08:12:00
+
+== Pending Reboot ==
+Pending reboot: No
+Indicators found: None
+
+== Recent Installed Updates ==
+HotFixID   : KB5000001
+Description: Security Update
+InstalledOn: 07/08/2026 00:00:00
+InstalledBy: ExampleUser
+
+HotFixID   : KB5000002
+Description: Update
+InstalledOn: 07/05/2026 00:00:00
+InstalledBy: ExampleUser
+
+== Windows Update Services ==
+Name       : wuauserv
+DisplayName: Windows Update
+State      : Running
+StartMode  : Manual
+
+Name       : bits
+DisplayName: Background Intelligent Transfer Service
+State      : Running
+StartMode  : Manual
+
+== Windows Update Events ==
+Skipped. Use -IncludeEventLog to include recent Windows Update related events.
 ```
 
 ## Markdown Report
@@ -172,7 +222,7 @@ Skipped. Use -IncludeScheduledTasks to include read-only scheduled task checks.
 - Computer name: `DESKTOP-EXAMPLE`
 - Mode: `read-only`
 - TXT report: `C:\Example\WindowsDiagnosticsReport-20260709-101530.txt`
-- Selected: `System Information, Event Log Check, Services Check`
+- Selected: `System Information, Event Log Check, Services Check, Windows Update Check`
 
 ## System Information
 
@@ -237,5 +287,34 @@ State      : Stopped
 StartMode  : Auto
 ExitCode   : 0
 ProcessId  : 0
+```
+
+## Windows Update Check
+
+- Command: `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows-update-check.ps1`
+- Exit code: `0`
+
+```text
+Windows Diagnostics Toolkit - Windows Update Check
+Mode: read-only
+
+== Summary ==
+Time window         : Last 30 day(s)
+Pending reboot     : No
+Recent updates     : 2
+Event log check    : Skipped
+Services checked   : 5
+
+== Windows Version ==
+Caption       : Microsoft Windows 11 Pro
+Version       : 10.0.26100
+BuildNumber   : 26100
+
+== Pending Reboot ==
+Pending reboot: No
+Indicators found: None
+
+== Windows Update Events ==
+Skipped. Use -IncludeEventLog to include recent Windows Update related events.
 ```
 ````

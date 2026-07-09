@@ -18,7 +18,8 @@ settings.
 ## Safety
 
 These scripts are read-only. They do not change network, disk, registry,
-service, scheduled task, firewall, DNS, routing, power, or system configuration.
+service, scheduled task, Windows Update, firewall, DNS, routing, power, or
+system configuration.
 
 Some Windows storage and network cmdlets may expose less detail without elevated
 permissions. When a command is unavailable or access is restricted, scripts print
@@ -36,6 +37,7 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Network -OutputDirectory .\reports
 ```
 
@@ -50,6 +52,7 @@ pwsh -NoProfile -File .\scripts\network-check.ps1
 pwsh -NoProfile -File .\scripts\disk-health.ps1
 pwsh -NoProfile -File .\scripts\event-log-check.ps1
 pwsh -NoProfile -File .\scripts\services-check.ps1
+pwsh -NoProfile -File .\scripts\windows-update-check.ps1
 ```
 
 If your execution policy blocks local scripts, use the one-command bypass shown
@@ -92,14 +95,21 @@ Run only Services diagnostics:
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
 ```
 
+Run only Windows Update diagnostics:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
+```
+
 Available parameters:
 
-- `-All` - run system, network, disk, Event Log, and Services checks
+- `-All` - run system, network, disk, Event Log, Services, and Windows Update checks
 - `-System` - run only system information unless combined with other selectors
 - `-Network` - run only network checks unless combined with other selectors
 - `-Disk` - run only disk checks unless combined with other selectors
 - `-Events` - run only Event Log diagnostics unless combined with other selectors
 - `-Services` - run only Services diagnostics unless combined with other selectors
+- `-Updates` - run only Windows Update diagnostics unless combined with other selectors
 - `-OutputDirectory` - choose where report files are written
 - `-ExportMarkdown` - also write a `.md` report
 
@@ -204,6 +214,24 @@ Include startup entries and scheduled tasks with non-zero last results:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\services-check.ps1 -IncludeStartup -IncludeScheduledTasks -MaxItems 20
+```
+
+### `scripts/windows-update-check.ps1`
+
+Checks Windows Update related state from built-in read-only sources. The script
+does not install updates, start update scans, reset Windows Update components,
+clean `SoftwareDistribution`, change services, or write registry values.
+
+Run:
+
+```powershell
+pwsh -NoProfile -File .\scripts\windows-update-check.ps1
+```
+
+Include recent Windows Update related Event Log entries:
+
+```powershell
+pwsh -NoProfile -File .\scripts\windows-update-check.ps1 -IncludeEventLog -SinceDays 14 -MaxEvents 20
 ```
 
 ## Example Output
