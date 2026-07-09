@@ -12,7 +12,7 @@ Created at    : 2026-07-09 10:15:30 +02:00
 Computer name : DESKTOP-EXAMPLE
 Mode          : read-only
 Output        : C:\Example\WindowsDiagnosticsReport-20260709-101530.txt
-Selected      : System Information, Network Check, Disk Health, Event Log Check
+Selected      : System Information, Network Check, Disk Health, Event Log Check, Services Check
 
 == System Information ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\system-info.ps1
@@ -124,6 +124,43 @@ Level          : Error
 Id             : 2002
 ProviderName   : ExampleProvider
 Message        : Example application event message.
+
+== Services Check ==
+Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\services-check.ps1
+Exit code: 0
+
+Windows Diagnostics Toolkit - Services Check
+Mode: read-only
+
+== Summary ==
+Total services                 : 250
+Running services               : 120
+Automatic services not running : 1
+Non-OK service states          : 1
+Startup entries included       : False
+Scheduled tasks included       : False
+
+== Automatic Services Not Running ==
+Name       : ExampleService
+DisplayName: Example Service
+State      : Stopped
+StartMode  : Auto
+ExitCode   : 0
+ProcessId  : 0
+
+== Non-OK Service States ==
+Name       : ExamplePendingService
+DisplayName: Example Pending Service
+State      : Start Pending
+StartMode  : Manual
+ExitCode   : 0
+ProcessId  : 1234
+
+== Startup Entries ==
+Skipped. Use -IncludeStartup to include read-only startup entry checks.
+
+== Scheduled Tasks With Non-Zero Last Result ==
+Skipped. Use -IncludeScheduledTasks to include read-only scheduled task checks.
 ```
 
 ## Markdown Report
@@ -135,7 +172,7 @@ Message        : Example application event message.
 - Computer name: `DESKTOP-EXAMPLE`
 - Mode: `read-only`
 - TXT report: `C:\Example\WindowsDiagnosticsReport-20260709-101530.txt`
-- Selected: `System Information, Event Log Check`
+- Selected: `System Information, Event Log Check, Services Check`
 
 ## System Information
 
@@ -176,5 +213,29 @@ Level          : Error
 Id             : 1001
 ProviderName   : ExampleProvider
 Message        : Example service reported a recoverable error.
+```
+
+## Services Check
+
+- Command: `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\services-check.ps1`
+- Exit code: `0`
+
+```text
+Windows Diagnostics Toolkit - Services Check
+Mode: read-only
+
+== Summary ==
+Total services                 : 250
+Running services               : 120
+Automatic services not running : 1
+Non-OK service states          : 1
+
+== Automatic Services Not Running ==
+Name       : ExampleService
+DisplayName: Example Service
+State      : Stopped
+StartMode  : Auto
+ExitCode   : 0
+ProcessId  : 0
 ```
 ````

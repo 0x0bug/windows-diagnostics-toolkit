@@ -18,7 +18,7 @@ settings.
 ## Safety
 
 These scripts are read-only. They do not change network, disk, registry,
-service, firewall, DNS, routing, power, or system configuration.
+service, scheduled task, firewall, DNS, routing, power, or system configuration.
 
 Some Windows storage and network cmdlets may expose less detail without elevated
 permissions. When a command is unavailable or access is restricted, scripts print
@@ -35,6 +35,7 @@ cd windows-diagnostics-toolkit
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Network -OutputDirectory .\reports
 ```
 
@@ -48,6 +49,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\system-info.ps
 pwsh -NoProfile -File .\scripts\network-check.ps1
 pwsh -NoProfile -File .\scripts\disk-health.ps1
 pwsh -NoProfile -File .\scripts\event-log-check.ps1
+pwsh -NoProfile -File .\scripts\services-check.ps1
 ```
 
 If your execution policy blocks local scripts, use the one-command bypass shown
@@ -84,13 +86,20 @@ Run only Event Log diagnostics:
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
 ```
 
+Run only Services diagnostics:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
+```
+
 Available parameters:
 
-- `-All` - run system, network, disk, and Event Log checks
+- `-All` - run system, network, disk, Event Log, and Services checks
 - `-System` - run only system information unless combined with other selectors
 - `-Network` - run only network checks unless combined with other selectors
 - `-Disk` - run only disk checks unless combined with other selectors
 - `-Events` - run only Event Log diagnostics unless combined with other selectors
+- `-Services` - run only Services diagnostics unless combined with other selectors
 - `-OutputDirectory` - choose where report files are written
 - `-ExportMarkdown` - also write a `.md` report
 
@@ -177,6 +186,24 @@ Include warnings and adjust the time window:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\event-log-check.ps1 -SinceHours 48 -IncludeWarnings -MaxEvents 20
+```
+
+### `scripts/services-check.ps1`
+
+Checks Windows services and optionally includes read-only startup entry and
+scheduled task diagnostics. The script does not start, stop, restart, or modify
+services, registry keys, or scheduled tasks.
+
+Run:
+
+```powershell
+pwsh -NoProfile -File .\scripts\services-check.ps1
+```
+
+Include startup entries and scheduled tasks with non-zero last results:
+
+```powershell
+pwsh -NoProfile -File .\scripts\services-check.ps1 -IncludeStartup -IncludeScheduledTasks -MaxItems 20
 ```
 
 ## Example Output
