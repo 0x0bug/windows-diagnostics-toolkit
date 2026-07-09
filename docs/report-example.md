@@ -12,7 +12,7 @@ Created at    : 2026-07-09 10:15:30 +02:00
 Computer name : DESKTOP-EXAMPLE
 Mode          : read-only
 Output        : C:\Example\WindowsDiagnosticsReport-20260709-101530.txt
-Selected      : System Information, Network Check, Disk Health
+Selected      : System Information, Network Check, Disk Health, Event Log Check
 
 == System Information ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\system-info.ps1
@@ -90,6 +90,40 @@ Size         : 930.00 GB
 Free space   : 420.00 GB
 Free percent : 45.2%
 Source       : Get-Volume
+
+== Event Log Check ==
+Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\event-log-check.ps1
+Exit code: 0
+
+Windows Diagnostics Toolkit - Event Log Check
+Mode: read-only
+
+== Summary ==
+Time window     : Last 24 hour(s), since 07/09/2026 10:15:30
+Logs checked    : System, Application
+Levels included : Critical, Error
+Total events    : 2
+Displayed events: 2
+System         : 1 event(s)
+Application    : 1 event(s)
+
+== Top Sources ==
+ExampleProvider                                       2
+
+== Recent Events ==
+TimeCreated    : 07/09/2026 09:58:00
+LogName        : System
+Level          : Error
+Id             : 1001
+ProviderName   : ExampleProvider
+Message        : Example service reported a recoverable error.
+
+TimeCreated    : 07/09/2026 09:45:00
+LogName        : Application
+Level          : Error
+Id             : 2002
+ProviderName   : ExampleProvider
+Message        : Example application event message.
 ```
 
 ## Markdown Report
@@ -101,7 +135,7 @@ Source       : Get-Volume
 - Computer name: `DESKTOP-EXAMPLE`
 - Mode: `read-only`
 - TXT report: `C:\Example\WindowsDiagnosticsReport-20260709-101530.txt`
-- Selected: `System Information`
+- Selected: `System Information, Event Log Check`
 
 ## System Information
 
@@ -117,5 +151,30 @@ Computer name : DESKTOP-EXAMPLE
 Caption       : Microsoft Windows 11 Pro
 Version       : 10.0.26100
 Build number  : 26100
+```
+
+## Event Log Check
+
+- Command: `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\event-log-check.ps1`
+- Exit code: `0`
+
+```text
+Windows Diagnostics Toolkit - Event Log Check
+Mode: read-only
+
+== Summary ==
+Time window     : Last 24 hour(s), since 07/09/2026 10:15:30
+Logs checked    : System, Application
+Levels included : Critical, Error
+Total events    : 2
+Displayed events: 2
+
+== Recent Events ==
+TimeCreated    : 07/09/2026 09:58:00
+LogName        : System
+Level          : Error
+Id             : 1001
+ProviderName   : ExampleProvider
+Message        : Example service reported a recoverable error.
 ```
 ````

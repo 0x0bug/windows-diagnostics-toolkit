@@ -4,6 +4,7 @@ param(
     [switch]$System,
     [switch]$Network,
     [switch]$Disk,
+    [switch]$Events,
     [string]$OutputDirectory = (Get-Location).Path,
     [switch]$ExportMarkdown
 )
@@ -184,7 +185,7 @@ function Add-MarkdownSection {
 }
 
 $repositoryRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$selectedAll = $All -or (-not $System -and -not $Network -and -not $Disk)
+$selectedAll = $All -or (-not $System -and -not $Network -and -not $Disk -and -not $Events)
 $selectedChecks = New-Object System.Collections.Generic.List[object]
 
 if ($selectedAll -or $System) {
@@ -208,15 +209,29 @@ if ($selectedAll -or $Disk) {
     })
 }
 
+if ($selectedAll -or $Events) {
+    $selectedChecks.Add([pscustomobject]@{
+        Title = 'Event Log Check'
+        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\event-log-check.ps1'
+    })
+}
+
 $resolvedOutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
 if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) {
     New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
 }
 
-$timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$reportBaseName = "WindowsDiagnosticsReport-$timestamp"
-$textReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.txt"
-$markdownReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.md"
+do {
+    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $reportBaseName = "WindowsDiagnosticsReport-$timestamp"
+    $textReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.txt"
+    $markdownReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.md"
+
+    if ((Test-Path -LiteralPath $textReportPath) -or (Test-Path -LiteralPath $markdownReportPath)) {
+        Start-Sleep -Seconds 1
+    }
+} while ((Test-Path -LiteralPath $textReportPath) -or (Test-Path -LiteralPath $markdownReportPath))
+
 $powerShellPath = Get-CurrentPowerShellPath
 $createdAt = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
 

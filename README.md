@@ -34,6 +34,7 @@ cd windows-diagnostics-toolkit
 
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Network -OutputDirectory .\reports
 ```
 
@@ -46,6 +47,7 @@ You can also run individual scripts directly:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\system-info.ps1
 pwsh -NoProfile -File .\scripts\network-check.ps1
 pwsh -NoProfile -File .\scripts\disk-health.ps1
+pwsh -NoProfile -File .\scripts\event-log-check.ps1
 ```
 
 If your execution policy blocks local scripts, use the one-command bypass shown
@@ -76,12 +78,19 @@ Run selected checks into a custom output directory:
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Disk -OutputDirectory .\reports
 ```
 
+Run only Event Log diagnostics:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
+```
+
 Available parameters:
 
-- `-All` - run system, network, and disk checks
+- `-All` - run system, network, disk, and Event Log checks
 - `-System` - run only system information unless combined with other selectors
 - `-Network` - run only network checks unless combined with other selectors
 - `-Disk` - run only disk checks unless combined with other selectors
+- `-Events` - run only Event Log diagnostics unless combined with other selectors
 - `-OutputDirectory` - choose where report files are written
 - `-ExportMarkdown` - also write a `.md` report
 
@@ -150,6 +159,24 @@ Optional threshold:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\disk-health.ps1 -LowFreeSpacePercent 20
+```
+
+### `scripts/event-log-check.ps1`
+
+Reads recent Windows Event Log entries from the `System` and `Application` logs.
+The script uses `Get-WinEvent` in read-only mode and reports Critical/Error
+events from the last 24 hours by default.
+
+Run:
+
+```powershell
+pwsh -NoProfile -File .\scripts\event-log-check.ps1
+```
+
+Include warnings and adjust the time window:
+
+```powershell
+pwsh -NoProfile -File .\scripts\event-log-check.ps1 -SinceHours 48 -IncludeWarnings -MaxEvents 20
 ```
 
 ## Example Output
