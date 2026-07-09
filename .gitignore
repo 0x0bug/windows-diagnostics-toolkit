@@ -15,6 +15,12 @@ Thumbs.db
 *.temp
 *.bak
 
+# Generated diagnostics reports
+reports/
+reports-test/
+WindowsDiagnosticsReport-*.txt
+WindowsDiagnosticsReport-*.md
+
 # Test and coverage output
 coverage/
 TestResults/
