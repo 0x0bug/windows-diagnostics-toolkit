@@ -34,7 +34,7 @@ function Get-ProductionScript {
 
     $scriptsDirectory = Join-Path -Path $RepositoryRoot -ChildPath 'scripts'
     if (Test-Path -LiteralPath $scriptsDirectory -PathType Container) {
-        foreach ($script in @(Get-ChildItem -LiteralPath $scriptsDirectory -Filter '*.ps1' | Where-Object { -not $_.PSIsContainer } | Sort-Object -Property FullName)) {
+        foreach ($script in @(Get-ChildItem -LiteralPath $scriptsDirectory -Recurse -File -Filter '*.ps1' | Sort-Object -Property FullName)) {
             $scripts.Add($script)
         }
     }
@@ -45,10 +45,13 @@ function Get-ProductionScript {
 function Test-AllowedNewItemCommand {
     param(
         [Parameter(Mandatory = $true)][System.Management.Automation.Language.CommandAst]$CommandAst,
-        [Parameter(Mandatory = $true)][string]$ScriptPath
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot
     )
 
-    if ((Split-Path -Leaf $ScriptPath) -ne 'Invoke-WindowsDiagnostics.ps1') {
+    $entrypointPath = [System.IO.Path]::GetFullPath((Join-Path -Path $RepositoryRoot -ChildPath 'Invoke-WindowsDiagnostics.ps1'))
+    $currentScriptPath = [System.IO.Path]::GetFullPath($ScriptPath)
+    if (-not [string]::Equals($currentScriptPath, $entrypointPath, [System.StringComparison]::OrdinalIgnoreCase)) {
         return $false
     }
 
@@ -164,16 +167,18 @@ function Get-SafetyIssue {
         }, $true)
 
     foreach ($commandAst in @($commandAsts)) {
-        $commandName = $commandAst.GetCommandName()
-        if ([string]::IsNullOrWhiteSpace($commandName)) {
+        $rawCommandName = $commandAst.GetCommandName()
+        if ([string]::IsNullOrWhiteSpace($rawCommandName)) {
             continue
         }
+
+        $commandName = Split-Path -Path ($rawCommandName -replace '/', '\') -Leaf
 
         $isForbidden = $false
         $reason = $null
 
         if ($commandName -eq 'New-Item') {
-            if (-not (Test-AllowedNewItemCommand -CommandAst $commandAst -ScriptPath $ScriptPath)) {
+            if (-not (Test-AllowedNewItemCommand -CommandAst $commandAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot)) {
                 $isForbidden = $true
                 $reason = 'New-Item is only allowed in Invoke-WindowsDiagnostics.ps1 for -OutputDirectory creation.'
             }
@@ -198,7 +203,7 @@ function Get-SafetyIssue {
                 Path    = Get-RelativeDisplayPath -BasePath $RepositoryRoot -TargetPath $ScriptPath
                 Line    = $commandAst.Extent.StartLineNumber
                 Column  = $commandAst.Extent.StartColumnNumber
-                Command = $commandName
+                Command = $rawCommandName
                 Message = $reason
             }
         }
