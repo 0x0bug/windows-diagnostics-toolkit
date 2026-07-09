@@ -34,7 +34,7 @@ function Get-ProductionScript {
 
     $scriptsDirectory = Join-Path -Path $RepositoryRoot -ChildPath 'scripts'
     if (Test-Path -LiteralPath $scriptsDirectory -PathType Container) {
-        foreach ($script in @(Get-ChildItem -LiteralPath $scriptsDirectory -Recurse -File -Filter '*.ps1' | Sort-Object -Property FullName)) {
+        foreach ($script in @(Get-RepositoryChildItem -RootPath $scriptsDirectory | Where-Object { -not $_.PSIsContainer -and $_.Extension -eq '.ps1' } | Sort-Object -Property FullName)) {
             $scripts.Add($script)
         }
     }
@@ -173,6 +173,10 @@ function Get-SafetyIssue {
         }
 
         $commandName = Split-Path -Path ($rawCommandName -replace '/', '\') -Leaf
+        $commandAlias = Get-Alias -Name $commandName -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $commandName } | Select-Object -First 1
+        if ($null -ne $commandAlias) {
+            $commandName = $commandAlias.ResolvedCommandName
+        }
 
         $isForbidden = $false
         $reason = $null
