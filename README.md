@@ -25,6 +25,26 @@ Some Windows storage and network cmdlets may expose less detail without elevated
 permissions. When a command is unavailable or access is restricted, scripts print
 a warning and continue where possible.
 
+## Validation
+
+Run repository validation locally with PowerShell 7:
+
+```powershell
+pwsh -NoProfile -File .\scripts\validate.ps1
+```
+
+Run the same validation with Windows PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate.ps1
+```
+
+Validation checks:
+
+- PowerShell parser errors in production scripts
+- AST-based read-only safety guard for dangerous commands
+- generated reports, logs, temporary files, and backup files left in the repository
+
 ## Quick Start
 
 Clone the repository and create a support report from the repository root:
