@@ -6,6 +6,7 @@ param(
     [switch]$Disk,
     [switch]$Events,
     [switch]$Services,
+    [switch]$Updates,
     [string]$OutputDirectory = (Get-Location).Path,
     [switch]$ExportMarkdown
 )
@@ -186,7 +187,7 @@ function Add-MarkdownSection {
 }
 
 $repositoryRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$selectedAll = $All -or (-not $System -and -not $Network -and -not $Disk -and -not $Events -and -not $Services)
+$selectedAll = $All -or (-not $System -and -not $Network -and -not $Disk -and -not $Events -and -not $Services -and -not $Updates)
 $selectedChecks = New-Object System.Collections.Generic.List[object]
 
 if ($selectedAll -or $System) {
@@ -221,6 +222,13 @@ if ($selectedAll -or $Services) {
     $selectedChecks.Add([pscustomobject]@{
         Title = 'Services Check'
         Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\services-check.ps1'
+    })
+}
+
+if ($selectedAll -or $Updates) {
+    $selectedChecks.Add([pscustomobject]@{
+        Title = 'Windows Update Check'
+        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\windows-update-check.ps1'
     })
 }
 
