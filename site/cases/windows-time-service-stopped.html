@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Diagnose a stopped Windows Time service — Windows Diagnostics Toolkit</title>
+  <meta name="description" content="Inspect W32Time service state, timezone, local and UTC time, source, status, and optional events without changing time configuration.">
+  <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-time-service-stopped.html">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header><nav class="wrap"><a class="brand" href="../">Windows Diagnostics Toolkit</a><div class="nav-links"><a href="./">Cases</a><a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a></div></nav></header>
+<main><section class="wrap"><div class="eyebrow">Troubleshooting case</div><h1>Windows Time service is stopped</h1><p class="lead">Inspect time-service context without starting the service, changing peers, or requesting resynchronization.</p><pre><code>pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Time -PrivacyMode -ExportMarkdown</code></pre><div class="grid"><article class="card"><h3>What it checks</h3><p>W32Time state and start mode, domain membership, timezone, local and UTC clock, configured source, and verbose status.</p></article><article class="card"><h3>Optional evidence</h3><p>The standalone module can include recent Time-Service warning and error events.</p></article></div><h2>Interpretation</h2><p>A stopped service can be normal on a non-domain computer until Windows needs it. Use the source, status, domain context, and events together rather than treating service state alone as a failure.</p><p><a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit">Open the project on GitHub</a></p></section></main>
+<footer><div class="wrap">No time-service configuration or resynchronization is performed.</div></footer>
+</body>
+</html>
