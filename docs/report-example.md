@@ -16,16 +16,17 @@ Computer name : <HOST-1>
 Mode          : read-only
 Privacy mode  : enabled
 Output        : <USER-1>\WindowsDiagnosticsReport-20260709-101530.txt
-Selected      : System Information, Security Posture, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check
+Selected      : System Information, Security Posture, Performance Snapshot, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check
 
 == Findings Summary ==
 Overall status : ERROR
 Errors         : 1
-Warnings       : 4
+Warnings       : 5
 OK modules     : 2
 
 [ERROR] Disk Health / DISK_UNHEALTHY - An example disk reported an unhealthy state. Evidence: Health=Unhealthy
 [WARN] Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED - One or more BitLocker volumes are not protected.
+[WARN] Performance Snapshot / PERFORMANCE_MEMORY_LOW - Available physical memory is below the warning threshold.
 [WARN] Network Check / NETWORK_DNS_FAILED - DNS resolution did not complete successfully.
 [WARN] Event Log Check / RECENT_ERROR_EVENTS - Recent error events were found.
 [WARN] Services Check / SERVICE_STATE_ISSUES - One or more services need attention.
@@ -88,6 +89,32 @@ Ready     : Enabled
 Volume            : C:\
 Protection status : Off
 Volume status     : FullyDecrypted
+
+== Performance Snapshot ==
+Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\performance-snapshot.ps1
+Exit code: 0
+
+Windows Diagnostics Toolkit - Performance Snapshot
+Mode: read-only
+
+== Memory ==
+Total physical memory : 32.00 GB
+Available memory      : 3.20 GB
+Available percent     : 10.0%
+
+== CPU Snapshot ==
+Total CPU load : 42.0%
+
+== Pagefile Usage ==
+Allocated : 8,192 MB
+Used      : 1,024 MB
+Usage     : 12.5%
+
+== Top Processes by Working Set ==
+ExampleApp                       512.00 MB
+
+== Top Processes by CPU Time ==
+ExampleApp                         120.00 s
 
 == Network Check ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\network-check.ps1
@@ -271,17 +298,18 @@ Skipped. Use -IncludeEventLog to include recent Windows Update related events.
 - Mode: `read-only`
 - Privacy mode: `enabled`
 - TXT report: `<USER-1>\WindowsDiagnosticsReport-20260709-101530.txt`
-- Selected: `System Information, Security Posture, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check`
+- Selected: `System Information, Security Posture, Performance Snapshot, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check`
 
 ## Findings Summary
 
 - Overall status: `WARN`
 - Errors: `0`
-- Warnings: `3`
+- Warnings: `4`
 - OK modules: `2`
 
 - `[WARN]` **Event Log Check / RECENT_ERROR_EVENTS** - Recent error events were found.
 - `[WARN]` **Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED** - One or more BitLocker volumes are not protected.
+- `[WARN]` **Performance Snapshot / PERFORMANCE_MEMORY_LOW** - Available physical memory is below the warning threshold.
 - `[WARN]` **Services Check / SERVICE_STATE_ISSUES** - One or more services need attention.
 - `[OK]` **System Information** - No findings.
 - `[OK]` **Windows Update Check** - No findings.
@@ -318,6 +346,22 @@ Real-time protection: Enabled
 == BitLocker ==
 Volume            : C:\
 Protection status : Off
+```
+
+## Performance Snapshot
+
+- Command: `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\performance-snapshot.ps1`
+- Exit code: `0`
+
+```text
+Windows Diagnostics Toolkit - Performance Snapshot
+Mode: read-only
+
+== Memory ==
+Available percent     : 10.0%
+
+== Top Processes by Working Set ==
+ExampleApp                       512.00 MB
 ```
 
 ## Event Log Check
