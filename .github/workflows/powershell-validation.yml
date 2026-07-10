@@ -62,6 +62,22 @@ jobs:
         shell: powershell
         run: .\tests\crash-hang-diagnostics.tests.ps1
 
+      - name: Test Time Sync Diagnostics with PowerShell 7
+        shell: pwsh
+        run: .\tests\time-sync-diagnostics.tests.ps1
+
+      - name: Test Time Sync Diagnostics with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\time-sync-diagnostics.tests.ps1
+
+      - name: Test validation AST policy with PowerShell 7
+        shell: pwsh
+        run: .\tests\validate-ast.tests.ps1
+
+      - name: Test validation AST policy with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\validate-ast.tests.ps1
+
       - name: Smoke test System report
         shell: pwsh
         run: |

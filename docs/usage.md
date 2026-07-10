@@ -154,6 +154,34 @@ Run only this module through the combined-report runner:
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Crashes -ExportMarkdown
 ```
 
+## Time Sync Diagnostics
+
+`scripts/time-sync-diagnostics.ps1` reads W32Time service status, domain
+membership, timezone, local/UTC time, the configured time source, and verbose
+status. It invokes only `w32tm.exe /query /source` and
+`w32tm.exe /query /status /verbose`; it never configures or resynchronizes time.
+
+```powershell
+pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1
+```
+
+Use `-IncludeTimeServiceEvents` to show up to 20 Time-Service warnings and errors
+from the previous seven days. The standalone bounds can be changed without adding
+any write operations:
+
+```powershell
+pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 -SinceDays 14 -MaxEvents 20 -IncludeTimeServiceEvents
+```
+
+A stopped W32Time service on a domain-joined computer, a local clock source, or an
+unavailable source creates `WARN` while the script still exits with code 0.
+
+Run only this module through the combined-report runner:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Time -ExportMarkdown
+```
+
 ## Network Diagnostics
 
 `scripts/network-check.ps1` prints active network adapters, IP addresses, DNS

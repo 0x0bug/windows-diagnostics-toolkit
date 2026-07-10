@@ -142,6 +142,8 @@ function Get-SafetyIssue {
         'reg.exe',
         'netsh',
         'netsh.exe',
+        'w32tm',
+        'w32tm.exe',
         'sc',
         'sc.exe',
         'bcdedit',
@@ -185,6 +187,12 @@ function Get-SafetyIssue {
             if (-not (Test-AllowedNewItemCommand -CommandAst $commandAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot)) {
                 $isForbidden = $true
                 $reason = 'New-Item is only allowed in Invoke-WindowsDiagnostics.ps1 for -OutputDirectory creation.'
+            }
+        }
+        elseif ($commandName -eq 'w32tm.exe') {
+            if (-not (Test-WdtAllowedW32tmCommand -CommandAst $commandAst)) {
+                $isForbidden = $true
+                $reason = 'Only w32tm.exe /query /source and w32tm.exe /query /status /verbose are allowed.'
             }
         }
         elseif ($forbiddenExactCommands.ContainsKey($commandName)) {
@@ -272,6 +280,13 @@ function Get-GeneratedFileIssue {
 }
 
 $repositoryRoot = Get-RepositoryRoot
+$validationPolicyPath = Join-Path -Path $PSScriptRoot -ChildPath 'validation-policy.ps1'
+if (-not (Test-Path -LiteralPath $validationPolicyPath -PathType Leaf)) {
+    throw "Validation policy is missing: $validationPolicyPath"
+}
+
+. $validationPolicyPath
+
 $productionScripts = @(Get-ProductionScript -RepositoryRoot $repositoryRoot)
 $parserIssues = New-Object System.Collections.Generic.List[object]
 $safetyIssues = New-Object System.Collections.Generic.List[object]
