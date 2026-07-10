@@ -42,13 +42,15 @@ function Test-WdtAllowedDotSource {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
     if ($CommandAst.InvocationOperator -ne [System.Management.Automation.Language.TokenKind]::Dot -or $CommandAst.CommandElements.Count -ne 1) { return $false }
     $text = $CommandAst.CommandElements[0].Extent.Text
-    $allowed = @("`$PSScriptRoot\validation-policy.ps1", "`$PSScriptRoot\report-common.ps1", "`$PSScriptRoot\scripts\report-common.ps1")
+    $allowed = @("`$PSScriptRoot\validation-policy.ps1", "`$PSScriptRoot\report-common.ps1", "`$PSScriptRoot\scripts\report-common.ps1", "`$PSScriptRoot\scripts\diagnostic-catalog.ps1", "`$PSScriptRoot\scripts\tui.ps1")
     if ($text -notin $allowed) { return $false }
     $scriptsPath = [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'scripts'))
     $scriptDirectory = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptPath))
     return ($text -eq "`$PSScriptRoot\validation-policy.ps1" -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\validate.ps1')) -or
         ($text -eq "`$PSScriptRoot\report-common.ps1" -and [string]::Equals($scriptDirectory, $scriptsPath, [System.StringComparison]::OrdinalIgnoreCase)) -or
-        ($text -eq "`$PSScriptRoot\scripts\report-common.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot))
+        ($text -eq "`$PSScriptRoot\scripts\report-common.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) -or
+        ($text -eq "`$PSScriptRoot\scripts\diagnostic-catalog.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) -or
+        ($text -eq "`$PSScriptRoot\scripts\tui.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot))
 }
 
 function Test-WdtAllowedNewItemCommand {
@@ -299,6 +301,20 @@ function Test-WdtAllowedPowerShellCommand {
     )
 }
 
+function Test-WdtAllowedTuiReportInvocation {
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
+
+    if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1')) { return $false }
+    if ($CommandAst.GetCommandName() -ine 'Invoke-WdtReport') { return $false }
+    if ((Get-WdtEnclosingFunctionName $CommandAst) -cne 'Invoke-WdtInteractiveSession') { return $false }
+    if ($CommandAst.Redirections.Count -ne 0 -or $CommandAst.CommandElements.Count -ne 2) { return $false }
+
+    $argument = $CommandAst.CommandElements[1]
+    return $argument -is [System.Management.Automation.Language.VariableExpressionAst] -and
+        $argument.Splatted -and
+        $argument.VariablePath.UserPath -ceq 'reportParameters'
+}
+
 function Get-WdtCommandSafetyIssue {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot, [string[]]$LocalFunctionNames)
     if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Dot) {
@@ -318,6 +334,28 @@ function Get-WdtCommandSafetyIssue {
         if (Test-WdtAllowedBitLockerCimQuery $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'Invoke-CimMethod is only allowed for approved read-only BitLocker status queries.'
     }
+
+    if ($leaf -eq 'Invoke-WdtReport') {
+        if ($leaf -in $LocalFunctionNames) { return }
+        if (Test-WdtAllowedTuiReportInvocation $CommandAst $ScriptPath $RepositoryRoot) { return }
+        return New-WdtSafetyIssue $CommandAst 'The report runner is only callable from the approved interactive session.'
+    }
+
+    if ($leaf -eq 'Read-Host') {
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-WdtInteractiveSession' -and
+            $CommandAst.Redirections.Count -eq 0) { return }
+        return New-WdtSafetyIssue $CommandAst 'Read-Host is only allowed in Invoke-WdtInteractiveSession without redirection.'
+    }
+
+    if ($leaf -eq 'Clear-Host') {
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $CommandAst) -in @('Show-WdtTuiScreen', 'Invoke-WdtInteractiveSession') -and
+            $CommandAst.Redirections.Count -eq 0) { return }
+        return New-WdtSafetyIssue $CommandAst 'Clear-Host is only allowed in approved TUI rendering functions without redirection.'
+    }
+
+    if ($leaf -eq 'Get-WdtDiagnosticDefinition' -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1')) { return }
 
     if ($leaf -eq 'New-Item') {
         if (Test-WdtAllowedNewItemCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
@@ -361,6 +399,12 @@ function Get-WdtMemberSafetyIssue {
     $isStatic = $MemberAst.Expression -is [System.Management.Automation.Language.TypeExpressionAst]
     if ($isStatic) {
         $typeName = $MemberAst.Expression.TypeName.FullName
+        if ($typeName -eq 'System.Console' -and $member -eq 'ReadKey' -and
+            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtInteractiveSession' -and
+            $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -ceq '$true') {
+            return
+        }
         if ($typeName -eq 'System.IO.File' -and $member -eq 'WriteAllLines' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and $argumentCount -eq 3) {
             $pathVariable = if ($MemberAst.Arguments[0] -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Arguments[0].VariablePath.UserPath } else { '' }
             $linesVariable = if ($MemberAst.Arguments[1] -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Arguments[1].VariablePath.UserPath } else { '' }
@@ -374,6 +418,8 @@ function Get-WdtMemberSafetyIssue {
             'IO.Path::GetFullPath',
             'Management.ManagementDateTimeConverter::ToDateTime',
             'Math::Max',
+            'Math::Min',
+            'Math::Floor',
             'string::Equals',
             'string::IsNullOrEmpty',
             'string::IsNullOrWhiteSpace',
@@ -437,6 +483,12 @@ function Get-WdtSafetyIssues {
     foreach ($import in $approvedImports) {
         $helperPath = if ($import.CommandElements[0].Extent.Text -like '*validation-policy.ps1') {
             Join-Path $RepositoryRoot 'scripts\validation-policy.ps1'
+        }
+        elseif ($import.CommandElements[0].Extent.Text -like '*tui.ps1') {
+            Join-Path $RepositoryRoot 'scripts\tui.ps1'
+        }
+        elseif ($import.CommandElements[0].Extent.Text -like '*diagnostic-catalog.ps1') {
+            Join-Path $RepositoryRoot 'scripts\diagnostic-catalog.ps1'
         }
         else {
             Join-Path $RepositoryRoot 'scripts\report-common.ps1'

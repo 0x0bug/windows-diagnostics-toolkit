@@ -1,12 +1,12 @@
 # Windows Diagnostics Toolkit
 
-![Windows Diagnostics Toolkit: read-only Windows diagnostics in under 30 seconds](site/assets/social-preview.svg)
+![Windows Diagnostics Toolkit: local read-only diagnostics](site/assets/social-preview.svg)
 
-**Generate a local Windows support report in under 30 seconds without changing the system.**
+**Generate a local Windows support report with diagnostics that are read-only by design with automated safety checks.**
 
 Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 and Windows 11. It collects security, performance, network, disk, crash, service, Event Log, time-sync, and Windows Update context into TXT and optional Markdown reports.
 
-- Read-only by design
+- Read-only by design with automated safety checks
 - No installer or third-party PowerShell modules
 - No telemetry, upload, remote collection, or automatic fixes
 - Local reports with an aggregated `OK` / `WARN` / `ERROR` findings summary
@@ -17,21 +17,47 @@ Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 
 
 ## Quick start
 
-Clone the repository and run the combined diagnostics from its root:
+### Interactive mode
+
+Clone the repository and start the toolkit without switches:
 
 ```powershell
 git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
 cd windows-diagnostics-toolkit
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1
 ```
 
-Windows PowerShell 5.1:
+Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default; the menu lets you change the selected modules and output directory.
+The TUI uses a normal layout from 60x25 and a compact layout from 40x18. It uses console colors when available and keeps the same text markers in monochrome terminals. Below 40x18 it asks you to resize the window before showing the menu.
+
+If Windows PowerShell reports that script execution is disabled, use this process-only launch command:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\Invoke-WindowsDiagnostics.ps1
 ```
 
-The one-run execution-policy bypass applies only to that process. It does not change the machine-wide policy.
+This opens the same interactive TUI. The one-run execution-policy bypass applies only to the new PowerShell process; it does not change the machine-wide or current-user execution policy and does not require PowerShell 7.
+
+If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`; installing PowerShell 7 is optional because the toolkit supports the built-in Windows PowerShell 5.1 command above.
+
+### Command-line mode
+
+Explicit module switches run diagnostics immediately without opening the TUI:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
+```
+
+Windows PowerShell 5.1 non-interactive example:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+```
+
+Without module switches the Windows PowerShell command opens the TUI. With `-All` or one or more module switches it runs directly in command-line mode.
 
 Reports are written to the current directory unless `-OutputDirectory` is provided:
 
@@ -62,7 +88,7 @@ The report begins with a findings summary so the user does not need to inspect e
 Use `-PrivacyMode` when attaching a report to a GitHub issue, forum post, chat, or support request:
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 ```
 
 Privacy Mode replaces identifying values with stable per-report tokens such as:
@@ -82,22 +108,22 @@ Review every report before publishing it. Standalone module output is raw and lo
 ## Run selected checks
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Performance
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Network
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Time
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Disk
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Crashes
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
+.\Invoke-WindowsDiagnostics.ps1 -System
+.\Invoke-WindowsDiagnostics.ps1 -Security
+.\Invoke-WindowsDiagnostics.ps1 -Performance
+.\Invoke-WindowsDiagnostics.ps1 -Network
+.\Invoke-WindowsDiagnostics.ps1 -Time
+.\Invoke-WindowsDiagnostics.ps1 -Disk
+.\Invoke-WindowsDiagnostics.ps1 -Crashes
+.\Invoke-WindowsDiagnostics.ps1 -Events
+.\Invoke-WindowsDiagnostics.ps1 -Services
+.\Invoke-WindowsDiagnostics.ps1 -Updates
 ```
 
 Selectors can be combined:
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Network -Disk -OutputDirectory .\reports
+.\Invoke-WindowsDiagnostics.ps1 -System -Network -Disk -OutputDirectory .\reports
 ```
 
 See the [usage guide](docs/usage.md) for standalone module parameters and detailed behavior.
@@ -132,6 +158,8 @@ PowerShell 7:
 ```powershell
 pwsh -NoProfile -File .\scripts\validate.ps1
 ```
+
+The `pwsh` command is available only when PowerShell 7 is installed. Windows PowerShell 5.1 users should use the command below.
 
 Windows PowerShell 5.1:
 
