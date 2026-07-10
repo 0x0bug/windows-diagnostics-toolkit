@@ -17,6 +17,26 @@ Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 
 
 ## Quick start
 
+### Interactive remote launch
+
+Download the bootstrap script to a local file, review it if needed, and run it:
+
+```powershell
+$p="$env:TEMP\wdt-bootstrap.ps1"; irm "https://raw.githubusercontent.com/0x0bug/windows-diagnostics-toolkit/main/tools/bootstrap.ps1" -OutFile $p; & $p
+```
+
+The bootstrap downloads a temporary copy of the toolkit from the fixed GitHub repository, validates it, and removes that temporary copy when the session ends. Diagnostic reports remain local and are never uploaded. The bootstrap is a distribution layer that performs network and temporary-file operations; it is not itself described as read-only. Piping a remote script to `Invoke-Expression` is not recommended.
+
+### Interactive local launch
+
+From an existing checkout:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Interactive
+```
+
+### Command-line launch
+
 Clone the repository and run the combined diagnostics from its root:
 
 ```powershell

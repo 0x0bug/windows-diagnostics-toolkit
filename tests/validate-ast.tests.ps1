@@ -62,9 +62,12 @@ foreach ($source in @(
 
 Assert-Allowed '. $PSScriptRoot\report-common.ps1' 'scripts\disk-health.ps1'
 Assert-Allowed '. $PSScriptRoot\scripts\report-common.ps1' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Allowed '. $PSScriptRoot\scripts\tui.ps1' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed '. $PSScriptRoot\validation-policy.ps1' 'scripts\validate.ps1'
 Assert-Allowed '[System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed 'function Invoke-DiagnosticScript { $process.Start() }' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Allowed '[System.Console]::ReadKey($true)' 'scripts\tui.ps1'
+Assert-Allowed 'function Invoke-WdtInteractiveSession { Invoke-WdtReport @reportParameters }' 'scripts\tui.ps1'
 
 $allowedCallbacks = @'
 function Protect-WdtRegexMatches {
@@ -124,6 +127,22 @@ foreach ($source in @(
         '. (Join-Path $PSScriptRoot $childPath)'
     )) { Assert-Denied $source '*not an approved repository helper*' }
 Assert-Denied '& $PSScriptRoot\report-common.ps1' '*Dynamic command invocation is not allowed*'
+Assert-Denied '. $PSScriptRoot\scripts\tui.ps1' '*not an approved repository helper*' 'scripts\disk-health.ps1'
+Assert-Denied '. $tuiPath' '*not an approved repository helper*' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Denied 'Invoke-WdtReport @reportParameters' '*only callable from the approved interactive session*' 'scripts\tui.ps1'
+
+foreach ($source in @(
+        '[System.Console]::SetOut($writer)',
+        '[System.Console]::SetIn($reader)',
+        '[System.Console]::OpenStandardInput()',
+        '[System.Console]::UnknownMethod()'
+    )) { Assert-Denied $source '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1' }
+
+foreach ($source in @(
+        'Start-Process calc.exe',
+        'Invoke-RestMethod https://example.com',
+        'Invoke-Expression ''Get-Date'''
+    )) { Assert-Denied $source '*PowerShell command is not in the reviewed read-only allowlist*' 'scripts\tui.ps1' }
 
 Assert-Denied 'function Other { & $Validator $value $valueMatch $Text }' '*Only approved internal callbacks are permitted*' 'scripts\report-common.ps1'
 Assert-Denied 'function Protect-WdtRegexMatches { & $Validator $value $valueMatch $Text $extra }' '*Only approved internal callbacks are permitted*' 'scripts\report-common.ps1'

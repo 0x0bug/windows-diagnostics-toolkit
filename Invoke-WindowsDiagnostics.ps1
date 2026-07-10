@@ -13,7 +13,8 @@ param(
     [switch]$Updates,
     [string]$OutputDirectory = (Get-Location).Path,
     [switch]$ExportMarkdown,
-    [switch]$PrivacyMode
+    [switch]$PrivacyMode,
+    [switch]$Interactive
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,6 +26,13 @@ if (-not (Test-Path -LiteralPath $reportCommonPath -PathType Leaf)) {
 }
 
 . $PSScriptRoot\scripts\report-common.ps1
+
+$tuiPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\tui.ps1'
+if (-not (Test-Path -LiteralPath $tuiPath -PathType Leaf)) {
+    throw "Missing interactive helper: $tuiPath"
+}
+
+. $PSScriptRoot\scripts\tui.ps1
 
 function Get-CurrentPowerShellPath {
     try {
@@ -309,162 +317,179 @@ function Protect-WdtDiagnosticResults {
     }
 }
 
-$selectedAll = $All -or (-not $System -and -not $Security -and -not $Performance -and -not $Network -and -not $Time -and -not $Disk -and -not $Crashes -and -not $Events -and -not $Services -and -not $Updates)
-$selectedChecks = New-Object System.Collections.Generic.List[object]
+function Invoke-WdtReport {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$SelectedModules,
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [bool]$ExportMarkdown,
+        [bool]$PrivacyMode
+    )
 
-if ($selectedAll -or $System) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'System Information'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\system-info.ps1'
-    })
-}
+    $startedAt = Get-Date
+    $selectedChecks = New-Object System.Collections.Generic.List[object]
+    $checkDefinitions = @(
+        [pscustomobject]@{ Name = 'System'; Title = 'System Information'; Script = 'system-info.ps1' },
+        [pscustomobject]@{ Name = 'Security'; Title = 'Security Posture'; Script = 'security-posture.ps1' },
+        [pscustomobject]@{ Name = 'Performance'; Title = 'Performance Snapshot'; Script = 'performance-snapshot.ps1' },
+        [pscustomobject]@{ Name = 'Network'; Title = 'Network Check'; Script = 'network-check.ps1' },
+        [pscustomobject]@{ Name = 'Time'; Title = 'Time Sync Diagnostics'; Script = 'time-sync-diagnostics.ps1' },
+        [pscustomobject]@{ Name = 'Disk'; Title = 'Disk Health'; Script = 'disk-health.ps1' },
+        [pscustomobject]@{ Name = 'Crashes'; Title = 'Crash and Hang Diagnostics'; Script = 'crash-hang-diagnostics.ps1' },
+        [pscustomobject]@{ Name = 'Events'; Title = 'Event Log Check'; Script = 'event-log-check.ps1' },
+        [pscustomobject]@{ Name = 'Services'; Title = 'Services Check'; Script = 'services-check.ps1' },
+        [pscustomobject]@{ Name = 'Updates'; Title = 'Windows Update Check'; Script = 'windows-update-check.ps1' }
+    )
 
-if ($selectedAll -or $Security) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Security Posture'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\security-posture.ps1'
-    })
-}
-
-if ($selectedAll -or $Performance) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Performance Snapshot'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\performance-snapshot.ps1'
-    })
-}
-
-if ($selectedAll -or $Network) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Network Check'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\network-check.ps1'
-    })
-}
-
-if ($selectedAll -or $Time) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Time Sync Diagnostics'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\time-sync-diagnostics.ps1'
-    })
-}
-
-if ($selectedAll -or $Disk) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Disk Health'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\disk-health.ps1'
-    })
-}
-
-if ($selectedAll -or $Crashes) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Crash and Hang Diagnostics'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\crash-hang-diagnostics.ps1'
-    })
-}
-
-if ($selectedAll -or $Events) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Event Log Check'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\event-log-check.ps1'
-    })
-}
-
-if ($selectedAll -or $Services) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Services Check'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\services-check.ps1'
-    })
-}
-
-if ($selectedAll -or $Updates) {
-    $selectedChecks.Add([pscustomobject]@{
-        Title = 'Windows Update Check'
-        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\windows-update-check.ps1'
-    })
-}
-
-$resolvedOutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
-if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) {
-    New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
-}
-
-do {
-    $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-    $reportBaseName = "WindowsDiagnosticsReport-$timestamp"
-    $textReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.txt"
-    $markdownReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.md"
-
-    if ((Test-Path -LiteralPath $textReportPath) -or (Test-Path -LiteralPath $markdownReportPath)) {
-        Start-Sleep -Seconds 1
+    foreach ($definition in $checkDefinitions) {
+        if ($definition.Name -in $SelectedModules) {
+            $selectedChecks.Add([pscustomobject]@{
+                    Title = $definition.Title
+                    Path  = Join-Path -Path $repositoryRoot -ChildPath ("scripts\{0}" -f $definition.Script)
+                })
+        }
     }
-} while ((Test-Path -LiteralPath $textReportPath) -or (Test-Path -LiteralPath $markdownReportPath))
 
-$powerShellPath = Get-CurrentPowerShellPath
-$createdAt = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
-
-$results = New-Object System.Collections.Generic.List[object]
-foreach ($check in $selectedChecks) {
-    $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot))
-}
-
-$privacyModeLabel = if ($PrivacyMode) { 'enabled' } else { 'disabled' }
-$displayComputerName = [string]$env:COMPUTERNAME
-$displayTextReportPath = $textReportPath
-$displayMarkdownReportPath = $markdownReportPath
-$redactionContext = $null
-
-if ($PrivacyMode) {
-    $redactionContext = New-WdtRedactionContext
-    if (-not [string]::IsNullOrWhiteSpace($displayComputerName)) {
-        $displayComputerName = Get-WdtRedactionToken -Context $redactionContext -Category HOST -Value $displayComputerName
+    if ($selectedChecks.Count -eq 0) {
+        throw 'At least one diagnostic module must be selected.'
     }
-    $displayTextReportPath = Protect-WdtText -Text $textReportPath -Context $redactionContext
-    $displayMarkdownReportPath = Protect-WdtText -Text $markdownReportPath -Context $redactionContext
-}
 
-Protect-WdtDiagnosticResults -Results @($results.ToArray()) -Context $redactionContext
+    $resolvedOutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
+    if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) {
+        New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
+    }
 
-$findingsSummary = Get-WdtFindingsSummary -Results @($results.ToArray())
+    do {
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $reportBaseName = "WindowsDiagnosticsReport-$timestamp"
+        $textReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.txt"
+        $markdownReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.md"
 
-$textLines = New-Object System.Collections.Generic.List[string]
-$textLines.Add('Windows Diagnostics Toolkit - Support Report')
-$textLines.Add(('Created at    : {0}' -f $createdAt))
-$textLines.Add(('Computer name : {0}' -f $displayComputerName))
-$textLines.Add(('Mode          : read-only'))
-$textLines.Add(('Privacy mode  : {0}' -f $privacyModeLabel))
-$textLines.Add(('Output        : {0}' -f $displayTextReportPath))
-$textLines.Add(('Selected      : {0}' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
+        if ((Test-Path -LiteralPath $textReportPath) -or (Test-Path -LiteralPath $markdownReportPath)) {
+            Start-Sleep -Seconds 1
+        }
+    } while ((Test-Path -LiteralPath $textReportPath) -or (Test-Path -LiteralPath $markdownReportPath))
 
-Add-TextFindingsSummary -Lines $textLines -Summary $findingsSummary
+    $powerShellPath = Get-CurrentPowerShellPath
+    $createdAt = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
+    $results = New-Object System.Collections.Generic.List[object]
+    foreach ($check in $selectedChecks) {
+        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot))
+    }
 
-foreach ($result in $results) {
-    Add-TextSection -Lines $textLines -Result $result
-}
+    $privacyModeLabel = if ($PrivacyMode) { 'enabled' } else { 'disabled' }
+    $displayComputerName = [string]$env:COMPUTERNAME
+    $displayTextReportPath = $textReportPath
+    $displayMarkdownReportPath = $markdownReportPath
+    $redactionContext = $null
 
-[System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)
-Write-Host ("TXT report written: {0}" -f $displayTextReportPath)
+    if ($PrivacyMode) {
+        $redactionContext = New-WdtRedactionContext
+        if (-not [string]::IsNullOrWhiteSpace($displayComputerName)) {
+            $displayComputerName = Get-WdtRedactionToken -Context $redactionContext -Category HOST -Value $displayComputerName
+        }
+        $displayTextReportPath = Protect-WdtText -Text $textReportPath -Context $redactionContext
+        $displayMarkdownReportPath = Protect-WdtText -Text $markdownReportPath -Context $redactionContext
+    }
 
-if ($ExportMarkdown) {
-    $markdownLines = New-Object System.Collections.Generic.List[string]
-    $markdownLines.Add('# Windows Diagnostics Toolkit - Support Report')
-    $markdownLines.Add('')
-    $markdownLines.Add(('- Created at: `{0}`' -f $createdAt))
-    $markdownLines.Add(('- Computer name: `{0}`' -f $displayComputerName))
-    $markdownLines.Add(('- Mode: `read-only`'))
-    $markdownLines.Add(('- Privacy mode: `{0}`' -f $privacyModeLabel))
-    $markdownLines.Add(('- TXT report: `{0}`' -f $displayTextReportPath))
-    $markdownLines.Add(('- Selected: `{0}`' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
+    Protect-WdtDiagnosticResults -Results @($results.ToArray()) -Context $redactionContext
+    $findingsSummary = Get-WdtFindingsSummary -Results @($results.ToArray())
 
-    Add-MarkdownFindingsSummary -Lines $markdownLines -Summary $findingsSummary
-
+    $textLines = New-Object System.Collections.Generic.List[string]
+    $textLines.Add('Windows Diagnostics Toolkit - Support Report')
+    $textLines.Add(('Created at    : {0}' -f $createdAt))
+    $textLines.Add(('Computer name : {0}' -f $displayComputerName))
+    $textLines.Add(('Mode          : read-only'))
+    $textLines.Add(('Privacy mode  : {0}' -f $privacyModeLabel))
+    $textLines.Add(('Output        : {0}' -f $displayTextReportPath))
+    $textLines.Add(('Selected      : {0}' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
+    Add-TextFindingsSummary -Lines $textLines -Summary $findingsSummary
     foreach ($result in $results) {
-        Add-MarkdownSection -Lines $markdownLines -Result $result
+        Add-TextSection -Lines $textLines -Result $result
     }
 
-    [System.IO.File]::WriteAllLines($markdownReportPath, $markdownLines, [System.Text.Encoding]::UTF8)
-    Write-Host ("Markdown report written: {0}" -f $displayMarkdownReportPath)
+    [System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)
+    Write-Host ("TXT report written: {0}" -f $displayTextReportPath)
+
+    $writtenMarkdownPath = $null
+    if ($ExportMarkdown) {
+        $markdownLines = New-Object System.Collections.Generic.List[string]
+        $markdownLines.Add('# Windows Diagnostics Toolkit - Support Report')
+        $markdownLines.Add('')
+        $markdownLines.Add(('- Created at: `{0}`' -f $createdAt))
+        $markdownLines.Add(('- Computer name: `{0}`' -f $displayComputerName))
+        $markdownLines.Add(('- Mode: `read-only`'))
+        $markdownLines.Add(('- Privacy mode: `{0}`' -f $privacyModeLabel))
+        $markdownLines.Add(('- TXT report: `{0}`' -f $displayTextReportPath))
+        $markdownLines.Add(('- Selected: `{0}`' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
+        Add-MarkdownFindingsSummary -Lines $markdownLines -Summary $findingsSummary
+        foreach ($result in $results) {
+            Add-MarkdownSection -Lines $markdownLines -Result $result
+        }
+
+        [System.IO.File]::WriteAllLines($markdownReportPath, $markdownLines, [System.Text.Encoding]::UTF8)
+        Write-Host ("Markdown report written: {0}" -f $displayMarkdownReportPath)
+        $writtenMarkdownPath = $markdownReportPath
+    }
+
+    $exitCode = if (($results | Where-Object { $_.ExitCode -ne 0 }).Count -gt 0) { 1 } else { 0 }
+    if ($exitCode -ne 0) {
+        Write-Warning 'One or more diagnostics completed with a non-zero exit code. See the report for details.'
+    }
+
+    return [pscustomobject]@{
+        ExitCode           = $exitCode
+        TextReportPath     = $textReportPath
+        MarkdownReportPath = $writtenMarkdownPath
+        WarningCount       = $findingsSummary.WarningCount
+        ErrorCount         = $findingsSummary.ErrorCount
+        SelectedCount      = $selectedChecks.Count
+        ElapsedTime        = ((Get-Date) - $startedAt)
+    }
 }
 
-if (($results | Where-Object { $_.ExitCode -ne 0 }).Count -gt 0) {
-    Write-Warning 'One or more diagnostics completed with a non-zero exit code. See the report for details.'
-    exit 1
+$allModules = @('System', 'Security', 'Performance', 'Network', 'Time', 'Disk', 'Crashes', 'Events', 'Services', 'Updates')
+$selectedModules = New-Object System.Collections.Generic.List[string]
+foreach ($selection in @(
+        [pscustomobject]@{ Name = 'System'; Enabled = $System },
+        [pscustomobject]@{ Name = 'Security'; Enabled = $Security },
+        [pscustomobject]@{ Name = 'Performance'; Enabled = $Performance },
+        [pscustomobject]@{ Name = 'Network'; Enabled = $Network },
+        [pscustomobject]@{ Name = 'Time'; Enabled = $Time },
+        [pscustomobject]@{ Name = 'Disk'; Enabled = $Disk },
+        [pscustomobject]@{ Name = 'Crashes'; Enabled = $Crashes },
+        [pscustomobject]@{ Name = 'Events'; Enabled = $Events },
+        [pscustomobject]@{ Name = 'Services'; Enabled = $Services },
+        [pscustomobject]@{ Name = 'Updates'; Enabled = $Updates }
+    )) {
+    if ($selection.Enabled) {
+        $selectedModules.Add($selection.Name)
+    }
+}
+
+$hasExplicitSelection = $All -or $selectedModules.Count -gt 0
+if ($All -or (-not $Interactive -and -not $hasExplicitSelection)) {
+    $selectedModules = New-Object System.Collections.Generic.List[string]
+    foreach ($moduleName in $allModules) {
+        $selectedModules.Add($moduleName)
+    }
+}
+
+if ($Interactive) {
+    $interactiveOutputDirectory = if ($PSBoundParameters.ContainsKey('OutputDirectory')) {
+        $OutputDirectory
+    }
+    else {
+        Join-Path -Path (Get-Location).Path -ChildPath 'WindowsDiagnosticsReports'
+    }
+    $initialSelection = if ($hasExplicitSelection) { @($selectedModules.ToArray()) } else { $null }
+    $interactiveExitCode = Invoke-WdtInteractiveSession -InitialSelection $initialSelection -OutputDirectory $interactiveOutputDirectory
+    if ($interactiveExitCode -ne 0) {
+        exit $interactiveExitCode
+    }
+    return
+}
+
+$reportResult = Invoke-WdtReport -SelectedModules @($selectedModules.ToArray()) -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode
+if ($reportResult.ExitCode -ne 0) {
+    exit $reportResult.ExitCode
 }
