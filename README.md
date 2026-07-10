@@ -28,7 +28,7 @@ cd windows-diagnostics-toolkit
 ```
 
 Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default; the menu lets you change the selected modules and output directory.
-The menu uses console colors when available and keeps the same text markers in monochrome terminals.
+The TUI uses a normal layout from 60x25 and a compact layout from 40x18. It uses console colors when available and keeps the same text markers in monochrome terminals. Below 40x18 it asks you to resize the window before showing the menu.
 
 ### Command-line mode
 

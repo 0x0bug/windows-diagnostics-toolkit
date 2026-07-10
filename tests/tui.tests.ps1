@@ -88,26 +88,62 @@ Assert-True ($state.CursorIndex -ge 0 -and $state.CursorIndex -lt $menuCount) 'C
 
 $renderState = New-WdtTuiState -OutputDirectory ('C:\A\Very\Long\Report\Directory\That\Must\Be\Truncated\For\Narrow\Terminals')
 $renderState.Diagnostics[0].Selected = $false
-$normalLayout = @(Get-WdtTuiLayout -State $renderState -Width 80 -Height 25)
-$compactLayout = @(Get-WdtTuiLayout -State $renderState -Width 40 -Height 20)
-Assert-True ($normalLayout.Count -le 25) 'Normal TUI exceeds a 25-row terminal.'
-Assert-True ($compactLayout.Count -lt $normalLayout.Count) 'Compact TUI did not reduce its layout.'
-Assert-Equal 4 @($normalLayout | Select-Object -First 4).Count 'Normal TUI logo must have four lines.'
-foreach ($logoLine in @($normalLayout | Select-Object -First 4)) {
-    Assert-True ($logoLine.Text.Length -le 32) 'TUI logo is wider than 32 characters.'
-    Assert-True ($logoLine.Text -match '^[ -~]+$') 'TUI logo must be ASCII only.'
+$normalLayout = Get-WdtTuiLayout -State $renderState -Width 80 -Height 25
+$compactLayout = Get-WdtTuiLayout -State $renderState -Width 40 -Height 18
+Assert-Equal 'Normal' $normalLayout.Mode '80x25 must select normal layout.'
+Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 60 -Height 25).Mode '60x25 must select normal layout.'
+Assert-Equal 'Compact' (Get-WdtTuiLayout -State $renderState -Width 59 -Height 25).Mode '59x25 must select compact layout.'
+Assert-Equal 'Compact' $compactLayout.Mode '40x18 must select compact layout.'
+foreach ($size in @(@(39, 18), @(40, 17), @(20, 10), @(5, 5))) {
+    Assert-Equal 'TooSmall' (Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1]).Mode ("{0}x{1} must select TooSmall layout." -f $size[0], $size[1])
 }
-$normalScreen = @($normalLayout | ForEach-Object Text) -join "`n"
-$compactScreen = @($compactLayout | ForEach-Object Text) -join "`n"
-foreach ($text in @('Read-only | Local reports | No telemetry', '[ ]', '[x]', 'Privacy mode', 'Markdown report', 'Output:', 'Run diagnostics')) {
+Assert-True ($normalLayout.Lines.Count -le 25) 'Normal TUI exceeds a 25-row terminal.'
+Assert-True ($compactLayout.Lines.Count -le 18) 'Compact TUI exceeds its minimum supported height.'
+Assert-Equal 3 @($normalLayout.Lines | Select-Object -First 3).Count 'Normal TUI logo must have three lines.'
+foreach ($logoLine in @($normalLayout.Lines | Select-Object -First 3)) {
+    $logoText = ConvertTo-WdtTuiPlainText -Line $logoLine
+    Assert-True ($logoText.Length -le 32) 'TUI logo is wider than 32 characters.'
+    Assert-True ($logoText -match '^[ -~]+$') 'TUI logo must be ASCII only.'
+    Assert-Equal 'Cyan' $logoLine.Segments[0].Color 'TUI logo must be cyan.'
+}
+$normalScreen = @($normalLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+$compactScreen = @($compactLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+foreach ($text in @('Windows Diagnostics Toolkit', 'Read-only | Local reports | No telemetry', '[ ]', '[x]', 'Privacy Mode', 'Markdown report', 'Output:', 'Run diagnostics', 'Exit')) {
     Assert-True ($normalScreen.Contains($text)) ("Normal TUI rendering is missing: {0}" -f $text)
 }
-Assert-True ($compactScreen.Contains('WDT | Read-only | Local reports | No telemetry')) 'Compact TUI header is missing.'
+Assert-True ($compactScreen.Contains('WDT - Windows Diagnostics Toolkit')) 'Compact TUI header is missing.'
+Assert-True ($compactScreen.Contains('Selected:')) 'Compact TUI status is missing.'
+Assert-True ($compactScreen.Contains('Items ')) 'Compact TUI viewport indicator is missing.'
 Assert-True ($compactScreen.Contains('...')) 'Narrow TUI did not truncate the output path.'
 Assert-True (-not ($normalScreen -match "`e\[")) 'TUI model must not contain ANSI sequences.'
-Assert-True (@($normalLayout | Where-Object { $_.Role -eq 'Header' }).Count -gt 0) 'TUI layout has no header role.'
-Assert-True (@($normalLayout | Where-Object { $_.Role -eq 'Success' }).Count -gt 0) 'TUI layout has no success role.'
-Assert-True (@($normalLayout | Where-Object { $_.Role -eq 'Selected' }).Count -gt 0) 'TUI layout has no selected role.'
+$allSegments = @($normalLayout.Lines | ForEach-Object { $_.Segments })
+Assert-True (@($allSegments | Where-Object { $_.Text -eq '>' -and $_.Color -eq 'Yellow' }).Count -eq 0) 'Pointer unexpectedly lost its trailing space contract.'
+Assert-True (@($allSegments | Where-Object { $_.Text -eq '> ' -and $_.Color -eq 'Yellow' }).Count -gt 0) 'Active pointer must be yellow.'
+Assert-True (@($allSegments | Where-Object { $_.Text -eq '[x]' -and $_.Color -eq 'Green' }).Count -gt 0) 'Selected checkbox must be green.'
+Assert-True (@($allSegments | Where-Object { $_.Text -eq '[ ]' -and $_.Color -eq 'DarkGray' }).Count -gt 0) 'Unselected checkbox must be dark gray.'
+Assert-True (@($allSegments | Where-Object { $_.Text -like '*System information*' -and $_.Color -eq 'Gray' }).Count -gt 0) 'Unselected module text must be gray.'
+Assert-True (@($allSegments | Where-Object { $_.Text -eq 'Run diagnostics' -and $_.Color -eq 'Green' }).Count -gt 0) 'Run action must be green.'
+$privacyOffState = $renderState
+for ($move = 0; $move -lt 10; $move++) { $privacyOffState = Update-WdtTuiState -State $privacyOffState -Action MoveDown }
+$privacyOffState = Update-WdtTuiState -State $privacyOffState -Action ToggleCurrent
+Assert-True (@((Get-WdtTuiLayout -State $privacyOffState -Width 80 -Height 25).Lines | ForEach-Object { $_.Segments } | Where-Object { $_.Text -eq '[ ]' -and $_.Color -eq 'DarkGray' }).Count -gt 0) 'Disabled privacy mode must be dark gray.'
+$errorState = Update-WdtTuiState -State $renderState -Action MoveDown
+$errorState.ErrorMessage = 'Sample error'
+Assert-True (@((Get-WdtTuiLayout -State $errorState -Width 80 -Height 25).Lines | ForEach-Object { $_.Segments } | Where-Object { $_.Color -eq 'Red' }).Count -gt 0) 'Error must have a red segment.'
+$warningResult = [pscustomobject]@{ ExitCode = 1 }
+Assert-Equal 'Yellow' (Get-WdtTuiRunResultLayout -Result $warningResult)[0].Segments[0].Color 'Partial result must be yellow.'
+foreach ($width in 1..5) { foreach ($line in @((Get-WdtTuiLayout -State $renderState -Width $width -Height 5).Lines)) { Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $width) 'Too-small text exceeded its width.' } }
+foreach ($size in @(@(80, 25), @(60, 25), @(59, 25), @(40, 18), @(39, 18), @(40, 17), @(20, 10), @(5, 5))) { foreach ($line in @((Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1]).Lines)) { Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $size[0]) ("Layout exceeded {0} columns." -f $size[0]) } }
+$lastItemState = $renderState
+for ($move = 0; $move -lt 14; $move++) { $lastItemState = Update-WdtTuiState -State $lastItemState -Action MoveDown }
+$lastCompact = Get-WdtTuiLayout -State $lastItemState -Width 40 -Height 18
+Assert-True ($lastItemState.CursorIndex -ge $lastCompact.Viewport.Start -and $lastItemState.CursorIndex -le $lastCompact.Viewport.End) 'Active item is outside the compact viewport.'
+Assert-True ((@($lastCompact.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('Exit')) 'Exit is unreachable in compact viewport.'
+$runState = $renderState
+for ($move = 0; $move -lt 13; $move++) { $runState = Update-WdtTuiState -State $runState -Action MoveDown }
+Assert-True ((@((Get-WdtTuiLayout -State $runState -Width 40 -Height 18).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('Run diagnostics')) 'Run is unreachable in compact viewport.'
+$tooSmallText = @((Get-WdtTuiLayout -State $renderState -Width 20 -Height 10).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True ($tooSmallText.Contains('20x10')) 'TooSmall layout does not report the current size.'
 
 $parameters = ConvertTo-WdtReportParameters -State $renderState
 Assert-Equal @(Get-WdtTuiSelectedModule -State $renderState).Count @($parameters.SelectedModules).Count 'Selected modules were not preserved in report parameters.'
@@ -131,6 +167,9 @@ try {
     & $entrypointPath -System -PrivacyMode -ExportMarkdown -OutputDirectory $cliOutput
     Assert-True (@(Get-ChildItem -LiteralPath $cliOutput -Filter 'WindowsDiagnosticsReport-*.txt' -File).Count -ge 1) 'CLI mode did not create a TXT report.'
     Assert-True (@(Get-ChildItem -LiteralPath $cliOutput -Filter 'WindowsDiagnosticsReport-*.md' -File).Count -ge 1) 'CLI mode did not create a Markdown report.'
+    foreach ($report in @(Get-ChildItem -LiteralPath $cliOutput -Filter 'WindowsDiagnosticsReport-*' -File)) {
+        Assert-True (-not ((Get-Content -LiteralPath $report.FullName -Raw) -match "`e\[")) ("Report contains an ANSI sequence: {0}" -f $report.Name)
+    }
 }
 finally {
     if (Test-Path -LiteralPath $cliOutput) { Remove-Item -LiteralPath $cliOutput -Recurse -Force }
@@ -143,11 +182,18 @@ foreach ($routingCase in @(
         [pscustomobject]@{ Arguments = @('-Interactive', '-System'); Name = 'interactive system' },
         [pscustomobject]@{ Arguments = @('-Interactive', '-All'); Name = 'interactive all' }
     )) {
-    $childOutput = @('') | & $hostExecutable -NoProfile -ExecutionPolicy Bypass -File $entrypointPath @($routingCase.Arguments) 2>&1
-    Assert-Equal 2 $LASTEXITCODE ("Redirected stdin exit code is incorrect for {0}." -f $routingCase.Name)
-    $childText = $childOutput -join "`n"
-    Assert-True ($childText.Contains('Interactive input is unavailable.')) ("Redirected stdin message is missing for {0}." -f $routingCase.Name)
-    Assert-True ($childText.Contains('Use -All or select one or more diagnostic modules.')) ("Redirected stdin guidance is missing for {0}." -f $routingCase.Name)
+    $redirectedOutput = Join-Path $env:TEMP ('wdt-tui-redirected-' + [guid]::NewGuid().ToString('N'))
+    try {
+        $childOutput = @('') | & $hostExecutable -NoProfile -ExecutionPolicy Bypass -File $entrypointPath @($routingCase.Arguments) -OutputDirectory $redirectedOutput 2>&1
+        Assert-Equal 2 $LASTEXITCODE ("Redirected stdin exit code is incorrect for {0}." -f $routingCase.Name)
+        $childText = $childOutput -join "`n"
+        Assert-True ($childText.Contains('Interactive input is unavailable.')) ("Redirected stdin message is missing for {0}." -f $routingCase.Name)
+        Assert-True ($childText.Contains('Use -All or select one or more diagnostic modules.')) ("Redirected stdin guidance is missing for {0}." -f $routingCase.Name)
+        Assert-Equal 0 @(Get-ChildItem -LiteralPath $redirectedOutput -Filter 'WindowsDiagnosticsReport-*' -File -ErrorAction SilentlyContinue).Count ("Redirected stdin created a report for {0}." -f $routingCase.Name)
+    }
+    finally {
+        if (Test-Path -LiteralPath $redirectedOutput) { Remove-Item -LiteralPath $redirectedOutput -Recurse -Force }
+    }
 }
 $global:LASTEXITCODE = 0
 

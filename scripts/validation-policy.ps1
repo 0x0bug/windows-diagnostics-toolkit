@@ -418,6 +418,8 @@ function Get-WdtMemberSafetyIssue {
             'IO.Path::GetFullPath',
             'Management.ManagementDateTimeConverter::ToDateTime',
             'Math::Max',
+            'Math::Min',
+            'Math::Floor',
             'string::Equals',
             'string::IsNullOrEmpty',
             'string::IsNullOrWhiteSpace',
