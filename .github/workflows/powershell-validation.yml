@@ -78,6 +78,14 @@ jobs:
         shell: powershell
         run: .\tests\validate-ast.tests.ps1
 
+      - name: Test Network Context with PowerShell 7
+        shell: pwsh
+        run: .\tests\network-context.tests.ps1
+
+      - name: Test Network Context with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\network-context.tests.ps1
+
       - name: Smoke test System report
         shell: pwsh
         run: |

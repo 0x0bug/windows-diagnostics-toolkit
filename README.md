@@ -258,9 +258,10 @@ pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 -IncludeTimeServiceEve
 Checks current network state:
 
 - active network adapters
-- current IPv4 and IPv6 addresses
-- DNS servers
-- IPv4 gateway
+- current IPv4 and IPv6 addresses, DHCP status/server, and DNS suffix/search list
+- DNS servers and IPv4 gateway
+- active routes (default routes first, capped at 30)
+- read-only WinINET and WinHTTP proxy context with credentials and sensitive query values removed
 - gateway reachability
 - DNS resolution
 - internet reachability
