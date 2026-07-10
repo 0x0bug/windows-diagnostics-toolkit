@@ -16,15 +16,16 @@ Computer name : <HOST-1>
 Mode          : read-only
 Privacy mode  : enabled
 Output        : <USER-1>\WindowsDiagnosticsReport-20260709-101530.txt
-Selected      : System Information, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check
+Selected      : System Information, Security Posture, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check
 
 == Findings Summary ==
 Overall status : ERROR
 Errors         : 1
-Warnings       : 3
+Warnings       : 4
 OK modules     : 2
 
 [ERROR] Disk Health / DISK_UNHEALTHY - An example disk reported an unhealthy state. Evidence: Health=Unhealthy
+[WARN] Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED - One or more BitLocker volumes are not protected.
 [WARN] Network Check / NETWORK_DNS_FAILED - DNS resolution did not complete successfully.
 [WARN] Event Log Check / RECENT_ERROR_EVENTS - Recent error events were found.
 [WARN] Services Check / SERVICE_STATE_ISSUES - One or more services need attention.
@@ -57,6 +58,36 @@ File system   : NTFS
 Size          : 930.00 GB
 Free space    : 420.00 GB
 Free percent  : 45.2%
+
+== Security Posture ==
+Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\security-posture.ps1
+Exit code: 0
+
+Windows Diagnostics Toolkit - Security Posture
+Mode: read-only
+
+== Defender ==
+Source              : Get-MpComputerStatus
+Antivirus enabled   : Enabled
+Real-time protection: Enabled
+
+== Firewall Profiles ==
+Domain              : Enabled (Get-NetFirewallProfile)
+Private             : Enabled (Get-NetFirewallProfile)
+Public              : Enabled (Get-NetFirewallProfile)
+
+== Secure Boot ==
+Source  : Confirm-SecureBootUEFI
+Enabled : Enabled
+
+== TPM ==
+Present   : Enabled
+Ready     : Enabled
+
+== BitLocker ==
+Volume            : C:\
+Protection status : Off
+Volume status     : FullyDecrypted
 
 == Network Check ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\network-check.ps1
@@ -240,16 +271,17 @@ Skipped. Use -IncludeEventLog to include recent Windows Update related events.
 - Mode: `read-only`
 - Privacy mode: `enabled`
 - TXT report: `<USER-1>\WindowsDiagnosticsReport-20260709-101530.txt`
-- Selected: `System Information, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check`
+- Selected: `System Information, Security Posture, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check`
 
 ## Findings Summary
 
 - Overall status: `WARN`
 - Errors: `0`
-- Warnings: `2`
+- Warnings: `3`
 - OK modules: `2`
 
 - `[WARN]` **Event Log Check / RECENT_ERROR_EVENTS** - Recent error events were found.
+- `[WARN]` **Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED** - One or more BitLocker volumes are not protected.
 - `[WARN]` **Services Check / SERVICE_STATE_ISSUES** - One or more services need attention.
 - `[OK]` **System Information** - No findings.
 - `[OK]` **Windows Update Check** - No findings.
@@ -268,6 +300,24 @@ Computer name : <HOST-1>
 Caption       : Microsoft Windows 11 Pro
 Version       : 10.0.26100
 Build number  : 26100
+```
+
+## Security Posture
+
+- Command: `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\security-posture.ps1`
+- Exit code: `0`
+
+```text
+Windows Diagnostics Toolkit - Security Posture
+Mode: read-only
+
+== Defender ==
+Antivirus enabled   : Enabled
+Real-time protection: Enabled
+
+== BitLocker ==
+Volume            : C:\
+Protection status : Off
 ```
 
 ## Event Log Check

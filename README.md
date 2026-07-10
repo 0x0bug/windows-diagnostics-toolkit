@@ -56,6 +56,7 @@ cd windows-diagnostics-toolkit
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
@@ -149,8 +150,9 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
 
 Available parameters:
 
-- `-All` - run system, network, disk, Event Log, Services, and Windows Update checks
+- `-All` - run system, security, network, disk, Event Log, Services, and Windows Update checks
 - `-System` - run only system information unless combined with other selectors
+- `-Security` - run only Security Posture diagnostics unless combined with other selectors
 - `-Network` - run only network checks unless combined with other selectors
 - `-Disk` - run only disk checks unless combined with other selectors
 - `-Events` - run only Event Log diagnostics unless combined with other selectors
@@ -178,6 +180,24 @@ Run:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\system-info.ps1
+```
+
+### `scripts/security-posture.ps1`
+
+Reports a read-only security posture summary:
+
+- Microsoft Defender component status
+- Windows Firewall profile state
+- Secure Boot and TPM availability
+- BitLocker volume protection state without recovery keys or key protectors
+
+Unavailable Windows components produce findings with `WARN` and do not make the
+standalone script fail.
+
+Run:
+
+```powershell
+pwsh -NoProfile -File .\scripts\security-posture.ps1
 ```
 
 ### `scripts/network-check.ps1`
