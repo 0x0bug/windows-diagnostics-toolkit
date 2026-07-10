@@ -5,6 +5,7 @@ param(
     [switch]$Security,
     [switch]$Performance,
     [switch]$Network,
+    [switch]$Time,
     [switch]$Disk,
     [switch]$Crashes,
     [switch]$Events,
@@ -308,7 +309,7 @@ function Protect-WdtDiagnosticResults {
     }
 }
 
-$selectedAll = $All -or (-not $System -and -not $Security -and -not $Performance -and -not $Network -and -not $Disk -and -not $Crashes -and -not $Events -and -not $Services -and -not $Updates)
+$selectedAll = $All -or (-not $System -and -not $Security -and -not $Performance -and -not $Network -and -not $Time -and -not $Disk -and -not $Crashes -and -not $Events -and -not $Services -and -not $Updates)
 $selectedChecks = New-Object System.Collections.Generic.List[object]
 
 if ($selectedAll -or $System) {
@@ -336,6 +337,13 @@ if ($selectedAll -or $Network) {
     $selectedChecks.Add([pscustomobject]@{
         Title = 'Network Check'
         Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\network-check.ps1'
+    })
+}
+
+if ($selectedAll -or $Time) {
+    $selectedChecks.Add([pscustomobject]@{
+        Title = 'Time Sync Diagnostics'
+        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\time-sync-diagnostics.ps1'
     })
 }
 
