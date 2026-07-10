@@ -16,17 +16,18 @@ Computer name : <HOST-1>
 Mode          : read-only
 Privacy mode  : enabled
 Output        : <USER-1>\WindowsDiagnosticsReport-20260709-101530.txt
-Selected      : System Information, Security Posture, Performance Snapshot, Network Check, Disk Health, Crash and Hang Diagnostics, Event Log Check, Services Check, Windows Update Check
+Selected      : System Information, Security Posture, Performance Snapshot, Network Check, Time Sync Diagnostics, Disk Health, Crash and Hang Diagnostics, Event Log Check, Services Check, Windows Update Check
 
 == Findings Summary ==
 Overall status : ERROR
 Errors         : 1
-Warnings       : 6
+Warnings       : 7
 OK modules     : 2
 
 [ERROR] Disk Health / DISK_UNHEALTHY - An example disk reported an unhealthy state. Evidence: Health=Unhealthy
 [WARN] Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED - One or more BitLocker volumes are not protected.
 [WARN] Performance Snapshot / PERFORMANCE_MEMORY_LOW - Available physical memory is below the warning threshold.
+[WARN] Time Sync Diagnostics / TIME_SOURCE_LOCAL_CLOCK - Windows Time is using a local clock source.
 [WARN] Crash and Hang Diagnostics / CRASH_RECENT_DUMPS_FOUND - Recent crash dump files were found.
 [WARN] Network Check / NETWORK_DNS_FAILED - DNS resolution did not complete successfully.
 [WARN] Event Log Check / RECENT_ERROR_EVENTS - Recent error events were found.
@@ -142,6 +143,30 @@ example.invalid: Resolution failed.
 
 == Internet Connectivity ==
 <IP-4>: Reachable
+
+== Time Sync Diagnostics ==
+Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\time-sync-diagnostics.ps1
+Exit code: 0
+
+Windows Diagnostics Toolkit - Time Sync Diagnostics
+Mode: read-only
+
+== Windows Time Service ==
+Name      : W32Time
+State     : Running
+Start mode: Auto
+Domain joined: False
+
+== Timezone and Clock ==
+Local time: 2026-07-09T10:15:30.0000000+02:00
+UTC time  : 2026-07-09T08:15:30.0000000Z
+Timezone : Central European Standard Time
+
+== Time Source ==
+Source: Local CMOS Clock
+
+== W32tm Status ==
+Source: Local CMOS Clock
 
 == Disk Health ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\disk-health.ps1
@@ -320,18 +345,19 @@ Skipped. Use -IncludeEventLog to include recent Windows Update related events.
 - Mode: `read-only`
 - Privacy mode: `enabled`
 - TXT report: `<USER-1>\WindowsDiagnosticsReport-20260709-101530.txt`
-- Selected: `System Information, Security Posture, Performance Snapshot, Network Check, Disk Health, Crash and Hang Diagnostics, Event Log Check, Services Check, Windows Update Check`
+- Selected: `System Information, Security Posture, Performance Snapshot, Network Check, Time Sync Diagnostics, Disk Health, Crash and Hang Diagnostics, Event Log Check, Services Check, Windows Update Check`
 
 ## Findings Summary
 
 - Overall status: `WARN`
 - Errors: `0`
-- Warnings: `5`
+- Warnings: `6`
 - OK modules: `2`
 
 - `[WARN]` **Event Log Check / RECENT_ERROR_EVENTS** - Recent error events were found.
 - `[WARN]` **Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED** - One or more BitLocker volumes are not protected.
 - `[WARN]` **Performance Snapshot / PERFORMANCE_MEMORY_LOW** - Available physical memory is below the warning threshold.
+- `[WARN]` **Time Sync Diagnostics / TIME_SOURCE_LOCAL_CLOCK** - Windows Time is using a local clock source.
 - `[WARN]` **Crash and Hang Diagnostics / CRASH_RECENT_DUMPS_FOUND** - Recent crash dump files were found.
 - `[WARN]` **Services Check / SERVICE_STATE_ISSUES** - One or more services need attention.
 - `[OK]` **System Information** - No findings.
@@ -385,6 +411,26 @@ Available percent     : 10.0%
 
 == Top Processes by Working Set ==
 ExampleApp                       512.00 MB
+```
+
+## Time Sync Diagnostics
+
+- Command: `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\time-sync-diagnostics.ps1`
+- Exit code: `0`
+
+```text
+Windows Diagnostics Toolkit - Time Sync Diagnostics
+Mode: read-only
+
+== Windows Time Service ==
+Name      : W32Time
+State     : Running
+
+== Time Source ==
+Source: Local CMOS Clock
+
+== W32tm Status ==
+Source: Local CMOS Clock
 ```
 
 ## Crash and Hang Diagnostics

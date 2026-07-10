@@ -58,6 +58,7 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Performance
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Time
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Crashes
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
@@ -152,10 +153,11 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
 
 Available parameters:
 
-- `-All` - run system, security, performance, network, disk, crash/hang, Event Log, Services, and Windows Update checks
+- `-All` - run system, security, performance, network, time sync, disk, crash/hang, Event Log, Services, and Windows Update checks
 - `-System` - run only system information unless combined with other selectors
 - `-Security` - run only Security Posture diagnostics unless combined with other selectors
 - `-Performance` - run only Performance Snapshot diagnostics unless combined with other selectors
+- `-Time` - run only Time Sync diagnostics unless combined with other selectors
 - `-Crashes` - run only Crash and Hang diagnostics unless combined with other selectors
 - `-Network` - run only network checks unless combined with other selectors
 - `-Disk` - run only disk checks unless combined with other selectors
@@ -232,6 +234,23 @@ The defaults are seven days, 50 events, and 20 dump files. BugCheck creates an
 
 ```powershell
 pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1
+```
+
+### `scripts/time-sync-diagnostics.ps1`
+
+Reports a read-only Windows Time snapshot:
+
+- W32Time service state, domain membership, timezone, local and UTC clock values
+- configured time source and verbose status through two diagnostic-only `w32tm.exe` queries
+- optional Time-Service warnings and errors from the last seven days
+
+The script never changes time-service configuration or requests a resynchronization.
+An unavailable source, a stopped W32Time service on a domain-joined computer, or a
+local clock source creates a `WARN` finding without changing the standalone exit code.
+
+```powershell
+pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1
+pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 -IncludeTimeServiceEvents
 ```
 
 ### `scripts/network-check.ps1`
