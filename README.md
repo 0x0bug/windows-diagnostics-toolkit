@@ -43,10 +43,12 @@ Windows PowerShell 5.1:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\Invoke-WindowsDiagnostics.ps1
+  -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 ```
 
 The one-run execution-policy bypass applies only to that process. It does not change the machine-wide policy.
+
+If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`. Use the `powershell.exe` command above; installing PowerShell 7 is optional because the toolkit also supports the built-in Windows PowerShell 5.1.
 
 Reports are written to the current directory unless `-OutputDirectory` is provided:
 
@@ -77,7 +79,7 @@ The report begins with a findings summary so the user does not need to inspect e
 Use `-PrivacyMode` when attaching a report to a GitHub issue, forum post, chat, or support request:
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 ```
 
 Privacy Mode replaces identifying values with stable per-report tokens such as:
@@ -97,22 +99,22 @@ Review every report before publishing it. Standalone module output is raw and lo
 ## Run selected checks
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Performance
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Network
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Time
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Disk
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Crashes
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
+.\Invoke-WindowsDiagnostics.ps1 -System
+.\Invoke-WindowsDiagnostics.ps1 -Security
+.\Invoke-WindowsDiagnostics.ps1 -Performance
+.\Invoke-WindowsDiagnostics.ps1 -Network
+.\Invoke-WindowsDiagnostics.ps1 -Time
+.\Invoke-WindowsDiagnostics.ps1 -Disk
+.\Invoke-WindowsDiagnostics.ps1 -Crashes
+.\Invoke-WindowsDiagnostics.ps1 -Events
+.\Invoke-WindowsDiagnostics.ps1 -Services
+.\Invoke-WindowsDiagnostics.ps1 -Updates
 ```
 
 Selectors can be combined:
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Network -Disk -OutputDirectory .\reports
+.\Invoke-WindowsDiagnostics.ps1 -System -Network -Disk -OutputDirectory .\reports
 ```
 
 See the [usage guide](docs/usage.md) for standalone module parameters and detailed behavior.
@@ -147,6 +149,8 @@ PowerShell 7:
 ```powershell
 pwsh -NoProfile -File .\scripts\validate.ps1
 ```
+
+The `pwsh` command is available only when PowerShell 7 is installed. Windows PowerShell 5.1 users should use the command below.
 
 Windows PowerShell 5.1:
 

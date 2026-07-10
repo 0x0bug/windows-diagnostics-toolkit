@@ -18,8 +18,15 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $catalogPath = Join-Path $repositoryRoot 'scripts\diagnostic-catalog.ps1'
 $tuiPath = Join-Path $repositoryRoot 'scripts\tui.ps1'
 $entrypointPath = Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'
+$readmePath = Join-Path $repositoryRoot 'README.md'
 . $catalogPath
 . $tuiPath
+
+$readme = Get-Content -LiteralPath $readmePath -Raw
+Assert-True ($readme.Contains('powershell.exe -NoProfile -ExecutionPolicy Bypass')) 'README is missing the Windows PowerShell 5.1 launch command.'
+Assert-True ($readme.Contains('If PowerShell reports that `pwsh` is not recognized')) 'README is missing pwsh troubleshooting guidance.'
+Assert-True ($readme.Contains('installing PowerShell 7 is optional')) 'README does not explain that PowerShell 7 is optional.'
+Assert-True (-not $readme.Contains('pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1')) 'README runtime examples still require PowerShell 7.'
 
 foreach ($path in @($catalogPath, $tuiPath, $entrypointPath)) {
     $tokens = $null; $parseErrors = $null
