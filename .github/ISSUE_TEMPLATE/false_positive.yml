@@ -1,0 +1,55 @@
+name: False positive or noisy finding
+description: Report a finding that is incorrect, duplicated, or too noisy
+title: "finding: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach an unredacted report. Use `-PrivacyMode`, include only the relevant section, and review it before sharing.
+  - type: input
+    id: finding
+    attributes:
+      label: Finding code
+      placeholder: SERVICE_STATE_ISSUES
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and build
+      placeholder: Windows 11, build 26100
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Toolkit version or commit
+      placeholder: v1.0.0 or commit SHA
+    validations:
+      required: true
+  - type: textarea
+    id: reason
+    attributes:
+      label: Why the finding is incorrect or noisy
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Redacted evidence
+      description: Include the minimum report excerpt needed to reproduce the classification.
+      render: text
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected classification or output
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I reviewed the content and removed credentials, tokens, personal data, and private infrastructure details.
+          required: true

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Check disabled Windows Firewall profiles — Windows Diagnostics Toolkit</title>
+  <meta name="description" content="Check Windows Firewall profile state together with Defender, Secure Boot, TPM, and BitLocker using read-only PowerShell diagnostics.">
+  <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-firewall-disabled.html">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header><nav class="wrap"><a class="brand" href="../">Windows Diagnostics Toolkit</a><div class="nav-links"><a href="./">Cases</a><a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a></div></nav></header>
+<main><section class="wrap"><div class="eyebrow">Troubleshooting case</div><h1>Windows Firewall profiles are disabled</h1><p class="lead">Collect a security posture snapshot without enabling, disabling, or reconfiguring protection.</p><pre><code>pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security -PrivacyMode -ExportMarkdown</code></pre><div class="grid"><article class="card"><h3>Context collected</h3><p>Domain, Private, and Public firewall profiles plus Defender, Secure Boot, TPM, and BitLocker status.</p></article><article class="card"><h3>Read-only boundary</h3><p>The toolkit reports state only. It does not change firewall rules or security policy.</p></article></div><h2>Interpretation</h2><p>A disabled profile is evidence to investigate, not an automatic instruction to change the system. Confirm whether another security product or managed policy is responsible before remediation.</p><p><a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit">Open the project on GitHub</a></p></section></main>
+<footer><div class="wrap">The toolkit reports diagnostic state; it does not apply hardening changes.</div></footer>
+</body>
+</html>
