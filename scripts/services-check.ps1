@@ -12,6 +12,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path -Path $PSScriptRoot -ChildPath 'report-common.ps1')
+
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
     Write-Host ''
@@ -215,6 +217,26 @@ $runningServices = @(
         Sort-Object -Property Name
 )
 
+if ($null -ne $serviceInventory.Error) {
+    Write-WdtFinding -Severity WARN -Code 'SERVICE_INVENTORY_UNAVAILABLE' -Message 'The Windows service inventory could not be read.' -Evidence (ConvertTo-SafeSingleLine -Value $serviceInventory.Error)
+}
+else {
+    $serviceStateIssues = @(
+        @($automaticNotRunning) + @($nonOkServiceStates) |
+            Sort-Object -Property Name -Unique
+    )
+
+    if ($serviceStateIssues.Count -gt 0) {
+        $serviceIssueEvidence = @(
+            $serviceStateIssues |
+                Select-Object -First 10 |
+                ForEach-Object { '{0}={1} ({2})' -f $_.Name, $_.State, $_.StartMode }
+        ) -join '; '
+
+        Write-WdtFinding -Severity WARN -Code 'SERVICE_STATE_ISSUES' -Message ('{0} service(s) need attention: {1} automatic service(s) are not running and {2} service(s) have a non-OK state.' -f $serviceStateIssues.Count, $automaticNotRunning.Count, $nonOkServiceStates.Count) -Evidence $serviceIssueEvidence
+    }
+}
+
 Write-Section 'Summary'
 if ($null -ne $serviceInventory.Error) {
     Write-Host ('Services inventory: unavailable - {0}' -f $serviceInventory.Error)
@@ -258,6 +280,16 @@ else {
     $startupInventory = Get-StartupEntryInventory
     $startupEntries = @($startupInventory.Entries | Sort-Object -Property Location, Name)
     $shownStartupEntries = @($startupEntries | Select-Object -First $MaxItems)
+    $startupSourceErrors = @($startupInventory.Errors | Where-Object { $_.Error -ne 'Path not found' })
+
+    if ($startupSourceErrors.Count -gt 0) {
+        $startupErrorEvidence = @(
+            $startupSourceErrors |
+                ForEach-Object { '{0}: {1}' -f $_.Path, (ConvertTo-SafeSingleLine -Value $_.Error) }
+        ) -join '; '
+
+        Write-WdtFinding -Severity WARN -Code 'STARTUP_SOURCE_UNAVAILABLE' -Message ('{0} startup source(s) could not be read.' -f $startupSourceErrors.Count) -Evidence $startupErrorEvidence
+    }
 
     Write-ItemLimitNote -Shown $shownStartupEntries.Count -Total $startupEntries.Count
 
@@ -286,9 +318,11 @@ else {
     $taskInventory = Get-ScheduledTaskInventory
 
     if ($taskInventory.Unavailable) {
+        Write-WdtFinding -Severity WARN -Code 'SCHEDULED_TASK_SOURCE_UNAVAILABLE' -Message 'Scheduled task diagnostics are unavailable.' -Evidence (ConvertTo-SafeSingleLine -Value $taskInventory.Error)
         Write-Host ('Unavailable: {0}' -f $taskInventory.Error)
     }
     elseif ($null -ne $taskInventory.Error) {
+        Write-WdtFinding -Severity WARN -Code 'SCHEDULED_TASK_SOURCE_UNAVAILABLE' -Message 'The scheduled task inventory could not be read.' -Evidence (ConvertTo-SafeSingleLine -Value $taskInventory.Error)
         Write-Host ('Skipped because scheduled tasks are unavailable: {0}' -f $taskInventory.Error)
     }
     else {
@@ -310,6 +344,16 @@ else {
                 Write-Host ('NextRunTime   : {0}' -f $task.NextRunTime)
                 Write-Host ''
             }
+        }
+
+        if ($taskInventory.Errors.Count -gt 0) {
+            $taskErrorEvidence = @(
+                $taskInventory.Errors |
+                    Select-Object -First 10 |
+                    ForEach-Object { '{0}{1}: {2}' -f $_.TaskPath, $_.TaskName, (ConvertTo-SafeSingleLine -Value $_.Error) }
+            ) -join '; '
+
+            Write-WdtFinding -Severity WARN -Code 'SCHEDULED_TASK_SOURCE_UNAVAILABLE' -Message ('Details could not be read for {0} scheduled task(s).' -f $taskInventory.Errors.Count) -Evidence $taskErrorEvidence
         }
 
         foreach ($errorItem in @($taskInventory.Errors | Select-Object -First $MaxItems)) {

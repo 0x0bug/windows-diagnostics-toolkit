@@ -64,6 +64,14 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -System -Network -OutputDi
 The wrapper writes `WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.txt` to the current
 directory by default. Use `-ExportMarkdown` to also create a Markdown report.
 
+Reports created by the wrapper include a `Findings Summary` before the detailed
+module output. Findings use `OK`, `WARN`, and `ERROR` statuses and are grouped by
+severity; overall status follows `ERROR` > `WARN` > `OK`. A diagnostic finding
+does not change the wrapper exit code; a non-zero
+exit code still indicates that a module failed to execute. Internal finding
+markers emitted by modules are consumed by the wrapper and are not shown in TXT
+or Markdown reports.
+
 You can also run individual scripts directly:
 
 ```powershell
