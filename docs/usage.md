@@ -88,6 +88,24 @@ pwsh -NoProfile -File .\scripts\system-info.ps1
 
 Use this script first when you need a quick summary of the local machine.
 
+## Security Posture
+
+`scripts/security-posture.ps1` reads Defender, Windows Firewall, Secure Boot,
+TPM, and BitLocker status. It uses read-only cmdlets with CIM fallback where
+available. Missing components or access create `WARN` findings without changing
+the standalone exit code. Recovery keys, key protectors, and hardening policies
+are never displayed.
+
+```powershell
+pwsh -NoProfile -File .\scripts\security-posture.ps1
+```
+
+Run only this module through the combined-report runner:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security -ExportMarkdown
+```
+
 ## Network Diagnostics
 
 `scripts/network-check.ps1` prints active network adapters, IP addresses, DNS
