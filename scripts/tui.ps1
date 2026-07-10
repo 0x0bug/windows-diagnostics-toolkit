@@ -140,75 +140,111 @@ function Format-WdtTuiPath {
     return '...' + $Path.Substring($Path.Length - ($available - 3))
 }
 
-function Get-WdtTuiLines {
+function New-WdtTuiLine {
+    param([string]$Text, [string]$Role = 'Default')
+    return [pscustomobject]@{ Text = $Text; Role = $Role }
+}
+
+function Get-WdtTuiLayout {
     param(
         [Parameter(Mandatory = $true)]$State,
-        [int]$Width = 80
+        [int]$Width = 80,
+        [int]$Height = 25
     )
 
     $safeWidth = [Math]::Max(40, $Width)
     $items = @(Get-WdtTuiMenuItem -State $State)
     $selectedCount = @(Get-WdtTuiSelectedModule -State $State).Count
-    $checkMark = [char]0x2713
-    $lines = @(
-        'Windows Diagnostics Toolkit',
-        '',
-        'Read-only diagnostics',
-        'Local reports',
-        'No telemetry',
-        '',
-        'Diagnostics',
-        ('-' * [Math]::Max(20, $safeWidth - 2))
-    )
+    $compact = $Height -lt 25 -or $safeWidth -lt 60
+    $lines = @()
+    if ($compact) {
+        $lines += New-WdtTuiLine -Text 'WDT | Read-only | Local reports | No telemetry' -Role 'Header'
+    }
+    else {
+        $lines += @(
+            (New-WdtTuiLine -Text '__      __ ___ _____' -Role 'Header'),
+            (New-WdtTuiLine -Text '\ \    / /|   |_   _|' -Role 'Header'),
+            (New-WdtTuiLine -Text ' \ \/\/ / | | | | |' -Role 'Header'),
+            (New-WdtTuiLine -Text '  \_/\_/  |_| |_| |_|' -Role 'Header'),
+            (New-WdtTuiLine -Text 'Read-only | Local reports | No telemetry' -Role 'Info'),
+            (New-WdtTuiLine -Text 'Diagnostics' -Role 'Section')
+        )
+    }
 
     for ($index = 0; $index -lt $items.Count; $index++) {
         $item = $items[$index]
         $active = if ($index -eq $State.CursorIndex) { '>' } else { ' ' }
         if ($item.Kind -eq 'Diagnostic') {
             $diagnostic = @($State.Diagnostics | Where-Object { $_.Name -eq $item.Name })[0]
-            $mark = if ($diagnostic.Selected) { $checkMark } else { ' ' }
-            $lines += ("{0} [{1}] {2}" -f $active, $mark, $item.Label)
+            $mark = if ($diagnostic.Selected) { 'x' } else { ' ' }
+            $role = if ($index -eq $State.CursorIndex) { 'Selected' } else { 'Default' }
+            $lines += New-WdtTuiLine -Text ("{0} [{1}] {2}" -f $active, $mark, $item.Label) -Role $role
         }
     }
 
-    $lines += @('', ("Selected modules: {0}" -f $selectedCount), '', 'Report options', ('-' * [Math]::Max(20, $safeWidth - 2)))
+    if (-not $compact) { $lines += New-WdtTuiLine -Text ("Selected: {0}" -f $selectedCount) -Role 'Info' }
     for ($index = $State.Diagnostics.Count; $index -lt $items.Count; $index++) {
         $item = $items[$index]
         $active = if ($index -eq $State.CursorIndex) { '>' } else { ' ' }
+        $role = if ($index -eq $State.CursorIndex) { 'Selected' } else { 'Default' }
         if ($item.Kind -eq 'Privacy') {
-            $mark = if ($State.PrivacyMode) { $checkMark } else { ' ' }
-            $lines += ("{0} [{1}] Privacy mode" -f $active, $mark)
+            $mark = if ($State.PrivacyMode) { 'x' } else { ' ' }
+            $lines += New-WdtTuiLine -Text ("{0} [{1}] Privacy mode" -f $active, $mark) -Role $role
         }
         elseif ($item.Kind -eq 'Markdown') {
-            $mark = if ($State.ExportMarkdown) { $checkMark } else { ' ' }
-            $lines += ("{0} [{1}] Markdown report" -f $active, $mark)
+            $mark = if ($State.ExportMarkdown) { 'x' } else { ' ' }
+            $lines += New-WdtTuiLine -Text ("{0} [{1}] Markdown report" -f $active, $mark) -Role $role
         }
         elseif ($item.Kind -eq 'Output') {
-            $lines += ("{0} Output: {1}" -f $active, (Format-WdtTuiPath -Path $State.OutputDirectory -Width $safeWidth))
+            $lines += New-WdtTuiLine -Text ("{0} Output: {1}" -f $active, (Format-WdtTuiPath -Path $State.OutputDirectory -Width $safeWidth)) -Role $role
         }
         elseif ($item.Kind -eq 'Run') {
-            $lines += ''; $lines += 'Actions'; $lines += ('-' * [Math]::Max(20, $safeWidth - 2)); $lines += ("{0} Run diagnostics" -f $active)
+            $lines += New-WdtTuiLine -Text ("{0} Run diagnostics" -f $active) -Role $(if ($index -eq $State.CursorIndex) { 'Selected' } else { 'Success' })
         }
         elseif ($item.Kind -eq 'Exit') {
-            $lines += ("{0} Exit" -f $active)
+            $lines += New-WdtTuiLine -Text ("{0} Exit" -f $active) -Role $role
         }
     }
 
     if (-not [string]::IsNullOrWhiteSpace($State.ErrorMessage)) {
-        $lines += ''; $lines += ("Error: {0}" -f $State.ErrorMessage)
+        $lines += New-WdtTuiLine -Text ("Error: {0}" -f $State.ErrorMessage) -Role 'Error'
     }
-    $lines += @('', 'Up/Down Navigate   Space Toggle   Enter Select', 'A Select all   R Recommended   Esc Exit')
+    $lines += New-WdtTuiLine -Text 'Up/Down Navigate  Space Toggle  Enter Select' -Role 'Info'
+    $lines += New-WdtTuiLine -Text 'A All  R Recommended  Esc Exit' -Role 'Info'
     return $lines
+}
+
+function Get-WdtTuiLines {
+    param([Parameter(Mandatory = $true)]$State, [int]$Width = 80, [int]$Height = 25)
+    return @(Get-WdtTuiLayout -State $State -Width $Width -Height $Height | ForEach-Object { $_.Text })
 }
 
 function Show-WdtTuiScreen {
     param([Parameter(Mandatory = $true)]$State)
 
     $width = 80
-    try { $width = $Host.UI.RawUI.WindowSize.Width } catch { }
+    $height = 25
+    try {
+        $width = $Host.UI.RawUI.WindowSize.Width
+        $height = $Host.UI.RawUI.WindowSize.Height
+    }
+    catch { }
     Clear-Host
-    foreach ($line in @(Get-WdtTuiLines -State $State -Width $width)) {
-        if ($line -like 'Error:*') { Write-Host $line -ForegroundColor Red } else { Write-Host $line }
+    foreach ($line in @(Get-WdtTuiLayout -State $State -Width $width -Height $height)) {
+        $color = switch ($line.Role) {
+            'Header' { 'Cyan' }
+            'Section' { 'Cyan' }
+            'Selected' { 'Yellow' }
+            'Success' { 'Green' }
+            'Error' { 'Red' }
+            'Info' { 'DarkGray' }
+            default { $null }
+        }
+        if ($null -eq $color) { Write-Host $line.Text }
+        else {
+            try { Write-Host $line.Text -ForegroundColor $color }
+            catch { Write-Host $line.Text }
+        }
     }
 }
 

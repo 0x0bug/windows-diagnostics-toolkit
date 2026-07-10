@@ -29,6 +29,7 @@ foreach ($path in @($catalogPath, $tuiPath, $entrypointPath)) {
 
 $catalog = @(Get-WdtDiagnosticDefinition)
 Assert-Equal 10 $catalog.Count 'Diagnostic catalog count is incorrect.'
+Assert-Equal 'Label,Name,Recommended,Script,Title' (($catalog[0].PSObject.Properties.Name | Sort-Object) -join ',') 'Diagnostic catalog fields are incorrect.'
 Assert-Equal 10 @($catalog.Name | Sort-Object -Unique).Count 'Diagnostic names are not unique.'
 Assert-Equal 10 @($catalog.Script | Sort-Object -Unique).Count 'Diagnostic scripts are not unique.'
 Assert-True (@($catalog | Where-Object { $_.Recommended }).Count -gt 0) 'Catalog has no recommended diagnostics.'
@@ -57,7 +58,12 @@ Assert-True ($state.ExportMarkdown) 'Markdown export must be enabled by default.
 Assert-Equal 'C:\Reports' $state.OutputDirectory 'Initial output directory is incorrect.'
 
 $menuCount = @(Get-WdtTuiMenuItem -State $state).Count
+$originalState = $state
+$originalFirstSelection = $state.Diagnostics[0].Selected
 $state = Update-WdtTuiState -State $state -Action MoveUp
+Assert-True ($state -ne $originalState) 'State transition returned the input object.'
+Assert-Equal $originalFirstSelection $originalState.Diagnostics[0].Selected 'State transition mutated the input diagnostics.'
+Assert-True ($state.Diagnostics[0] -ne $originalState.Diagnostics[0]) 'State transition did not clone diagnostics.'
 Assert-Equal ($menuCount - 1) $state.CursorIndex 'MoveUp did not wrap.'
 $state = Update-WdtTuiState -State $state -Action MoveDown
 Assert-Equal 0 $state.CursorIndex 'MoveDown did not wrap.'
@@ -80,12 +86,28 @@ $state = Update-WdtTuiState -State $state -Action Exit
 Assert-True ($state.ExitRequested) 'Exit transition failed.'
 Assert-True ($state.CursorIndex -ge 0 -and $state.CursorIndex -lt $menuCount) 'Cursor is outside menu bounds.'
 
-$renderState = New-WdtTuiState -OutputDirectory 'C:\A\Long\Report\Directory'
+$renderState = New-WdtTuiState -OutputDirectory ('C:\A\Very\Long\Report\Directory\That\Must\Be\Truncated\For\Narrow\Terminals')
 $renderState.Diagnostics[0].Selected = $false
-$screen = @(Get-WdtTuiLines -State $renderState -Width 40) -join "`n"
-foreach ($text in @('Windows Diagnostics Toolkit', '[ ]', ([char]0x2713), 'Selected modules:', 'Privacy mode', 'Markdown report', 'Output:', 'Run diagnostics')) {
-    Assert-True ($screen.Contains([string]$text)) ("TUI rendering is missing: {0}" -f $text)
+$normalLayout = @(Get-WdtTuiLayout -State $renderState -Width 80 -Height 25)
+$compactLayout = @(Get-WdtTuiLayout -State $renderState -Width 40 -Height 20)
+Assert-True ($normalLayout.Count -le 25) 'Normal TUI exceeds a 25-row terminal.'
+Assert-True ($compactLayout.Count -lt $normalLayout.Count) 'Compact TUI did not reduce its layout.'
+Assert-Equal 4 @($normalLayout | Select-Object -First 4).Count 'Normal TUI logo must have four lines.'
+foreach ($logoLine in @($normalLayout | Select-Object -First 4)) {
+    Assert-True ($logoLine.Text.Length -le 32) 'TUI logo is wider than 32 characters.'
+    Assert-True ($logoLine.Text -match '^[ -~]+$') 'TUI logo must be ASCII only.'
 }
+$normalScreen = @($normalLayout | ForEach-Object Text) -join "`n"
+$compactScreen = @($compactLayout | ForEach-Object Text) -join "`n"
+foreach ($text in @('Read-only | Local reports | No telemetry', '[ ]', '[x]', 'Privacy mode', 'Markdown report', 'Output:', 'Run diagnostics')) {
+    Assert-True ($normalScreen.Contains($text)) ("Normal TUI rendering is missing: {0}" -f $text)
+}
+Assert-True ($compactScreen.Contains('WDT | Read-only | Local reports | No telemetry')) 'Compact TUI header is missing.'
+Assert-True ($compactScreen.Contains('...')) 'Narrow TUI did not truncate the output path.'
+Assert-True (-not ($normalScreen -match "`e\[")) 'TUI model must not contain ANSI sequences.'
+Assert-True (@($normalLayout | Where-Object { $_.Role -eq 'Header' }).Count -gt 0) 'TUI layout has no header role.'
+Assert-True (@($normalLayout | Where-Object { $_.Role -eq 'Success' }).Count -gt 0) 'TUI layout has no success role.'
+Assert-True (@($normalLayout | Where-Object { $_.Role -eq 'Selected' }).Count -gt 0) 'TUI layout has no selected role.'
 
 $parameters = ConvertTo-WdtReportParameters -State $renderState
 Assert-Equal @(Get-WdtTuiSelectedModule -State $renderState).Count @($parameters.SelectedModules).Count 'Selected modules were not preserved in report parameters.'
@@ -112,6 +134,27 @@ try {
 }
 finally {
     if (Test-Path -LiteralPath $cliOutput) { Remove-Item -LiteralPath $cliOutput -Recurse -Force }
+}
+
+$hostExecutable = (Get-Process -Id $PID).Path
+foreach ($routingCase in @(
+        [pscustomobject]@{ Arguments = @(); Name = 'no arguments' },
+        [pscustomobject]@{ Arguments = @('-Interactive'); Name = 'interactive' },
+        [pscustomobject]@{ Arguments = @('-Interactive', '-System'); Name = 'interactive system' },
+        [pscustomobject]@{ Arguments = @('-Interactive', '-All'); Name = 'interactive all' }
+    )) {
+    $childOutput = @('') | & $hostExecutable -NoProfile -ExecutionPolicy Bypass -File $entrypointPath @($routingCase.Arguments) 2>&1
+    Assert-Equal 2 $LASTEXITCODE ("Redirected stdin exit code is incorrect for {0}." -f $routingCase.Name)
+    $childText = $childOutput -join "`n"
+    Assert-True ($childText.Contains('Interactive input is unavailable.')) ("Redirected stdin message is missing for {0}." -f $routingCase.Name)
+    Assert-True ($childText.Contains('Use -All or select one or more diagnostic modules.')) ("Redirected stdin guidance is missing for {0}." -f $routingCase.Name)
+}
+
+foreach ($routingCase in @(
+        [pscustomobject]@{ Arguments = @('-System'); Expected = 'CommandLine' },
+        [pscustomobject]@{ Arguments = @('-All'); Expected = 'CommandLine' }
+    )) {
+    Assert-Equal $routingCase.Expected (Get-WdtLaunchMode -InteractiveRequested $false -HasExplicitModuleSelection ($routingCase.Arguments -contains '-System') -AllRequested ($routingCase.Arguments -contains '-All') -IsInputRedirected $true) 'CLI switches must bypass the TUI under redirected input.'
 }
 
 Write-Host 'Interactive TUI tests passed.'

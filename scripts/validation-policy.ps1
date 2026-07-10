@@ -341,9 +341,18 @@ function Get-WdtCommandSafetyIssue {
         return New-WdtSafetyIssue $CommandAst 'The report runner is only callable from the approved interactive session.'
     }
 
-    if ($leaf -in @('Read-Host', 'Clear-Host')) {
-        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and $CommandAst.Redirections.Count -eq 0) { return }
-        return New-WdtSafetyIssue $CommandAst 'Interactive console commands are only allowed in the TUI script.'
+    if ($leaf -eq 'Read-Host') {
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-WdtInteractiveSession' -and
+            $CommandAst.Redirections.Count -eq 0) { return }
+        return New-WdtSafetyIssue $CommandAst 'Read-Host is only allowed in Invoke-WdtInteractiveSession without redirection.'
+    }
+
+    if ($leaf -eq 'Clear-Host') {
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $CommandAst) -in @('Show-WdtTuiScreen', 'Invoke-WdtInteractiveSession') -and
+            $CommandAst.Redirections.Count -eq 0) { return }
+        return New-WdtSafetyIssue $CommandAst 'Clear-Host is only allowed in approved TUI rendering functions without redirection.'
     }
 
     if ($leaf -eq 'Get-WdtDiagnosticDefinition' -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1')) { return }
@@ -392,6 +401,7 @@ function Get-WdtMemberSafetyIssue {
         $typeName = $MemberAst.Expression.TypeName.FullName
         if ($typeName -eq 'System.Console' -and $member -eq 'ReadKey' -and
             (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtInteractiveSession' -and
             $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -ceq '$true') {
             return
         }

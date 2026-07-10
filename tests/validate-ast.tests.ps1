@@ -67,9 +67,10 @@ Assert-Allowed '. $PSScriptRoot\scripts\tui.ps1' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed '. $PSScriptRoot\validation-policy.ps1' 'scripts\validate.ps1'
 Assert-Allowed '[System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed 'function Invoke-DiagnosticScript { $process.Start() }' 'Invoke-WindowsDiagnostics.ps1'
-Assert-Allowed '[System.Console]::ReadKey($true)' 'scripts\tui.ps1'
-Assert-Allowed 'Read-Host ''Output directory''' 'scripts\tui.ps1'
-Assert-Allowed 'Clear-Host' 'scripts\tui.ps1'
+Assert-Allowed 'function Invoke-WdtInteractiveSession { [System.Console]::ReadKey($true) }' 'scripts\tui.ps1'
+Assert-Allowed 'function Invoke-WdtInteractiveSession { Read-Host ''Output directory'' }' 'scripts\tui.ps1'
+Assert-Allowed 'function Show-WdtTuiScreen { Clear-Host }' 'scripts\tui.ps1'
+Assert-Allowed 'function Invoke-WdtInteractiveSession { Clear-Host }' 'scripts\tui.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { Invoke-WdtReport @reportParameters }' 'scripts\tui.ps1'
 
 $allowedCallbacks = @'
@@ -141,6 +142,9 @@ foreach ($source in @(
         '[System.Console]::OpenStandardInput()',
         '[System.Console]::UnknownMethod()'
     )) { Assert-Denied $source '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1' }
+Assert-Denied 'function Other { [System.Console]::ReadKey($true) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
+Assert-Denied 'function Invoke-WdtInteractiveSession { [System.Console]::ReadKey($false) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
+Assert-Denied 'function Invoke-WdtInteractiveSession { [System.Console]::ReadKey() }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
 
 foreach ($source in @(
         'Start-Process calc.exe',
@@ -149,8 +153,11 @@ foreach ($source in @(
     )) { Assert-Denied $source '*PowerShell command is not in the reviewed read-only allowlist*' 'scripts\tui.ps1' }
 
 foreach ($source in @('Read-Host ''Value''', 'Clear-Host')) {
-    Assert-Denied $source '*only allowed in the TUI script*' 'scripts\disk-health.ps1'
+    Assert-Denied $source '*only allowed*' 'scripts\disk-health.ps1'
 }
+Assert-Denied 'function Other { Read-Host ''Value'' }' '*Read-Host is only allowed*' 'scripts\tui.ps1'
+Assert-Denied 'function Other { Clear-Host }' '*Clear-Host is only allowed*' 'scripts\tui.ps1'
+Assert-Denied 'function Invoke-WdtInteractiveSession { Read-Host ''Value'' > output.txt }' '*Read-Host is only allowed*' 'scripts\tui.ps1'
 
 Assert-Denied 'function Other { & $Validator $value $valueMatch $Text }' '*Only approved internal callbacks are permitted*' 'scripts\report-common.ps1'
 Assert-Denied 'function Protect-WdtRegexMatches { & $Validator $value $valueMatch $Text $extra }' '*Only approved internal callbacks are permitted*' 'scripts\report-common.ps1'
