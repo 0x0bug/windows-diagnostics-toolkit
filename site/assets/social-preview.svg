@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Windows Diagnostics Toolkit</title>
+  <desc id="desc">Read-only Windows diagnostics in under 30 seconds.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#08101d"/>
+      <stop offset="1" stop-color="#142b4d"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#67b7ff"/>
+      <stop offset="1" stop-color="#8be9c1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1280" height="640" rx="36" fill="url(#bg)"/>
+  <circle cx="1090" cy="95" r="230" fill="#67b7ff" opacity="0.08"/>
+  <circle cx="1180" cy="560" r="290" fill="#8be9c1" opacity="0.06"/>
+  <rect x="76" y="78" width="1128" height="484" rx="24" fill="#0a0f18" opacity="0.74" stroke="#314767" stroke-width="2"/>
+  <g transform="translate(116 122)">
+    <rect width="76" height="76" rx="15" fill="url(#accent)"/>
+    <path d="M18 20h17v17H18zm22 0h18v17H40zM18 42h17v17H18zm22 0h18v17H40z" fill="#06101c"/>
+  </g>
+  <text x="220" y="163" fill="#8be9c1" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="3">OPEN SOURCE · POWERSHELL</text>
+  <text x="116" y="270" fill="#edf4ff" font-family="Segoe UI, Arial, sans-serif" font-size="70" font-weight="750">Windows Diagnostics</text>
+  <text x="116" y="350" fill="#edf4ff" font-family="Segoe UI, Arial, sans-serif" font-size="70" font-weight="750">Toolkit</text>
+  <text x="116" y="416" fill="#a9b7ca" font-family="Segoe UI, Arial, sans-serif" font-size="32">Local support reports in under 30 seconds.</text>
+  <g font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="650">
+    <rect x="116" y="462" width="175" height="54" rx="12" fill="#142238" stroke="#314767"/>
+    <text x="144" y="497" fill="#edf4ff">Read-only</text>
+    <rect x="310" y="462" width="205" height="54" rx="12" fill="#142238" stroke="#314767"/>
+    <text x="338" y="497" fill="#edf4ff">No telemetry</text>
+    <rect x="534" y="462" width="232" height="54" rx="12" fill="#142238" stroke="#314767"/>
+    <text x="562" y="497" fill="#edf4ff">Privacy Mode</text>
+  </g>
+  <text x="930" y="502" fill="#67b7ff" font-family="Cascadia Code, Consolas, monospace" font-size="25">0x0bug / WDT</text>
+</svg>

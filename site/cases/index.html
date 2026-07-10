@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Windows troubleshooting cases — Windows Diagnostics Toolkit</title>
+  <meta name="description" content="Practical Windows troubleshooting cases for application crashes, disabled firewall profiles, stopped time service, and unexpected routes or proxy settings.">
+  <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/cases/">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header><nav class="wrap"><a class="brand" href="../">Windows Diagnostics Toolkit</a><div class="nav-links"><a href="../">Home</a><a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a></div></nav></header>
+<main>
+  <section class="wrap">
+    <div class="eyebrow">Troubleshooting library</div>
+    <h1>Windows diagnostic cases</h1>
+    <p class="lead">Each page starts from a real support symptom and shows which read-only diagnostics help establish the next step.</p>
+    <div class="grid">
+      <article class="card"><h3>Windows application keeps crashing</h3><p>Use crash events and dump metadata to confirm repeated application failures.</p><a href="windows-application-crashes.html">Open case</a></article>
+      <article class="card"><h3>Windows Firewall profiles are disabled</h3><p>Check firewall state in context with Defender, Secure Boot, TPM, and BitLocker.</p><a href="windows-firewall-disabled.html">Open case</a></article>
+      <article class="card"><h3>Windows Time service is stopped</h3><p>Inspect W32Time state, timezone, source, and verbose status without changing time configuration.</p><a href="windows-time-service-stopped.html">Open case</a></article>
+      <article class="card"><h3>Unexpected default route or proxy</h3><p>Compare route metrics, gateways, adapters, DNS, DHCP, and proxy configuration.</p><a href="windows-network-routes.html">Open case</a></article>
+    </div>
+  </section>
+</main>
+<footer><div class="wrap">The toolkit reports diagnostic state. It does not automatically repair or reconfigure Windows.</div></footer>
+</body>
+</html>

@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Inspect Windows default routes and proxy settings — Windows Diagnostics Toolkit</title>
+  <meta name="description" content="Inspect Windows adapters, DNS, DHCP, gateways, default routes, route metrics, and WinINET or WinHTTP proxy state using read-only diagnostics.">
+  <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-network-routes.html">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header><nav class="wrap"><a class="brand" href="../">Windows Diagnostics Toolkit</a><div class="nav-links"><a href="./">Cases</a><a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a></div></nav></header>
+<main><section class="wrap"><div class="eyebrow">Troubleshooting case</div><h1>Unexpected default route or proxy</h1><p class="lead">Compare active adapters, gateways, route metrics, DNS, DHCP, and proxy configuration without changing the network stack.</p><pre><code>pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Network -PrivacyMode -ExportMarkdown</code></pre><div class="grid"><article class="card"><h3>Routing context</h3><p>Default routes appear first with next hop, interface, and effective metric so competing paths are easier to identify.</p></article><article class="card"><h3>Proxy context</h3><p>WinINET and WinHTTP settings are reported read-only. Credentials and sensitive URL query values are removed.</p></article></div><h2>Interpretation</h2><p>The lowest effective default-route metric usually identifies the preferred path. Virtual switches and tunnel adapters may legitimately add routes, so compare the result with the software currently running.</p><p><a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit">Open the project on GitHub</a></p></section></main>
+<footer><div class="wrap">No DNS, proxy, adapter, or route setting is modified.</div></footer>
+</body>
+</html>
