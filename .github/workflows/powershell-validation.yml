@@ -46,6 +46,14 @@ jobs:
         shell: powershell
         run: .\tests\security-posture.tests.ps1
 
+      - name: Test Performance Snapshot with PowerShell 7
+        shell: pwsh
+        run: .\tests\performance-snapshot.tests.ps1
+
+      - name: Test Performance Snapshot with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\performance-snapshot.tests.ps1
+
       - name: Smoke test System report
         shell: pwsh
         run: |

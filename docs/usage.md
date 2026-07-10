@@ -106,6 +106,30 @@ Run only this module through the combined-report runner:
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security -ExportMarkdown
 ```
 
+## Performance Snapshot
+
+`scripts/performance-snapshot.ps1` takes a single read-only snapshot of memory,
+CPU, pagefile, and the top processes by working set and cumulative CPU time. It
+does not collect process paths, owners, or command lines.
+
+```powershell
+pwsh -NoProfile -File .\scripts\performance-snapshot.ps1
+```
+
+Default thresholds are 15% available memory, 95% CPU, and 80% pagefile usage.
+Use standalone parameters to adjust the memory and CPU warning thresholds or the
+number of processes shown:
+
+```powershell
+pwsh -NoProfile -File .\scripts\performance-snapshot.ps1 -TopProcessCount 20 -LowMemoryPercent 20 -HighCpuPercent 90
+```
+
+Run only this module through the combined-report runner:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Performance -ExportMarkdown
+```
+
 ## Network Diagnostics
 
 `scripts/network-check.ps1` prints active network adapters, IP addresses, DNS
