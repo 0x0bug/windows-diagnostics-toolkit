@@ -41,6 +41,32 @@ Add `-ExportMarkdown` to create a Markdown report alongside the TXT report:
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
 ```
 
+Add the opt-in `-PrivacyMode` modifier when the combined report will be shared:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+```
+
+Privacy Mode does not change which diagnostics run. It centrally redacts the
+captured module output, findings, headers, and output paths before the wrapper
+writes TXT or Markdown. Identical values receive the same typed token within a
+report:
+
+- `<HOST-1>` for a computer name
+- `<USER-1>` for a user name
+- `<IP-1>` for an IPv4 or IPv6 address
+- `<MAC-1>` for a MAC address
+- `<ID-1>` for a SID, GUID, or device identifier
+
+The numbering is independent for each token type, and the map is reset for each
+new report. Process names, application names, and dump-file names remain visible
+for diagnostic context. Standalone scripts do not accept `-PrivacyMode`; their
+output remains raw and local. The toolkit does not explicitly query process command
+lines or BitLocker recovery keys.
+
+Combined reports always replace proxy URL credentials and sensitive query values
+with `<REDACTED>`, including when `-PrivacyMode` is not enabled.
+
 Each report starts its diagnostic content with `Findings Summary`. The summary
 uses only `OK`, `WARN`, and `ERROR`, groups findings by severity, and lists a
 successfully completed module with no findings as `OK`. Overall status uses the

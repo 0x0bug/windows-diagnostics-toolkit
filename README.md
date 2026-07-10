@@ -55,6 +55,7 @@ cd windows-diagnostics-toolkit
 
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
@@ -71,6 +72,17 @@ does not change the wrapper exit code; a non-zero
 exit code still indicates that a module failed to execute. Internal finding
 markers emitted by modules are consumed by the wrapper and are not shown in TXT
 or Markdown reports.
+
+Use the wrapper's opt-in `-PrivacyMode` when a combined report will be shared.
+The wrapper centrally redacts captured module output, findings, headers, and report
+paths before writing TXT or Markdown. Repeated values receive the same typed token
+within one report, such as `<HOST-1>`, `<USER-1>`, `<IP-1>`, `<MAC-1>`, or
+`<ID-1>`; the token map is reset for every report. Process,
+application, and dump-file names remain visible for diagnostic context. Standalone
+scripts do not apply this wrapper option and continue to print raw local output.
+The toolkit does not explicitly query process command lines or BitLocker recovery keys.
+Proxy URL credentials and sensitive query values are replaced with `<REDACTED>`
+in combined reports even when Privacy Mode is disabled.
 
 You can also run individual scripts directly:
 
@@ -103,6 +115,12 @@ Run all checks and also export Markdown:
 
 ```powershell
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
+```
+
+Create the same reports with identifying values redacted:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 ```
 
 Run selected checks into a custom output directory:
@@ -140,6 +158,7 @@ Available parameters:
 - `-Updates` - run only Windows Update diagnostics unless combined with other selectors
 - `-OutputDirectory` - choose where report files are written
 - `-ExportMarkdown` - also write a `.md` report
+- `-PrivacyMode` - redact identifying values in combined TXT and Markdown reports
 
 See [docs/report-example.md](docs/report-example.md) for an anonymized report
 example.
