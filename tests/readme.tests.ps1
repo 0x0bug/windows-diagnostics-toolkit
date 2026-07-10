@@ -34,7 +34,7 @@ Assert-True ($readme.Contains('With `-All` or one or more module switches it run
 Assert-True ($readme.Contains('script execution is disabled')) 'README is missing Execution Policy troubleshooting.'
 Assert-True ($readme.Contains('does not change the machine-wide or current-user execution policy')) 'README does not explain the process-only Execution Policy bypass.'
 Assert-True ($readme.Contains('If PowerShell reports that `pwsh` is not recognized')) 'README is missing pwsh troubleshooting guidance.'
-Assert-True ($readme.Contains('Installing PowerShell 7 is optional')) 'README does not explain that PowerShell 7 is optional.'
+Assert-True ($readme.Contains('installing PowerShell 7 is optional')) 'README does not explain that PowerShell 7 is optional.'
 Assert-True (-not $readme.Contains('Set-ExecutionPolicy Unrestricted')) 'README recommends a persistent unsafe Execution Policy change.'
 
 Write-Host 'README tests passed.'
