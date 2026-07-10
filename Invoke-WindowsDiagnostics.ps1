@@ -3,6 +3,7 @@ param(
     [switch]$All,
     [switch]$System,
     [switch]$Security,
+    [switch]$Performance,
     [switch]$Network,
     [switch]$Disk,
     [switch]$Events,
@@ -306,7 +307,7 @@ function Protect-WdtDiagnosticResults {
     }
 }
 
-$selectedAll = $All -or (-not $System -and -not $Security -and -not $Network -and -not $Disk -and -not $Events -and -not $Services -and -not $Updates)
+$selectedAll = $All -or (-not $System -and -not $Security -and -not $Performance -and -not $Network -and -not $Disk -and -not $Events -and -not $Services -and -not $Updates)
 $selectedChecks = New-Object System.Collections.Generic.List[object]
 
 if ($selectedAll -or $System) {
@@ -320,6 +321,13 @@ if ($selectedAll -or $Security) {
     $selectedChecks.Add([pscustomobject]@{
         Title = 'Security Posture'
         Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\security-posture.ps1'
+    })
+}
+
+if ($selectedAll -or $Performance) {
+    $selectedChecks.Add([pscustomobject]@{
+        Title = 'Performance Snapshot'
+        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\performance-snapshot.ps1'
     })
 }
 

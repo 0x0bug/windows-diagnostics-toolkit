@@ -57,6 +57,7 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Performance
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
@@ -150,9 +151,10 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
 
 Available parameters:
 
-- `-All` - run system, security, network, disk, Event Log, Services, and Windows Update checks
+- `-All` - run system, security, performance, network, disk, Event Log, Services, and Windows Update checks
 - `-System` - run only system information unless combined with other selectors
 - `-Security` - run only Security Posture diagnostics unless combined with other selectors
+- `-Performance` - run only Performance Snapshot diagnostics unless combined with other selectors
 - `-Network` - run only network checks unless combined with other selectors
 - `-Disk` - run only disk checks unless combined with other selectors
 - `-Events` - run only Event Log diagnostics unless combined with other selectors
@@ -198,6 +200,21 @@ Run:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\security-posture.ps1
+```
+
+### `scripts/performance-snapshot.ps1`
+
+Reports a one-time, read-only performance snapshot:
+
+- available physical memory and CPU load
+- pagefile usage
+- top processes by working set and cumulative CPU time
+
+The script never collects process paths, owners, or command lines. By default it
+warns below 15% available memory, at 95% CPU, and at 80% pagefile usage.
+
+```powershell
+pwsh -NoProfile -File .\scripts\performance-snapshot.ps1
 ```
 
 ### `scripts/network-check.ps1`
