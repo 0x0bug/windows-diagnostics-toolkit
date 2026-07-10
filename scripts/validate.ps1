@@ -195,6 +195,12 @@ function Get-SafetyIssue {
                 $reason = 'Only w32tm.exe /query /source and w32tm.exe /query /status /verbose are allowed.'
             }
         }
+        elseif ($commandName -eq 'netsh.exe') {
+            if (-not (Test-WdtAllowedNetshCommand -CommandAst $commandAst)) {
+                $isForbidden = $true
+                $reason = 'Only netsh.exe winhttp show proxy is allowed.'
+            }
+        }
         elseif ($forbiddenExactCommands.ContainsKey($commandName)) {
             $isForbidden = $true
             $reason = 'Forbidden command.'

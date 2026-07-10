@@ -134,6 +134,27 @@ IPv4        : <IP-1>
 IPv6        : None
 Gateway     : <IP-2>
 DNS servers : <IP-3>
+DHCP        : Enabled
+DHCP server : <IP-5>
+DNS suffix  : example.invalid
+DNS search list : example.invalid
+
+== Active Routes (Default First) ==
+Type             : Default
+Destination      : 0.0.0.0/0
+Next hop         : <IP-2>
+Interface        : Ethernet
+Effective metric : 25
+Source           : Get-NetRoute
+
+== WinINET Proxy ==
+Enabled        : Enabled
+Proxy server   : https=<REDACTED>@proxy.example.invalid:8443
+Auto config URL: https://proxy.example.invalid/config.pac?token=<REDACTED>
+
+== WinHTTP Proxy ==
+Current WinHTTP proxy settings:
+    Direct access (no proxy server).
 
 == Gateway Reachability ==
 <IP-2>: Reachable
@@ -411,6 +432,32 @@ Available percent     : 10.0%
 
 == Top Processes by Working Set ==
 ExampleApp                       512.00 MB
+```
+
+## Network Check
+
+- Command: `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\network-check.ps1`
+- Exit code: `0`
+
+```text
+Windows Diagnostics Toolkit - Network Check
+Mode: read-only
+
+== Active Network Adapters ==
+Name            : Ethernet
+DHCP            : Enabled
+DHCP server     : <IP-5>
+DNS suffix      : example.invalid
+DNS search list : example.invalid
+
+== Active Routes (Default First) ==
+Type             : Default
+Destination      : 0.0.0.0/0
+Next hop         : <IP-2>
+Effective metric : 25
+
+== WinINET Proxy ==
+Proxy server   : https=<REDACTED>@proxy.example.invalid:8443
 ```
 
 ## Time Sync Diagnostics
