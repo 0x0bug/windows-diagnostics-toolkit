@@ -136,6 +136,7 @@ section { padding: 4.5rem 0; }
   border-radius: 14px;
   padding: 1.25rem;
 }
+.card h2, .card h3 { font-size: 1.25rem; margin: 0 0 0.75rem; }
 .card p { color: var(--muted); }
 .card a { font-weight: 700; }
 
@@ -166,6 +167,7 @@ section { padding: 4.5rem 0; }
   margin-inline: auto;
   padding: 3rem 0 5rem;
 }
+.article.breadcrumb { padding: 0; }
 .article h1 { font-size: clamp(2.5rem, 6vw, 4.4rem); }
 .article h2 { margin-top: 3rem; font-size: clamp(1.7rem, 4vw, 2.35rem); }
 .article h3 { margin-top: 2rem; }
@@ -175,6 +177,7 @@ section { padding: 4.5rem 0; }
 .article-meta { color: var(--muted); font-size: 0.95rem; }
 .article-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin: 2rem 0; }
 .article-grid .card { height: 100%; }
+.article-grid .card h3 { margin-top: 0; }
 
 .toc {
   border: 1px solid var(--line);
