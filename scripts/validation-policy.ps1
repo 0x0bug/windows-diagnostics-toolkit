@@ -4,6 +4,10 @@ param()
 function Test-WdtAllowedW32tmCommand {
     param([Parameter(Mandatory = $true)][System.Management.Automation.Language.CommandAst]$CommandAst)
 
+    if ($CommandAst.GetCommandName() -ne 'w32tm.exe') {
+        return $false
+    }
+
     $elements = @($CommandAst.CommandElements)
     if ($elements.Count -lt 3) {
         return $false
@@ -18,4 +22,20 @@ function Test-WdtAllowedW32tmCommand {
         $arguments[0] -eq '/query' -and
         $arguments[1] -eq '/status' -and
         $arguments[2] -eq '/verbose')
+}
+
+function Test-WdtAllowedNetshCommand {
+    param([Parameter(Mandatory = $true)][System.Management.Automation.Language.CommandAst]$CommandAst)
+
+    if ($CommandAst.GetCommandName() -ne 'netsh.exe') {
+        return $false
+    }
+
+    $elements = @($CommandAst.CommandElements)
+    if ($elements.Count -ne 4) {
+        return $false
+    }
+
+    $arguments = @($elements | Select-Object -Skip 1 | ForEach-Object { $_.Extent.Text.Trim("'`"") })
+    return ($arguments[0] -eq 'winhttp' -and $arguments[1] -eq 'show' -and $arguments[2] -eq 'proxy')
 }
