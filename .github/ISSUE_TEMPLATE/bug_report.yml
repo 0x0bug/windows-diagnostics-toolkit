@@ -1,0 +1,58 @@
+name: Bug report
+description: Report incorrect behavior, compatibility problems, or a failed diagnostic run
+title: "bug: "
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach an unredacted report. Run the combined report with `-PrivacyMode` and review it before sharing.
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and build
+      placeholder: Windows 11 24H2, build 26100
+    validations:
+      required: true
+  - type: dropdown
+    id: shell
+    attributes:
+      label: PowerShell edition
+      options:
+        - Windows PowerShell 5.1
+        - PowerShell 7
+        - Both
+    validations:
+      required: true
+  - type: input
+    id: command
+    attributes:
+      label: Command used
+      placeholder: pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Redacted report excerpt or error output
+      description: Include only the relevant section. Remove any remaining sensitive information.
+      render: text
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Privacy confirmation
+      options:
+        - label: I reviewed the content and removed credentials, tokens, personal data, and private infrastructure details.
+          required: true
