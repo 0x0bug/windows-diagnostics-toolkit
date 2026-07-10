@@ -27,6 +27,30 @@ pwsh -NoProfile -File .\scripts\network-check.ps1
 pwsh -NoProfile -File .\scripts\disk-health.ps1
 ```
 
+## Combined Support Reports
+
+Run the wrapper to collect all checks in one TXT report:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All
+```
+
+Add `-ExportMarkdown` to create a Markdown report alongside the TXT report:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
+```
+
+Each report starts its diagnostic content with `Findings Summary`. The summary
+uses only `OK`, `WARN`, and `ERROR`, groups findings by severity, and lists a
+successfully completed module with no findings as `OK`. Overall status uses the
+priority `ERROR` > `WARN` > `OK`.
+
+Findings describe diagnostic state and do not change the wrapper exit code. A
+non-zero exit code still means that a module failed to execute. Modules emit
+internal finding markers for the wrapper to aggregate; those markers are removed
+before TXT and Markdown reports are written.
+
 ## System Information
 
 `scripts/system-info.ps1` prints operating system, CPU, memory, GPU, uptime, and

@@ -14,6 +14,19 @@ Mode          : read-only
 Output        : C:\Example\WindowsDiagnosticsReport-20260709-101530.txt
 Selected      : System Information, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check
 
+== Findings Summary ==
+Overall status : ERROR
+Errors         : 1
+Warnings       : 3
+OK modules     : 2
+
+[ERROR] Disk Health / DISK_UNHEALTHY - An example disk reported an unhealthy state. Evidence: Health=Unhealthy
+[WARN] Network Check / NETWORK_DNS_FAILED - DNS resolution did not complete successfully.
+[WARN] Event Log Check / RECENT_ERROR_EVENTS - Recent error events were found.
+[WARN] Services Check / SERVICE_STATE_ISSUES - One or more services need attention.
+[OK] System Information - No findings.
+[OK] Windows Update Check - No findings.
+
 == System Information ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\system-info.ps1
 Exit code: 0
@@ -62,10 +75,10 @@ DNS servers : 192.0.2.53
 192.0.2.1: Reachable
 
 == DNS Resolution ==
-github.com: Resolved: 192.0.2.80
+example.invalid: Resolution failed.
 
 == Internet Connectivity ==
-8.8.8.8: Reachable
+192.0.2.200: Reachable
 
 == Disk Health ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\disk-health.ps1
@@ -78,7 +91,7 @@ Mode: read-only
 Name         : ExampleDisk
 Model        : ExampleDisk
 Media type   : SSD
-Health       : Healthy
+Health       : Unhealthy
 Size         : 930.00 GB
 Source       : Get-PhysicalDisk
 
@@ -223,6 +236,18 @@ Skipped. Use -IncludeEventLog to include recent Windows Update related events.
 - Mode: `read-only`
 - TXT report: `C:\Example\WindowsDiagnosticsReport-20260709-101530.txt`
 - Selected: `System Information, Event Log Check, Services Check, Windows Update Check`
+
+## Findings Summary
+
+- Overall status: `WARN`
+- Errors: `0`
+- Warnings: `2`
+- OK modules: `2`
+
+- `[WARN]` **Event Log Check / RECENT_ERROR_EVENTS** - Recent error events were found.
+- `[WARN]` **Services Check / SERVICE_STATE_ISSUES** - One or more services need attention.
+- `[OK]` **System Information** - No findings.
+- `[OK]` **Windows Update Check** - No findings.
 
 ## System Information
 

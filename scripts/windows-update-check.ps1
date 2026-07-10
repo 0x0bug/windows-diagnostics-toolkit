@@ -11,6 +11,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path -Path $PSScriptRoot -ChildPath 'report-common.ps1')
+
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
     Write-Host ''
@@ -312,6 +314,76 @@ $eventInventory = $null
 
 if ($IncludeEventLog) {
     $eventInventory = Read-WindowsUpdateEvents -StartTime $cutoff -EventLimit $MaxEvents
+}
+
+$unavailableSources = New-Object System.Collections.Generic.List[string]
+if ($null -ne $windowsVersion.Error) {
+    $unavailableSources.Add(('Windows version: {0}' -f (ConvertTo-SafeSingleLine -Value $windowsVersion.Error)))
+}
+if ($null -ne $recentUpdates.Error) {
+    $unavailableSources.Add(('Installed updates: {0}' -f (ConvertTo-SafeSingleLine -Value $recentUpdates.Error)))
+}
+foreach ($errorItem in @($pendingReboot.Errors)) {
+    $unavailableSources.Add(('Pending reboot/{0}: {1}' -f $errorItem.Name, (ConvertTo-SafeSingleLine -Value $errorItem.Error)))
+}
+if ($null -ne $updateServices.Error) {
+    $unavailableSources.Add(('Update services: {0}' -f (ConvertTo-SafeSingleLine -Value $updateServices.Error)))
+}
+if ($IncludeEventLog) {
+    foreach ($errorItem in @($eventInventory.Errors)) {
+        $unavailableSources.Add(('Event log/{0}: {1}' -f $errorItem.LogName, (ConvertTo-SafeSingleLine -Value $errorItem.Error)))
+    }
+}
+
+if ($unavailableSources.Count -gt 0) {
+    Write-WdtFinding -Severity WARN -Code 'WINDOWS_UPDATE_SOURCE_UNAVAILABLE' -Message ('{0} Windows Update diagnostic source(s) could not be read.' -f $unavailableSources.Count) -Evidence (@($unavailableSources.ToArray()) -join '; ')
+}
+
+if ($pendingReboot.Status -eq 'Yes') {
+    $pendingRebootEvidence = @($pendingReboot.Indicators | ForEach-Object { $_.Name }) -join '; '
+    Write-WdtFinding -Severity WARN -Code 'PENDING_REBOOT' -Message 'Windows reports that a reboot is pending.' -Evidence $pendingRebootEvidence
+}
+
+if ($null -eq $updateServices.Error) {
+    $problematicUpdateServices = @(
+        $updateServices.Services |
+            Where-Object {
+                ($_.StartMode -eq 'Auto' -and $_.State -ne 'Running') -or
+                $_.State -notin @('Running', 'Stopped')
+            }
+    )
+
+    if ($problematicUpdateServices.Count -gt 0 -or $updateServices.Missing.Count -gt 0) {
+        $updateServiceEvidence = New-Object System.Collections.Generic.List[string]
+        foreach ($service in @($problematicUpdateServices | Select-Object -First 10)) {
+            $updateServiceEvidence.Add(('{0}={1} ({2})' -f $service.Name, $service.State, $service.StartMode))
+        }
+        foreach ($missingService in @($updateServices.Missing | Select-Object -First 10)) {
+            $updateServiceEvidence.Add(('{0}=Missing' -f $missingService))
+        }
+
+        Write-WdtFinding -Severity WARN -Code 'WINDOWS_UPDATE_SERVICE_ISSUES' -Message ('{0} Windows Update service(s) have a problematic state and {1} expected service(s) are missing.' -f $problematicUpdateServices.Count, $updateServices.Missing.Count) -Evidence (@($updateServiceEvidence.ToArray()) -join '; ')
+    }
+}
+
+if ($IncludeEventLog) {
+    $problematicUpdateEvents = @(
+        $eventInventory.Events |
+            Where-Object {
+                $_.Level -in @(1, 2) -or
+                $_.LevelDisplayName -in @('Critical', 'Error')
+            }
+    )
+
+    if ($problematicUpdateEvents.Count -gt 0) {
+        $updateEventEvidence = @(
+            $problematicUpdateEvents |
+                Select-Object -First 5 |
+                ForEach-Object { '{0}/{1}/{2}' -f $_.LogName, $_.ProviderName, $_.Id }
+        ) -join '; '
+
+        Write-WdtFinding -Severity WARN -Code 'WINDOWS_UPDATE_EVENT_ISSUES' -Message ('{0} recent Windows Update Critical or Error event(s) were found.' -f $problematicUpdateEvents.Count) -Evidence $updateEventEvidence
+    }
 }
 
 Write-Section 'Summary'

@@ -11,6 +11,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path -Path $PSScriptRoot -ChildPath 'report-common.ps1')
+
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
     Write-Host ''
@@ -104,6 +106,38 @@ $sourceGroups = @(
         Sort-Object -Property @{ Expression = 'Count'; Descending = $true }, @{ Expression = 'Name'; Ascending = $true } |
         Select-Object -First 10
 )
+
+$unavailableLogs = @($logResults | Where-Object { $null -ne $_.Error })
+if ($unavailableLogs.Count -gt 0) {
+    $unavailableLogEvidence = @(
+        $unavailableLogs |
+            ForEach-Object { '{0}: {1}' -f $_.LogName, (ConvertTo-OneLineMessage -Message $_.Error) }
+    ) -join '; '
+
+    Write-WdtFinding -Severity WARN -Code 'EVENT_LOG_SOURCE_UNAVAILABLE' -Message ('{0} event log source(s) could not be read.' -f $unavailableLogs.Count) -Evidence $unavailableLogEvidence
+}
+
+$criticalEvents = @($events | Where-Object { $_.Level -eq 1 })
+if ($criticalEvents.Count -gt 0) {
+    $criticalEventEvidence = @(
+        $criticalEvents |
+            Select-Object -First 5 |
+            ForEach-Object { '{0}/{1}/{2}' -f $_.LogName, $_.ProviderName, $_.Id }
+    ) -join '; '
+
+    Write-WdtFinding -Severity ERROR -Code 'RECENT_CRITICAL_EVENTS' -Message ('{0} Critical event(s) were found in the last {1} hour(s).' -f $criticalEvents.Count, $SinceHours) -Evidence $criticalEventEvidence
+}
+
+$errorEvents = @($events | Where-Object { $_.Level -eq 2 })
+if ($errorEvents.Count -gt 0) {
+    $errorEventEvidence = @(
+        $errorEvents |
+            Select-Object -First 5 |
+            ForEach-Object { '{0}/{1}/{2}' -f $_.LogName, $_.ProviderName, $_.Id }
+    ) -join '; '
+
+    Write-WdtFinding -Severity WARN -Code 'RECENT_ERROR_EVENTS' -Message ('{0} Error event(s) were found in the last {1} hour(s).' -f $errorEvents.Count, $SinceHours) -Evidence $errorEventEvidence
+}
 
 Write-Section 'Summary'
 Write-Host ('Time window     : Last {0} hour(s), since {1}' -f $SinceHours, $startTime)
