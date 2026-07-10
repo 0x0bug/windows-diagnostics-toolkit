@@ -6,6 +6,9 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     runs-on: windows-latest
@@ -85,6 +88,14 @@ jobs:
       - name: Test Network Context with Windows PowerShell 5.1
         shell: powershell
         run: .\tests\network-context.tests.ps1
+
+      - name: Validate static site SEO with PowerShell 7
+        shell: pwsh
+        run: .\tests\site-seo.tests.ps1
+
+      - name: Validate static site SEO with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\site-seo.tests.ps1
 
       - name: Smoke test System report
         shell: pwsh
