@@ -8,21 +8,24 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
+function Normalize-LineEndings {
+    param([AllowEmptyString()][string]$Text)
+    return ($Text -replace "`r`n", "`n").Trim()
+}
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $readmePath = Join-Path -Path $repositoryRoot -ChildPath 'README.md'
-$readme = (Get-Content -LiteralPath $readmePath -Raw) -replace "`r`n", "`n"
+$readme = Normalize-LineEndings -Text (Get-Content -LiteralPath $readmePath -Raw)
 
-$interactiveWindowsPowerShellCommand = @'
+$interactiveWindowsPowerShellCommand = Normalize-LineEndings -Text @'
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\Invoke-WindowsDiagnostics.ps1
 '@
-$interactiveWindowsPowerShellCommand = $interactiveWindowsPowerShellCommand.Trim()
 
-$commandLineWindowsPowerShellCommand = @'
+$commandLineWindowsPowerShellCommand = Normalize-LineEndings -Text @'
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 '@
-$commandLineWindowsPowerShellCommand = $commandLineWindowsPowerShellCommand.Trim()
 
 Assert-True ($readme.Contains($interactiveWindowsPowerShellCommand)) 'README is missing the Windows PowerShell 5.1 interactive launch command.'
 Assert-True ($readme.Contains($commandLineWindowsPowerShellCommand)) 'README is missing the Windows PowerShell 5.1 command-line example.'
