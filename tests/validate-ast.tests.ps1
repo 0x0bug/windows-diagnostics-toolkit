@@ -53,4 +53,15 @@ foreach ($source in @(
     Assert-True -Condition (-not (Test-WdtAllowedW32tmCommand -CommandAst (Get-CommandAst -Source $source))) -Message ("Forbidden W32Time command was accepted: {0}" -f $source)
 }
 
+Assert-True -Condition (Test-WdtAllowedNetshCommand -CommandAst (Get-CommandAst -Source 'netsh.exe winhttp show proxy')) -Message 'Allowed WinHTTP proxy query was rejected.'
+
+foreach ($source in @(
+        'netsh.exe winhttp show proxy extra',
+        'netsh.exe winhttp set proxy server:8080',
+        'netsh.exe interface show interface',
+        'netsh winhttp show proxy'
+    )) {
+    Assert-True -Condition (-not (Test-WdtAllowedNetshCommand -CommandAst (Get-CommandAst -Source $source))) -Message ("Forbidden netsh command was accepted: {0}" -f $source)
+}
+
 Write-Host 'Validation AST policy tests passed.'

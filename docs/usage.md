@@ -184,8 +184,11 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Time -ExportMarkdown
 
 ## Network Diagnostics
 
-`scripts/network-check.ps1` prints active network adapters, IP addresses, DNS
-servers, gateways, and simple connectivity checks.
+`scripts/network-check.ps1` prints active network adapters, IP addresses, DHCP
+status/server, DNS suffix/search list, gateways, active routes, read-only WinINET
+and WinHTTP proxy context, and simple connectivity checks. Default routes appear
+first; the overall route output is capped at 30 records. The module never calls
+VPN APIs or classifies adapters as tunnels.
 
 ```powershell
 pwsh -NoProfile -File .\scripts\network-check.ps1
@@ -200,6 +203,11 @@ pwsh -NoProfile -File .\scripts\network-check.ps1 -DnsTestName github.com -Inter
 - `DnsTestName` controls the hostname used for DNS resolution.
 - `InternetTestHost` controls the host used for the internet reachability check.
 - `TimeoutSeconds` controls the timeout for PowerShell 7 `Test-Connection`.
+
+WinINET is read from the current user's registry settings. WinHTTP is queried only
+with `netsh.exe winhttp show proxy`. Proxy credentials and sensitive query values
+are replaced with `<REDACTED>` even when Privacy Mode is disabled. Missing adapter,
+route, or proxy sources create `WARN` findings without changing the exit code.
 
 ## Disk Health
 
