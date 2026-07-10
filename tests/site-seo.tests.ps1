@@ -5,7 +5,8 @@ $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $siteRoot = Join-Path -Path $repositoryRoot -ChildPath 'site'
-$siteRootFull = [System.IO.Path]::GetFullPath($siteRoot).TrimEnd('\', '/')
+$separatorCharacters = [char[]]@('\', '/')
+$siteRootFull = [System.IO.Path]::GetFullPath($siteRoot).TrimEnd($separatorCharacters)
 $publishedBaseUrl = 'https://0x0bug.github.io/windows-diagnostics-toolkit/'
 $projectPathPrefix = '/windows-diagnostics-toolkit/'
 
@@ -22,7 +23,8 @@ function Get-FirstMatchValue {
         [Parameter(Mandatory = $true)][string]$Pattern
     )
 
-    $match = [regex]::Match($Text, $Pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    $options = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Singleline
+    $match = [regex]::Match($Text, $Pattern, $options)
     if (-not $match.Success) {
         return $null
     }
@@ -38,7 +40,7 @@ function Get-RelativeSitePath {
         return $full
     }
 
-    return $full.Substring($siteRootFull.Length).TrimStart('\', '/').Replace('\', '/')
+    return $full.Substring($siteRootFull.Length).TrimStart($separatorCharacters).Replace('\', '/')
 }
 
 function Resolve-LocalSiteTarget {
@@ -53,7 +55,7 @@ function Resolve-LocalSiteTarget {
         return $null
     }
 
-    if ($pathPart -match '^(?i)(https?:|mailto:|tel:|javascript:|data:)') {
+    if ($pathPart -match '(?i)^(https?:|mailto:|tel:|javascript:|data:)') {
         return $null
     }
 
@@ -171,21 +173,24 @@ foreach ($file in $htmlFiles) {
         }
 
         foreach ($requiredMeta in @('og:title', 'og:description', 'og:url', 'og:image')) {
-            $value = Get-FirstMatchValue -Text $html -Pattern ("<meta\s+[^>]*property=[\"']{0}[\"'][^>]*content=[\"'](.*?)[\"'][^>]*>" -f [regex]::Escape($requiredMeta))
+            $metaPattern = '<meta\s+[^>]*property=["'']{0}["''][^>]*content=["''](.*?)["''][^>]*>' -f [regex]::Escape($requiredMeta)
+            $value = Get-FirstMatchValue -Text $html -Pattern $metaPattern
             if ([string]::IsNullOrWhiteSpace($value)) {
                 Add-TestIssue "$relativePath is missing $requiredMeta."
             }
         }
 
         foreach ($requiredTwitterMeta in @('twitter:card', 'twitter:title', 'twitter:description', 'twitter:image')) {
-            $value = Get-FirstMatchValue -Text $html -Pattern ("<meta\s+[^>]*name=[\"']{0}[\"'][^>]*content=[\"'](.*?)[\"'][^>]*>" -f [regex]::Escape($requiredTwitterMeta))
+            $metaPattern = '<meta\s+[^>]*name=["'']{0}["''][^>]*content=["''](.*?)["''][^>]*>' -f [regex]::Escape($requiredTwitterMeta)
+            $value = Get-FirstMatchValue -Text $html -Pattern $metaPattern
             if ([string]::IsNullOrWhiteSpace($value)) {
                 Add-TestIssue "$relativePath is missing $requiredTwitterMeta."
             }
         }
     }
 
-    $jsonLdMatches = [regex]::Matches($html, '<script\s+[^>]*type=["'']application/ld\+json["''][^>]*>(.*?)</script>', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Singleline)
+    $jsonOptions = [System.Text.RegularExpressions.RegexOptions]::IgnoreCase -bor [System.Text.RegularExpressions.RegexOptions]::Singleline
+    $jsonLdMatches = [regex]::Matches($html, '<script\s+[^>]*type=["'']application/ld\+json["''][^>]*>(.*?)</script>', $jsonOptions)
     foreach ($jsonLdMatch in $jsonLdMatches) {
         try {
             $null = $jsonLdMatch.Groups[1].Value | ConvertFrom-Json
