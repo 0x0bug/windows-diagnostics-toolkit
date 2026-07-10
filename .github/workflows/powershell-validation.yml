@@ -30,6 +30,14 @@ jobs:
         shell: powershell
         run: .\tests\report-common.tests.ps1
 
+      - name: Test Privacy Mode with PowerShell 7
+        shell: pwsh
+        run: .\tests\privacy-mode.tests.ps1
+
+      - name: Test Privacy Mode with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\privacy-mode.tests.ps1
+
       - name: Smoke test System report
         shell: pwsh
         run: |
