@@ -58,6 +58,7 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Performance
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Crashes
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Events
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Services
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
@@ -151,10 +152,11 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Updates
 
 Available parameters:
 
-- `-All` - run system, security, performance, network, disk, Event Log, Services, and Windows Update checks
+- `-All` - run system, security, performance, network, disk, crash/hang, Event Log, Services, and Windows Update checks
 - `-System` - run only system information unless combined with other selectors
 - `-Security` - run only Security Posture diagnostics unless combined with other selectors
 - `-Performance` - run only Performance Snapshot diagnostics unless combined with other selectors
+- `-Crashes` - run only Crash and Hang diagnostics unless combined with other selectors
 - `-Network` - run only network checks unless combined with other selectors
 - `-Disk` - run only disk checks unless combined with other selectors
 - `-Events` - run only Event Log diagnostics unless combined with other selectors
@@ -215,6 +217,21 @@ warns below 15% available memory, at 95% CPU, and at 80% pagefile usage.
 
 ```powershell
 pwsh -NoProfile -File .\scripts\performance-snapshot.ps1
+```
+
+### `scripts/crash-hang-diagnostics.ps1`
+
+Reports recent crash and hang metadata without reading dump contents:
+
+- Application Error, Windows Error Reporting, and Application Hang events
+- system BugCheck events
+- metadata for recent Minidump, `MEMORY.DMP`, and user CrashDumps files
+
+The defaults are seven days, 50 events, and 20 dump files. BugCheck creates an
+`ERROR` finding; application crashes, hangs, and recent dump files create `WARN`.
+
+```powershell
+pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1
 ```
 
 ### `scripts/network-check.ps1`

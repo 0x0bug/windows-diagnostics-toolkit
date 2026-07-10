@@ -130,6 +130,30 @@ Run only this module through the combined-report runner:
 pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Performance -ExportMarkdown
 ```
 
+## Crash and Hang Diagnostics
+
+`scripts/crash-hang-diagnostics.ps1` reads metadata for Application Error 1000,
+Windows Error Reporting 1001, Application Hang 1002, and system BugCheck events.
+It lists only dump-file name, timestamp, size, and source; it never reads dump
+contents.
+
+```powershell
+pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1
+```
+
+Defaults are seven days, 50 events, and 20 dump files. Use standalone parameters
+to change these bounds:
+
+```powershell
+pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1 -SinceDays 14 -MaxEvents 100 -MaxDumpFiles 10
+```
+
+Run only this module through the combined-report runner:
+
+```powershell
+pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Crashes -ExportMarkdown
+```
+
 ## Network Diagnostics
 
 `scripts/network-check.ps1` prints active network adapters, IP addresses, DNS
