@@ -1,12 +1,12 @@
 # Windows Diagnostics Toolkit
 
-![Windows Diagnostics Toolkit: read-only Windows diagnostics in under 30 seconds](site/assets/social-preview.svg)
+![Windows Diagnostics Toolkit: local read-only diagnostics](site/assets/social-preview.svg)
 
-**Generate a local Windows support report in under 30 seconds without changing the system.**
+**Generate a local Windows support report with diagnostics that are read-only by design with automated safety checks.**
 
 Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 and Windows 11. It collects security, performance, network, disk, crash, service, Event Log, time-sync, and Windows Update context into TXT and optional Markdown reports.
 
-- Read-only by design
+- Read-only by design with automated safety checks
 - No installer or third-party PowerShell modules
 - No telemetry, upload, remote collection, or automatic fixes
 - Local reports with an aggregated `OK` / `WARN` / `ERROR` findings summary
@@ -17,38 +17,32 @@ Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 
 
 ## Quick start
 
-### Interactive remote launch
+### Interactive mode
 
-Download the bootstrap script to a local file, review it if needed, and run it:
-
-```powershell
-$p="$env:TEMP\wdt-bootstrap.ps1"; irm "https://raw.githubusercontent.com/0x0bug/windows-diagnostics-toolkit/main/tools/bootstrap.ps1" -OutFile $p; & $p
-```
-
-The bootstrap downloads a temporary copy of the toolkit from the fixed GitHub repository, validates it, and removes that temporary copy when the session ends. Diagnostic reports remain local and are never uploaded. The bootstrap is a distribution layer that performs network and temporary-file operations; it is not itself described as read-only. Piping a remote script to `Invoke-Expression` is not recommended.
-
-### Interactive local launch
-
-From an existing checkout:
-
-```powershell
-.\Invoke-WindowsDiagnostics.ps1 -Interactive
-```
-
-### Command-line launch
-
-Clone the repository and run the combined diagnostics from its root:
+Clone the repository and start the toolkit without switches:
 
 ```powershell
 git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
 cd windows-diagnostics-toolkit
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1
+```
+
+Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default; the menu lets you change the selected modules and output directory.
+
+### Command-line mode
+
+Explicit module switches run diagnostics immediately without opening the TUI:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
 ```
 
 Windows PowerShell 5.1:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\Invoke-WindowsDiagnostics.ps1
 ```
 
 The one-run execution-policy bypass applies only to that process. It does not change the machine-wide policy.

@@ -89,14 +89,6 @@ jobs:
         shell: powershell
         run: .\tests\tui.tests.ps1
 
-      - name: Test bootstrap with PowerShell 7
-        shell: pwsh
-        run: .\tests\bootstrap.tests.ps1
-
-      - name: Test bootstrap with Windows PowerShell 5.1
-        shell: powershell
-        run: .\tests\bootstrap.tests.ps1
-
       - name: Test Network Context with PowerShell 7
         shell: pwsh
         run: .\tests\network-context.tests.ps1

@@ -42,13 +42,14 @@ function Test-WdtAllowedDotSource {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
     if ($CommandAst.InvocationOperator -ne [System.Management.Automation.Language.TokenKind]::Dot -or $CommandAst.CommandElements.Count -ne 1) { return $false }
     $text = $CommandAst.CommandElements[0].Extent.Text
-    $allowed = @("`$PSScriptRoot\validation-policy.ps1", "`$PSScriptRoot\report-common.ps1", "`$PSScriptRoot\scripts\report-common.ps1", "`$PSScriptRoot\scripts\tui.ps1")
+    $allowed = @("`$PSScriptRoot\validation-policy.ps1", "`$PSScriptRoot\report-common.ps1", "`$PSScriptRoot\scripts\report-common.ps1", "`$PSScriptRoot\scripts\diagnostic-catalog.ps1", "`$PSScriptRoot\scripts\tui.ps1")
     if ($text -notin $allowed) { return $false }
     $scriptsPath = [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'scripts'))
     $scriptDirectory = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptPath))
     return ($text -eq "`$PSScriptRoot\validation-policy.ps1" -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\validate.ps1')) -or
         ($text -eq "`$PSScriptRoot\report-common.ps1" -and [string]::Equals($scriptDirectory, $scriptsPath, [System.StringComparison]::OrdinalIgnoreCase)) -or
         ($text -eq "`$PSScriptRoot\scripts\report-common.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) -or
+        ($text -eq "`$PSScriptRoot\scripts\diagnostic-catalog.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) -or
         ($text -eq "`$PSScriptRoot\scripts\tui.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot))
 }
 
@@ -254,7 +255,6 @@ function Test-WdtAllowedPowerShellCommand {
     return $CommandName -in @(
         'Add-Member',
         'Confirm-SecureBootUEFI',
-        'Clear-Host',
         'ConvertFrom-Json',
         'ConvertTo-Json',
         'ForEach-Object',
@@ -288,7 +288,6 @@ function Test-WdtAllowedPowerShellCommand {
         'Measure-Object',
         'Out-Null',
         'Resolve-DnsName',
-        'Read-Host',
         'Select-Object',
         'Sort-Object',
         'Split-Path',
@@ -341,6 +340,13 @@ function Get-WdtCommandSafetyIssue {
         if (Test-WdtAllowedTuiReportInvocation $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'The report runner is only callable from the approved interactive session.'
     }
+
+    if ($leaf -in @('Read-Host', 'Clear-Host')) {
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and $CommandAst.Redirections.Count -eq 0) { return }
+        return New-WdtSafetyIssue $CommandAst 'Interactive console commands are only allowed in the TUI script.'
+    }
+
+    if ($leaf -eq 'Get-WdtDiagnosticDefinition' -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1')) { return }
 
     if ($leaf -eq 'New-Item') {
         if (Test-WdtAllowedNewItemCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
@@ -468,6 +474,9 @@ function Get-WdtSafetyIssues {
         }
         elseif ($import.CommandElements[0].Extent.Text -like '*tui.ps1') {
             Join-Path $RepositoryRoot 'scripts\tui.ps1'
+        }
+        elseif ($import.CommandElements[0].Extent.Text -like '*diagnostic-catalog.ps1') {
+            Join-Path $RepositoryRoot 'scripts\diagnostic-catalog.ps1'
         }
         else {
             Join-Path $RepositoryRoot 'scripts\report-common.ps1'

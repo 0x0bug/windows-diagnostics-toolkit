@@ -27,12 +27,12 @@ if (-not (Test-Path -LiteralPath $reportCommonPath -PathType Leaf)) {
 
 . $PSScriptRoot\scripts\report-common.ps1
 
-$tuiPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\tui.ps1'
-if (-not (Test-Path -LiteralPath $tuiPath -PathType Leaf)) {
-    throw "Missing interactive helper: $tuiPath"
+$catalogPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\diagnostic-catalog.ps1'
+if (-not (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
+    throw "Missing diagnostic catalog: $catalogPath"
 }
 
-. $PSScriptRoot\scripts\tui.ps1
+. $PSScriptRoot\scripts\diagnostic-catalog.ps1
 
 function Get-CurrentPowerShellPath {
     try {
@@ -319,7 +319,7 @@ function Protect-WdtDiagnosticResults {
 
 function Invoke-WdtReport {
     param(
-        [Parameter(Mandatory = $true)][string[]]$SelectedModules,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$SelectedModules,
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
         [bool]$ExportMarkdown,
         [bool]$PrivacyMode
@@ -327,18 +327,12 @@ function Invoke-WdtReport {
 
     $startedAt = Get-Date
     $selectedChecks = New-Object System.Collections.Generic.List[object]
-    $checkDefinitions = @(
-        [pscustomobject]@{ Name = 'System'; Title = 'System Information'; Script = 'system-info.ps1' },
-        [pscustomobject]@{ Name = 'Security'; Title = 'Security Posture'; Script = 'security-posture.ps1' },
-        [pscustomobject]@{ Name = 'Performance'; Title = 'Performance Snapshot'; Script = 'performance-snapshot.ps1' },
-        [pscustomobject]@{ Name = 'Network'; Title = 'Network Check'; Script = 'network-check.ps1' },
-        [pscustomobject]@{ Name = 'Time'; Title = 'Time Sync Diagnostics'; Script = 'time-sync-diagnostics.ps1' },
-        [pscustomobject]@{ Name = 'Disk'; Title = 'Disk Health'; Script = 'disk-health.ps1' },
-        [pscustomobject]@{ Name = 'Crashes'; Title = 'Crash and Hang Diagnostics'; Script = 'crash-hang-diagnostics.ps1' },
-        [pscustomobject]@{ Name = 'Events'; Title = 'Event Log Check'; Script = 'event-log-check.ps1' },
-        [pscustomobject]@{ Name = 'Services'; Title = 'Services Check'; Script = 'services-check.ps1' },
-        [pscustomobject]@{ Name = 'Updates'; Title = 'Windows Update Check'; Script = 'windows-update-check.ps1' }
-    )
+    $checkDefinitions = @(Get-WdtDiagnosticDefinition)
+    $knownModuleNames = @($checkDefinitions | ForEach-Object { $_.Name })
+    $unknownModuleNames = @($SelectedModules | Where-Object { $_ -notin $knownModuleNames })
+    if ($unknownModuleNames.Count -gt 0) {
+        throw ('Unknown diagnostic module(s): {0}' -f ($unknownModuleNames -join ', '))
+    }
 
     foreach ($definition in $checkDefinitions) {
         if ($definition.Name -in $SelectedModules) {
@@ -447,7 +441,6 @@ function Invoke-WdtReport {
     }
 }
 
-$allModules = @('System', 'Security', 'Performance', 'Network', 'Time', 'Disk', 'Crashes', 'Events', 'Services', 'Updates')
 $selectedModules = New-Object System.Collections.Generic.List[string]
 foreach ($selection in @(
         [pscustomobject]@{ Name = 'System'; Enabled = $System },
@@ -466,22 +459,40 @@ foreach ($selection in @(
     }
 }
 
-$hasExplicitSelection = $All -or $selectedModules.Count -gt 0
-if ($All -or (-not $Interactive -and -not $hasExplicitSelection)) {
+$hasExplicitSelection = $selectedModules.Count -gt 0
+if ($All) {
     $selectedModules = New-Object System.Collections.Generic.List[string]
-    foreach ($moduleName in $allModules) {
-        $selectedModules.Add($moduleName)
+    foreach ($definition in @(Get-WdtDiagnosticDefinition)) {
+        $selectedModules.Add($definition.Name)
     }
 }
 
-if ($Interactive) {
+$launchMode = Get-WdtLaunchMode `
+    -InteractiveRequested ([bool]$Interactive) `
+    -HasExplicitModuleSelection $hasExplicitSelection `
+    -AllRequested ([bool]$All) `
+    -IsInputRedirected ([System.Console]::IsInputRedirected)
+
+if ($launchMode -eq 'InteractiveUnavailable') {
+    Write-Host 'Interactive input is unavailable.' -ForegroundColor Red
+    Write-Host 'Use -All or select one or more diagnostic modules.'
+    exit 2
+}
+
+if ($launchMode -eq 'Interactive') {
+    $tuiPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\tui.ps1'
+    if (-not (Test-Path -LiteralPath $tuiPath -PathType Leaf)) {
+        throw "Missing interactive helper: $tuiPath"
+    }
+    . $PSScriptRoot\scripts\tui.ps1
+
     $interactiveOutputDirectory = if ($PSBoundParameters.ContainsKey('OutputDirectory')) {
         $OutputDirectory
     }
     else {
         Join-Path -Path (Get-Location).Path -ChildPath 'WindowsDiagnosticsReports'
     }
-    $initialSelection = if ($hasExplicitSelection) { @($selectedModules.ToArray()) } else { $null }
+    $initialSelection = if ($All -or $hasExplicitSelection) { @($selectedModules.ToArray()) } else { $null }
     $interactiveExitCode = Invoke-WdtInteractiveSession -InitialSelection $initialSelection -OutputDirectory $interactiveOutputDirectory
     if ($interactiveExitCode -ne 0) {
         exit $interactiveExitCode

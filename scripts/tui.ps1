@@ -1,23 +1,8 @@
 [CmdletBinding()]
 param()
 
-function Get-WdtTuiDiagnosticDefinition {
-    return @(
-        [pscustomobject]@{ Name = 'System'; Label = 'System information' },
-        [pscustomobject]@{ Name = 'Security'; Label = 'Security posture' },
-        [pscustomobject]@{ Name = 'Performance'; Label = 'Performance snapshot' },
-        [pscustomobject]@{ Name = 'Network'; Label = 'Network' },
-        [pscustomobject]@{ Name = 'Time'; Label = 'Time synchronization' },
-        [pscustomobject]@{ Name = 'Disk'; Label = 'Disk health' },
-        [pscustomobject]@{ Name = 'Crashes'; Label = 'Crashes and hangs' },
-        [pscustomobject]@{ Name = 'Events'; Label = 'Event logs' },
-        [pscustomobject]@{ Name = 'Services'; Label = 'Services and startup' },
-        [pscustomobject]@{ Name = 'Updates'; Label = 'Windows Update' }
-    )
-}
-
 function Get-WdtRecommendedSelection {
-    return @('System', 'Security', 'Performance', 'Network', 'Time', 'Disk', 'Updates')
+    return @(Get-WdtDiagnosticDefinition | Where-Object { $_.Recommended } | ForEach-Object { $_.Name })
 }
 
 function New-WdtTuiState {
@@ -30,7 +15,7 @@ function New-WdtTuiState {
     if ($null -eq $InitialSelection -or $InitialSelection.Count -eq 0) {
         $selectedNames = @(Get-WdtRecommendedSelection)
     }
-    $diagnostics = @(Get-WdtTuiDiagnosticDefinition | ForEach-Object {
+    $diagnostics = @(Get-WdtDiagnosticDefinition | ForEach-Object {
             [pscustomobject]@{
                 Name     = $_.Name
                 Label    = $_.Label
@@ -46,47 +31,8 @@ function New-WdtTuiState {
         CursorIndex    = 0
         ErrorMessage   = $null
         ExitRequested  = $false
+        ActionRequested = $null
     }
-}
-
-function Set-WdtRecommendedSelection {
-    param([Parameter(Mandatory = $true)]$State)
-
-    $recommended = @(Get-WdtRecommendedSelection)
-    foreach ($diagnostic in $State.Diagnostics) {
-        $diagnostic.Selected = $diagnostic.Name -in $recommended
-    }
-    return $State
-}
-
-function Set-WdtAllSelection {
-    param([Parameter(Mandatory = $true)]$State)
-
-    foreach ($diagnostic in $State.Diagnostics) {
-        $diagnostic.Selected = $true
-    }
-    return $State
-}
-
-function Switch-WdtDiagnosticSelection {
-    param(
-        [Parameter(Mandatory = $true)]$State,
-        [Parameter(Mandatory = $true)][string]$Name
-    )
-
-    foreach ($diagnostic in $State.Diagnostics) {
-        if ($diagnostic.Name -eq $Name) {
-            $diagnostic.Selected = -not $diagnostic.Selected
-            break
-        }
-    }
-    return $State
-}
-
-function Set-WdtTuiCancelled {
-    param([Parameter(Mandatory = $true)]$State)
-    $State.ExitRequested = $true
-    return $State
 }
 
 function Get-WdtTuiSelectedModule {
@@ -117,6 +63,73 @@ function Get-WdtTuiMenuItem {
         [pscustomobject]@{ Kind = 'Exit'; Name = 'Exit'; Label = 'Exit' }
     )
     return $items
+}
+
+function Update-WdtTuiState {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)][ValidateSet('MoveUp', 'MoveDown', 'ToggleCurrent', 'SelectCurrent', 'SelectAll', 'SelectRecommended', 'SetOutputDirectory', 'Exit')][string]$Action,
+        [string]$Value
+    )
+
+    $nextState = [pscustomobject]@{
+        Diagnostics     = @($State.Diagnostics | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Label = $_.Label; Selected = [bool]$_.Selected } })
+        PrivacyMode     = [bool]$State.PrivacyMode
+        ExportMarkdown  = [bool]$State.ExportMarkdown
+        OutputDirectory = [string]$State.OutputDirectory
+        CursorIndex     = [int]$State.CursorIndex
+        ErrorMessage    = $State.ErrorMessage
+        ExitRequested   = [bool]$State.ExitRequested
+        ActionRequested = $null
+    }
+    $items = @(Get-WdtTuiMenuItem -State $nextState)
+
+    if ($Action -eq 'MoveUp') {
+        $nextState.CursorIndex = if ($nextState.CursorIndex -le 0) { $items.Count - 1 } else { $nextState.CursorIndex - 1 }
+        return $nextState
+    }
+    if ($Action -eq 'MoveDown') {
+        $nextState.CursorIndex = if ($nextState.CursorIndex -ge $items.Count - 1) { 0 } else { $nextState.CursorIndex + 1 }
+        return $nextState
+    }
+    if ($Action -eq 'SelectAll') {
+        foreach ($diagnostic in $nextState.Diagnostics) { $diagnostic.Selected = $true }
+        return $nextState
+    }
+    if ($Action -eq 'SelectRecommended') {
+        $recommended = @(Get-WdtRecommendedSelection)
+        foreach ($diagnostic in $nextState.Diagnostics) { $diagnostic.Selected = $diagnostic.Name -in $recommended }
+        return $nextState
+    }
+    if ($Action -eq 'SetOutputDirectory') {
+        $nextState.OutputDirectory = $Value
+        return $nextState
+    }
+    if ($Action -eq 'Exit') {
+        $nextState.ExitRequested = $true
+        $nextState.ActionRequested = 'Exit'
+        return $nextState
+    }
+
+    $currentItem = $items[$nextState.CursorIndex]
+    if ($Action -eq 'ToggleCurrent' -or $Action -eq 'SelectCurrent') {
+        if ($currentItem.Kind -eq 'Diagnostic') {
+            foreach ($diagnostic in $nextState.Diagnostics) {
+                if ($diagnostic.Name -eq $currentItem.Name) { $diagnostic.Selected = -not $diagnostic.Selected; break }
+            }
+        }
+        elseif ($currentItem.Kind -eq 'Privacy') {
+            $nextState.PrivacyMode = -not $nextState.PrivacyMode
+        }
+        elseif ($currentItem.Kind -eq 'Markdown') {
+            $nextState.ExportMarkdown = -not $nextState.ExportMarkdown
+        }
+        elseif ($Action -eq 'SelectCurrent') {
+            $nextState.ActionRequested = $currentItem.Kind
+            if ($currentItem.Kind -eq 'Exit') { $nextState.ExitRequested = $true }
+        }
+    }
+    return $nextState
 }
 
 function Format-WdtTuiPath {
@@ -258,39 +271,46 @@ function Invoke-WdtInteractiveSession {
                 if ([string]::IsNullOrWhiteSpace($answer)) { $state.ErrorMessage = 'Input is required.'; continue }
                 if ($answer -match '^\d+$') {
                     $number = [int]$answer
-                    if ($number -ge 1 -and $number -le $items.Count) { $state.CursorIndex = $number - 1; $action = 'Select' }
+                    if ($number -ge 1 -and $number -le $items.Count) {
+                        while ($state.CursorIndex -ne ($number - 1)) { $state = Update-WdtTuiState -State $state -Action MoveDown }
+                        $action = 'Select'
+                    }
                 }
                 elseif ($answer -ieq 'A') { $action = 'All' }
                 elseif ($answer -ieq 'R') { $action = 'Recommended' }
-                elseif ($answer -ieq 'Run') { $state.CursorIndex = $items.Count - 2; $action = 'Select' }
+                elseif ($answer -ieq 'Run') {
+                    while ($state.CursorIndex -ne ($items.Count - 2)) { $state = Update-WdtTuiState -State $state -Action MoveDown }
+                    $action = 'Select'
+                }
                 elseif ($answer -ieq 'Exit') { $action = 'Exit' }
                 if ($null -eq $action) { $state.ErrorMessage = 'Unknown menu command.'; continue }
             }
 
             $state.ErrorMessage = $null
-            if ($action -eq 'Up') { $state.CursorIndex = if ($state.CursorIndex -le 0) { $items.Count - 1 } else { $state.CursorIndex - 1 }; continue }
-            if ($action -eq 'Down') { $state.CursorIndex = if ($state.CursorIndex -ge $items.Count - 1) { 0 } else { $state.CursorIndex + 1 }; continue }
-            if ($action -eq 'All') { $state = Set-WdtAllSelection -State $state; continue }
-            if ($action -eq 'Recommended') { $state = Set-WdtRecommendedSelection -State $state; continue }
-            if ($action -eq 'Exit') { $state = Set-WdtTuiCancelled -State $state; continue }
+            if ($action -eq 'Up') { $state = Update-WdtTuiState -State $state -Action MoveUp; continue }
+            if ($action -eq 'Down') { $state = Update-WdtTuiState -State $state -Action MoveDown; continue }
+            if ($action -eq 'All') { $state = Update-WdtTuiState -State $state -Action SelectAll; continue }
+            if ($action -eq 'Recommended') { $state = Update-WdtTuiState -State $state -Action SelectRecommended; continue }
+            if ($action -eq 'Exit') { $state = Update-WdtTuiState -State $state -Action Exit; continue }
             if ($action -notin @('Toggle', 'Select')) { continue }
 
-            $item = $items[$state.CursorIndex]
-            if ($item.Kind -eq 'Diagnostic') { $state = Switch-WdtDiagnosticSelection -State $state -Name $item.Name; continue }
-            if ($item.Kind -eq 'Privacy') { $state.PrivacyMode = -not $state.PrivacyMode; continue }
-            if ($item.Kind -eq 'Markdown') { $state.ExportMarkdown = -not $state.ExportMarkdown; continue }
-            if ($item.Kind -eq 'Output' -and $action -eq 'Select') {
+            $state = Update-WdtTuiState -State $state -Action $(if ($action -eq 'Toggle') { 'ToggleCurrent' } else { 'SelectCurrent' })
+            if ($state.ActionRequested -eq 'Output') {
                 $path = Read-Host 'Output directory'
                 if ([string]::IsNullOrWhiteSpace($path)) { $state.ErrorMessage = 'Output directory cannot be empty.'; continue }
-                try { $state.OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path) }
+                try {
+                    $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+                    $state = Update-WdtTuiState -State $state -Action SetOutputDirectory -Value $resolvedPath
+                }
                 catch { $state.ErrorMessage = $_.Exception.Message }
                 continue
             }
-            if ($item.Kind -eq 'Exit' -and $action -eq 'Select') { $state = Set-WdtTuiCancelled -State $state; continue }
-            if ($item.Kind -ne 'Run' -or $action -ne 'Select') { continue }
+            if ($state.ExitRequested) { continue }
+            if ($state.ActionRequested -ne 'Run') { continue }
 
             try {
-                $state.OutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($state.OutputDirectory)
+                $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($state.OutputDirectory)
+                $state = Update-WdtTuiState -State $state -Action SetOutputDirectory -Value $resolvedPath
             }
             catch {
                 $state.ErrorMessage = ("Invalid output directory: {0}" -f $_.Exception.Message)
