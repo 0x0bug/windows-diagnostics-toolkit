@@ -3,7 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
-. (Join-Path -Path $PSScriptRoot -ChildPath 'report-common.ps1')
+. $PSScriptRoot\report-common.ps1
 
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)

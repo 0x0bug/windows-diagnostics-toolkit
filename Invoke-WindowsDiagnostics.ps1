@@ -24,7 +24,7 @@ if (-not (Test-Path -LiteralPath $reportCommonPath -PathType Leaf)) {
     throw "Missing report helper: $reportCommonPath"
 }
 
-. $reportCommonPath
+. $PSScriptRoot\scripts\report-common.ps1
 
 function Get-CurrentPowerShellPath {
     try {

@@ -42,55 +42,6 @@ function Get-ProductionScript {
     return @($scripts.ToArray())
 }
 
-function Test-AllowedNewItemCommand {
-    param(
-        [Parameter(Mandatory = $true)][System.Management.Automation.Language.CommandAst]$CommandAst,
-        [Parameter(Mandatory = $true)][string]$ScriptPath,
-        [Parameter(Mandatory = $true)][string]$RepositoryRoot
-    )
-
-    $entrypointPath = [System.IO.Path]::GetFullPath((Join-Path -Path $RepositoryRoot -ChildPath 'Invoke-WindowsDiagnostics.ps1'))
-    $currentScriptPath = [System.IO.Path]::GetFullPath($ScriptPath)
-    if (-not [string]::Equals($currentScriptPath, $entrypointPath, [System.StringComparison]::OrdinalIgnoreCase)) {
-        return $false
-    }
-
-    $elements = @($CommandAst.CommandElements)
-    $hasDirectoryItemType = $false
-    $hasOutputDirectoryPath = $false
-    $hasForce = $false
-
-    for ($index = 0; $index -lt $elements.Count; $index++) {
-        $element = $elements[$index]
-        if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) {
-            continue
-        }
-
-        if ($element.ParameterName -eq 'Force') {
-            $hasForce = $true
-            continue
-        }
-
-        if ($index + 1 -ge $elements.Count) {
-            continue
-        }
-
-        $nextElement = $elements[$index + 1]
-        if ($element.ParameterName -eq 'ItemType' -and $nextElement.Extent.Text.Trim("'`"") -eq 'Directory') {
-            $hasDirectoryItemType = $true
-            continue
-        }
-
-        if ($element.ParameterName -eq 'Path' -and
-            $nextElement -is [System.Management.Automation.Language.VariableExpressionAst] -and
-            $nextElement.VariablePath.UserPath -eq 'resolvedOutputDirectory') {
-            $hasOutputDirectoryPath = $true
-        }
-    }
-
-    return ($hasDirectoryItemType -and $hasOutputDirectoryPath -and $hasForce)
-}
-
 function Get-ParserIssue {
     param(
         [Parameter(Mandatory = $true)]$ParseErrors,
@@ -116,114 +67,14 @@ function Get-SafetyIssue {
         [Parameter(Mandatory = $true)][string]$RepositoryRoot
     )
 
-    $forbiddenExactCommands = @{}
-    foreach ($commandName in @(
-        'Invoke-Expression',
-        'iex',
-        'Invoke-WebRequest',
-        'iwr',
-        'Invoke-RestMethod',
-        'irm',
-        'Start-Process',
-        'Start-Service',
-        'Stop-Service',
-        'Restart-Service',
-        'Set-Service',
-        'New-Service',
-        'Remove-Service',
-        'Set-ItemProperty',
-        'New-ItemProperty',
-        'Remove-ItemProperty',
-        'Remove-Item',
-        'Clear-EventLog',
-        'wevtutil',
-        'wevtutil.exe',
-        'reg',
-        'reg.exe',
-        'netsh',
-        'netsh.exe',
-        'w32tm',
-        'w32tm.exe',
-        'sc',
-        'sc.exe',
-        'bcdedit',
-        'bcdedit.exe',
-        'powercfg',
-        'powercfg.exe'
-    )) {
-        $forbiddenExactCommands[$commandName] = $true
-    }
-
-    $forbiddenPrefixes = @(
-        'Install-*',
-        'Update-*',
-        'Reset-*',
-        'Enable-*',
-        'Disable-*',
-        'Clear-*'
-    )
-
-    $commandAsts = $Ast.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.CommandAst]
-        }, $true)
-
-    foreach ($commandAst in @($commandAsts)) {
-        $rawCommandName = $commandAst.GetCommandName()
-        if ([string]::IsNullOrWhiteSpace($rawCommandName)) {
-            continue
-        }
-
-        $commandName = Split-Path -Path ($rawCommandName -replace '/', '\') -Leaf
-        $commandAlias = Get-Alias -Name $commandName -ErrorAction SilentlyContinue | Where-Object { $_.Name -eq $commandName } | Select-Object -First 1
-        if ($null -ne $commandAlias) {
-            $commandName = $commandAlias.ResolvedCommandName
-        }
-
-        $isForbidden = $false
-        $reason = $null
-
-        if ($commandName -eq 'New-Item') {
-            if (-not (Test-AllowedNewItemCommand -CommandAst $commandAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot)) {
-                $isForbidden = $true
-                $reason = 'New-Item is only allowed in Invoke-WindowsDiagnostics.ps1 for -OutputDirectory creation.'
-            }
-        }
-        elseif ($commandName -eq 'w32tm.exe') {
-            if (-not (Test-WdtAllowedW32tmCommand -CommandAst $commandAst)) {
-                $isForbidden = $true
-                $reason = 'Only w32tm.exe /query /source and w32tm.exe /query /status /verbose are allowed.'
-            }
-        }
-        elseif ($commandName -eq 'netsh.exe') {
-            if (-not (Test-WdtAllowedNetshCommand -CommandAst $commandAst)) {
-                $isForbidden = $true
-                $reason = 'Only netsh.exe winhttp show proxy is allowed.'
-            }
-        }
-        elseif ($forbiddenExactCommands.ContainsKey($commandName)) {
-            $isForbidden = $true
-            $reason = 'Forbidden command.'
-        }
-        else {
-            foreach ($prefix in $forbiddenPrefixes) {
-                if ($commandName -like $prefix) {
-                    $isForbidden = $true
-                    $reason = "Forbidden command prefix: $prefix"
-                    break
-                }
-            }
-        }
-
-        if ($isForbidden) {
-            [pscustomobject]@{
-                Type    = 'Safety'
-                Path    = Get-RelativeDisplayPath -BasePath $RepositoryRoot -TargetPath $ScriptPath
-                Line    = $commandAst.Extent.StartLineNumber
-                Column  = $commandAst.Extent.StartColumnNumber
-                Command = $rawCommandName
-                Message = $reason
-            }
+    foreach ($issue in @(Get-WdtSafetyIssues -Ast $Ast -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot)) {
+        [pscustomobject]@{
+            Type    = $issue.Type
+            Path    = Get-RelativeDisplayPath -BasePath $RepositoryRoot -TargetPath $ScriptPath
+            Line    = $issue.Line
+            Column  = $issue.Column
+            Command = $issue.Command
+            Message = $issue.Message
         }
     }
 }
@@ -291,7 +142,7 @@ if (-not (Test-Path -LiteralPath $validationPolicyPath -PathType Leaf)) {
     throw "Validation policy is missing: $validationPolicyPath"
 }
 
-. $validationPolicyPath
+. $PSScriptRoot\validation-policy.ps1
 
 $productionScripts = @(Get-ProductionScript -RepositoryRoot $repositoryRoot)
 $parserIssues = New-Object System.Collections.Generic.List[object]
