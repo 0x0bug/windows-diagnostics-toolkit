@@ -99,6 +99,11 @@ foreach ($size in @(@(39, 18), @(40, 17), @(20, 10), @(5, 5))) {
 }
 Assert-True ($normalLayout.Lines.Count -le 25) 'Normal TUI exceeds a 25-row terminal.'
 Assert-True ($compactLayout.Lines.Count -le 18) 'Compact TUI exceeds its minimum supported height.'
+$compactErrorState = Update-WdtTuiState -State $renderState -Action MoveDown
+$compactErrorState.ErrorMessage = 'Sample compact error'
+$compactErrorLayout = Get-WdtTuiLayout -State $compactErrorState -Width 40 -Height 18
+Assert-True ($compactErrorLayout.Lines.Count -le 18) 'Compact TUI with an error exceeds its minimum supported height.'
+Assert-True ((@($compactErrorLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('Error: Sample compact error')) 'Compact TUI hides its error message.'
 Assert-Equal 3 @($normalLayout.Lines | Select-Object -First 3).Count 'Normal TUI logo must have three lines.'
 foreach ($logoLine in @($normalLayout.Lines | Select-Object -First 3)) {
     $logoText = ConvertTo-WdtTuiPlainText -Line $logoLine
@@ -139,11 +144,39 @@ for ($move = 0; $move -lt 14; $move++) { $lastItemState = Update-WdtTuiState -St
 $lastCompact = Get-WdtTuiLayout -State $lastItemState -Width 40 -Height 18
 Assert-True ($lastItemState.CursorIndex -ge $lastCompact.Viewport.Start -and $lastItemState.CursorIndex -le $lastCompact.Viewport.End) 'Active item is outside the compact viewport.'
 Assert-True ((@($lastCompact.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('Exit')) 'Exit is unreachable in compact viewport.'
+$middleItemState = $renderState
+for ($move = 0; $move -lt 7; $move++) { $middleItemState = Update-WdtTuiState -State $middleItemState -Action MoveDown }
+$middleCompact = Get-WdtTuiLayout -State $middleItemState -Width 40 -Height 18
+Assert-True ($middleItemState.CursorIndex -ge $middleCompact.Viewport.Start -and $middleItemState.CursorIndex -le $middleCompact.Viewport.End) 'Middle compact cursor is outside the viewport.'
+$firstCompact = Get-WdtTuiLayout -State $renderState -Width 40 -Height 18
+Assert-True ($renderState.CursorIndex -ge $firstCompact.Viewport.Start -and $renderState.CursorIndex -le $firstCompact.Viewport.End) 'First compact cursor is outside the viewport.'
 $runState = $renderState
 for ($move = 0; $move -lt 13; $move++) { $runState = Update-WdtTuiState -State $runState -Action MoveDown }
 Assert-True ((@((Get-WdtTuiLayout -State $runState -Width 40 -Height 18).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('Run diagnostics')) 'Run is unreachable in compact viewport.'
 $tooSmallText = @((Get-WdtTuiLayout -State $renderState -Width 20 -Height 10).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
 Assert-True ($tooSmallText.Contains('20x10')) 'TooSmall layout does not report the current size.'
+Assert-Equal 'Exit' (ConvertTo-WdtTuiFallbackAction -Answer 'Exit') 'TooSmall fallback Exit was not recognized.'
+Assert-Equal $null (ConvertTo-WdtTuiFallbackAction -Answer '') 'TooSmall fallback Enter should only redraw.'
+
+$longLabelItem = [pscustomobject]@{ Kind = 'Diagnostic'; Name = 'System'; Label = ('L' * 120) }
+foreach ($width in @(40, 10, 6, 5, 1)) {
+    $longLabelLine = New-WdtTuiMenuLine -State $renderState -Item $longLabelItem -Index 0 -Width $width -ShowItemNumbers $false
+    Assert-True ((ConvertTo-WdtTuiPlainText -Line $longLabelLine).Length -le $width) ("Long menu line exceeds width {0}." -f $width)
+}
+
+$numberedFirst = Get-WdtTuiLayout -State $renderState -Width 40 -Height 18 -ShowItemNumbers $true
+$numberedFirstText = @($numberedFirst.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True ($numberedFirstText.Contains('1.')) 'Numbered fallback does not number the first item.'
+$numberedMiddle = Get-WdtTuiLayout -State $lastItemState -Width 40 -Height 18 -ShowItemNumbers $true
+$numberedMiddleText = @($numberedMiddle.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True ($numberedMiddleText.Contains('15.')) 'Numbered fallback does not preserve global viewport numbers.'
+Assert-True ($numberedMiddleText.Contains('14.')) 'Numbered fallback does not number Run.'
+Assert-True (-not $compactScreen.Contains('1.')) 'Keyboard layout unexpectedly displays item numbers.'
+$runIndex = Get-WdtTuiMenuIndex -State $renderState -Kind 'Run'
+$numberAction = ConvertTo-WdtTuiFallbackMenuAction -Answer '15' -VisibleIndexes $numberedMiddle.VisibleIndexes -RunIndex $runIndex
+Assert-Equal 'Select' $numberAction.Action 'Visible number did not select an item.'
+Assert-Equal 14 $numberAction.Index 'Visible number did not map to the global cursor index.'
+Assert-Equal $null (ConvertTo-WdtTuiFallbackMenuAction -Answer '15' -VisibleIndexes @(0, 1) -RunIndex $runIndex) 'Hidden item number was accepted.'
 
 $parameters = ConvertTo-WdtReportParameters -State $renderState
 Assert-Equal @(Get-WdtTuiSelectedModule -State $renderState).Count @($parameters.SelectedModules).Count 'Selected modules were not preserved in report parameters.'
