@@ -3,55 +3,144 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Windows Diagnostics Toolkit — read-only Windows support reports</title>
-  <meta name="description" content="Generate a local Windows security, performance, network, crash, disk, service, Event Log, time-sync, and update report in under 30 seconds without changing the system.">
-  <meta name="robots" content="index,follow">
+  <title>Windows Diagnostics Tool for PowerShell | WDT</title>
+  <meta name="description" content="Generate a local Windows 10/11 diagnostic report for security, crashes, performance, network, disks, services and updates without changing the system.">
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
+  <meta name="theme-color" content="#0a0f18">
   <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/">
   <link rel="stylesheet" href="assets/style.css">
+
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Windows Diagnostics Toolkit">
-  <meta property="og:description" content="Read-only Windows diagnostics in under 30 seconds. Local reports, no telemetry, optional Privacy Mode.">
+  <meta property="og:site_name" content="Windows Diagnostics Toolkit">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="Windows Diagnostics Tool for PowerShell">
+  <meta property="og:description" content="Read-only Windows 10/11 diagnostics with local reports, no telemetry and optional Privacy Mode.">
   <meta property="og:url" content="https://0x0bug.github.io/windows-diagnostics-toolkit/">
   <meta property="og:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg">
+  <meta property="og:image:alt" content="Windows Diagnostics Toolkit — read-only PowerShell diagnostics">
+
   <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Windows Diagnostics Tool for PowerShell">
+  <meta name="twitter:description" content="Generate a local Windows support report without changing system settings or uploading data.">
+  <meta name="twitter:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg">
+  <meta name="twitter:image:alt" content="Windows Diagnostics Toolkit — read-only PowerShell diagnostics">
+
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "Windows Diagnostics Toolkit",
-    "applicationCategory": "UtilitiesApplication",
-    "operatingSystem": "Windows 10, Windows 11",
-    "softwareRequirements": "Windows PowerShell 5.1 or PowerShell 7",
-    "isAccessibleForFree": true,
-    "license": "https://opensource.org/license/mit",
-    "downloadUrl": "https://github.com/0x0bug/windows-diagnostics-toolkit",
-    "codeRepository": "https://github.com/0x0bug/windows-diagnostics-toolkit",
-    "description": "Read-only PowerShell diagnostics that generate local Windows support reports without changing system settings."
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://0x0bug.github.io/windows-diagnostics-toolkit/#website",
+        "url": "https://0x0bug.github.io/windows-diagnostics-toolkit/",
+        "name": "Windows Diagnostics Toolkit",
+        "description": "Open-source read-only Windows diagnostics and troubleshooting guides.",
+        "inLanguage": "en"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://0x0bug.github.io/windows-diagnostics-toolkit/#software",
+        "url": "https://0x0bug.github.io/windows-diagnostics-toolkit/",
+        "name": "Windows Diagnostics Toolkit",
+        "applicationCategory": "UtilitiesApplication",
+        "applicationSubCategory": "Windows system diagnostics",
+        "operatingSystem": ["Windows 10", "Windows 11"],
+        "softwareRequirements": "Windows PowerShell 5.1 or PowerShell 7",
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        },
+        "license": "https://opensource.org/license/mit",
+        "downloadUrl": "https://github.com/0x0bug/windows-diagnostics-toolkit/releases",
+        "codeRepository": "https://github.com/0x0bug/windows-diagnostics-toolkit",
+        "author": {
+          "@type": "Person",
+          "name": "0x0bug",
+          "url": "https://github.com/0x0bug"
+        },
+        "image": "https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg",
+        "featureList": [
+          "Read-only Windows diagnostics",
+          "Local TXT and Markdown reports",
+          "Security posture checks",
+          "Performance and memory snapshot",
+          "Network, DNS, route and proxy context",
+          "Crash, hang and Event Log diagnostics",
+          "Privacy Mode for shared reports"
+        ],
+        "description": "A dependency-free PowerShell toolkit that generates local Windows 10 and Windows 11 support reports without changing system settings.",
+        "mainEntityOfPage": {
+          "@id": "https://0x0bug.github.io/windows-diagnostics-toolkit/#website"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://0x0bug.github.io/windows-diagnostics-toolkit/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Does Windows Diagnostics Toolkit change Windows settings?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. The production diagnostics are designed to collect and report state without applying fixes, changing services, editing the registry or reconfiguring the network."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does the toolkit upload diagnostic data?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Reports are written to a local folder selected by the user. The toolkit has no telemetry or automatic upload feature."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need administrator rights?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Most checks can run without elevation, although Windows may expose less detail for some security, storage and event sources."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I share the generated report?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Use the combined runner with Privacy Mode, then review the report manually before posting it publicly."
+            }
+          }
+        ]
+      }
+    ]
   }
   </script>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <header>
   <nav class="wrap" aria-label="Primary navigation">
     <a class="brand" href="./">Windows Diagnostics Toolkit</a>
     <div class="nav-links">
       <a href="#checks">Checks</a>
       <a href="#privacy">Privacy</a>
-      <a href="cases/">Cases</a>
+      <a href="cases/">Troubleshooting guides</a>
       <a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a>
     </div>
   </nav>
 </header>
 
-<main>
+<main id="main-content">
   <section class="hero wrap">
     <div>
       <div class="eyebrow">Open source · PowerShell · Windows 10/11</div>
-      <h1>Diagnose Windows without changing it.</h1>
-      <p class="lead">Generate a local support report covering security, performance, networking, crashes, disks, services, Event Logs, time synchronization, and Windows Update. A full run typically completes in under 30 seconds.</p>
+      <h1>A read-only Windows diagnostics tool for PowerShell</h1>
+      <p class="lead">Generate a local support report covering security, performance, networking, crashes, disks, services, Event Logs, time synchronization and Windows Update. A typical full run completes in about 30 seconds.</p>
       <div class="actions">
-        <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit">Get the toolkit</a>
-        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/report-example.md">View example report</a>
+        <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start">Run the diagnostics</a>
+        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/report-example.md">View an example report</a>
+        <a class="button" href="cases/windows-diagnostic-report-for-tech-support.html">Support report guide</a>
       </div>
     </div>
     <div class="terminal" aria-label="PowerShell quick start">
@@ -66,15 +155,15 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
   <section id="checks">
     <div class="wrap">
       <div class="eyebrow">One report, ten diagnostic areas</div>
-      <h2>Useful context before guesswork</h2>
-      <p class="section-intro">The report starts with an aggregated findings summary and keeps the detailed raw diagnostic context below it.</p>
+      <h2>Windows troubleshooting context before guesswork</h2>
+      <p class="section-intro">The report starts with an aggregated findings summary and keeps the detailed diagnostic context below it. Run every module or select only the area relevant to the problem.</p>
       <div class="grid">
-        <article class="card"><h3>System and performance</h3><p>Windows build, CPU, memory, GPU, uptime, pagefile, CPU snapshot, and top processes.</p></article>
-        <article class="card"><h3>Security posture</h3><p>Microsoft Defender, Windows Firewall, Secure Boot, TPM, and BitLocker status.</p></article>
-        <article class="card"><h3>Network context</h3><p>Adapters, DHCP, DNS, gateways, routes, proxy settings, and basic reachability checks.</p></article>
-        <article class="card"><h3>Crashes and Event Logs</h3><p>Application failures, hangs, BugCheck events, dump metadata, and recent critical errors.</p></article>
-        <article class="card"><h3>Disk and services</h3><p>Physical disk health, free space, automatic services not running, startup, and scheduled tasks.</p></article>
-        <article class="card"><h3>Time and updates</h3><p>W32Time status, timezone, configured source, reboot indicators, recent updates, and update services.</p></article>
+        <article class="card"><h3>System and performance</h3><p>Windows build, CPU, memory, GPU, uptime, pagefile, CPU snapshot and top processes.</p><a href="cases/windows-high-memory-usage.html">Diagnose high memory usage</a></article>
+        <article class="card"><h3>Security posture</h3><p>Microsoft Defender, Windows Firewall, Secure Boot, TPM and BitLocker status.</p><a href="cases/windows-firewall-disabled.html">Check disabled firewall profiles</a></article>
+        <article class="card"><h3>Network context</h3><p>Adapters, DHCP, DNS, gateways, routes, proxy settings and basic reachability checks.</p><a href="cases/windows-network-routes.html">Inspect routes and proxy settings</a></article>
+        <article class="card"><h3>Crashes and Event Logs</h3><p>Application failures, hangs, BugCheck events, dump metadata and recent critical errors.</p><a href="cases/windows-application-crashes.html">Find repeated application crashes</a></article>
+        <article class="card"><h3>Disk and free space</h3><p>Physical disk health, volume size and configurable low-free-space warnings.</p><a href="cases/windows-disk-health-low-space.html">Check disk health and space</a></article>
+        <article class="card"><h3>Time and Windows Update</h3><p>W32Time status, configured source, reboot indicators, recent updates and update services.</p><a href="cases/windows-update-pending-reboot.html">Check pending reboot indicators</a></article>
       </div>
     </div>
   </section>
@@ -86,8 +175,8 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
       <ul class="status-list">
         <li><strong>Read-only:</strong><span>The production scripts collect diagnostic state and do not apply fixes or configuration changes.</span></li>
         <li><strong>No telemetry:</strong><span>Reports stay in the output directory selected by the user. Nothing is uploaded.</span></li>
-        <li><strong>Privacy Mode:</strong><span>Computer names, users, paths, addresses, MACs, SIDs, GUIDs, and device identifiers are replaced with typed tokens in combined reports.</span></li>
-        <li><strong>Auditable:</strong><span>The source, validation policy, and dependency-free tests are public on GitHub.</span></li>
+        <li><strong>Privacy Mode:</strong><span>Common identifying values are replaced with stable typed tokens in combined reports.</span></li>
+        <li><strong>Auditable:</strong><span>The source, validation policy and dependency-free tests are public on GitHub.</span></li>
       </ul>
       <div class="callout"><strong>Before posting a report publicly:</strong> run the combined wrapper with <code>-PrivacyMode</code> and still review the final file manually.</div>
     </div>
@@ -95,13 +184,30 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
 
   <section>
     <div class="wrap">
-      <div class="eyebrow">Troubleshooting examples</div>
-      <h2>Start from the symptom</h2>
+      <div class="eyebrow">Search by symptom</div>
+      <h2>Practical Windows troubleshooting guides</h2>
+      <p class="section-intro">Each guide explains which read-only module to run, what evidence it collects, how to interpret the report and what the toolkit intentionally does not change.</p>
       <div class="grid">
-        <article class="card"><h3>Windows application keeps crashing</h3><p>Locate recent Application Error, WER, hang, BugCheck, and dump metadata.</p><a href="cases/windows-application-crashes.html">Read the case</a></article>
-        <article class="card"><h3>Windows Firewall is disabled</h3><p>Check all firewall profiles together with Defender, Secure Boot, TPM, and BitLocker.</p><a href="cases/windows-firewall-disabled.html">Read the case</a></article>
-        <article class="card"><h3>Windows time source is unavailable</h3><p>Inspect W32Time service state, timezone, source, verbose status, and optional events.</p><a href="cases/windows-time-service-stopped.html">Read the case</a></article>
-        <article class="card"><h3>Unexpected network route or proxy</h3><p>See which default route wins and compare adapter, gateway, DNS, DHCP, and proxy context.</p><a href="cases/windows-network-routes.html">Read the case</a></article>
+        <article class="card"><h3>Collect a Windows diagnostic report</h3><p>Create one redacted TXT and Markdown report for a support request.</p><a href="cases/windows-diagnostic-report-for-tech-support.html">Open the support report guide</a></article>
+        <article class="card"><h3>Windows application keeps crashing</h3><p>Locate recent Application Error, WER, hang, BugCheck and dump metadata.</p><a href="cases/windows-application-crashes.html">Open the crash guide</a></article>
+        <article class="card"><h3>Windows is using too much memory</h3><p>Compare available memory, pagefile use and top processes without continuous monitoring.</p><a href="cases/windows-high-memory-usage.html">Open the memory guide</a></article>
+        <article class="card"><h3>Windows Update may need a restart</h3><p>Inspect recent updates, reboot indicators and update-service state.</p><a href="cases/windows-update-pending-reboot.html">Open the update guide</a></article>
+        <article class="card"><h3>Windows Time service is stopped</h3><p>Inspect W32Time state, timezone, source, verbose status and optional events.</p><a href="cases/windows-time-service-stopped.html">Open the time guide</a></article>
+        <article class="card"><h3>Unexpected route or proxy</h3><p>Compare route metrics, adapters, gateways, DNS, DHCP and proxy context.</p><a href="cases/windows-network-routes.html">Open the network guide</a></article>
+      </div>
+      <div class="actions"><a class="button" href="cases/">Browse all troubleshooting guides</a></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <div class="eyebrow">Common questions</div>
+      <h2>Windows Diagnostics Toolkit FAQ</h2>
+      <div class="faq">
+        <details><summary>Does the toolkit change Windows settings?</summary><p>No. The production scripts are designed to collect and report state without applying automatic fixes, changing services, editing the registry or reconfiguring the network.</p></details>
+        <details><summary>Does it upload diagnostic data?</summary><p>No. Reports remain local. The project has no telemetry, remote collection or automatic upload feature.</p></details>
+        <details><summary>Does it require administrator rights?</summary><p>Most checks work without elevation. Some Windows sources may return less detail when the current user does not have permission to read them.</p></details>
+        <details><summary>What should I run before sharing a report?</summary><p>Use <code>-All -PrivacyMode -ExportMarkdown</code>, then inspect the final file and remove any remaining information you do not want to publish.</p></details>
       </div>
     </div>
   </section>
@@ -110,7 +216,7 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
     <div class="wrap">
       <div class="eyebrow">No installer required</div>
       <h2>Run it, read the findings, keep the report.</h2>
-      <p class="section-intro">Use the complete toolkit, select only the modules relevant to a support case, or run individual scripts. Windows PowerShell 5.1 and PowerShell 7 are both supported.</p>
+      <p class="section-intro">Use the complete toolkit, select only the modules relevant to a support case or run individual scripts. Windows PowerShell 5.1 and PowerShell 7 are both supported.</p>
       <div class="actions">
         <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start">Quick start</a>
         <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/usage.md">Detailed usage</a>
