@@ -3,14 +3,136 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Diagnose a stopped Windows Time service — Windows Diagnostics Toolkit</title>
-  <meta name="description" content="Inspect W32Time service state, timezone, local and UTC time, source, status, and optional events without changing time configuration.">
+  <title>Diagnose a Stopped Windows Time Service with PowerShell | WDT</title>
+  <meta name="description" content="Inspect W32Time service state, start mode, timezone, local and UTC time, configured source and recent events without changing Windows time settings.">
+  <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1">
+  <meta name="theme-color" content="#0a0f18">
   <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-time-service-stopped.html">
   <link rel="stylesheet" href="../assets/style.css">
+
+  <meta property="og:type" content="article">
+  <meta property="og:site_name" content="Windows Diagnostics Toolkit">
+  <meta property="og:locale" content="en_US">
+  <meta property="og:title" content="Diagnose a Stopped Windows Time Service with PowerShell">
+  <meta property="og:description" content="Inspect W32Time context without starting the service or requesting resynchronization.">
+  <meta property="og:url" content="https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-time-service-stopped.html">
+  <meta property="og:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg">
+  <meta property="og:image:alt" content="Windows Diagnostics Toolkit time synchronization guide">
+  <meta property="article:section" content="Windows troubleshooting">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Diagnose a Stopped Windows Time Service with PowerShell">
+  <meta name="twitter:description" content="Read-only checks for W32Time service state, source, status, clock values and recent events.">
+  <meta name="twitter:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "TechArticle",
+        "headline": "Diagnose a stopped Windows Time service with PowerShell",
+        "description": "How to inspect Windows Time service state, configured source and synchronization context without changing time configuration.",
+        "url": "https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-time-service-stopped.html",
+        "mainEntityOfPage": "https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-time-service-stopped.html",
+        "author": {"@type": "Person", "name": "0x0bug", "url": "https://github.com/0x0bug"},
+        "publisher": {"@type": "Person", "name": "0x0bug", "url": "https://github.com/0x0bug"},
+        "isPartOf": {"@id": "https://0x0bug.github.io/windows-diagnostics-toolkit/#website"},
+        "about": ["Windows Time service", "W32Time", "time synchronization", "PowerShell diagnostics"],
+        "inLanguage": "en"
+      },
+      {
+        "@type": "BreadcrumbList",
+        "itemListElement": [
+          {"@type": "ListItem", "position": 1, "name": "Windows Diagnostics Toolkit", "item": "https://0x0bug.github.io/windows-diagnostics-toolkit/"},
+          {"@type": "ListItem", "position": 2, "name": "Troubleshooting guides", "item": "https://0x0bug.github.io/windows-diagnostics-toolkit/cases/"},
+          {"@type": "ListItem", "position": 3, "name": "Windows Time service", "item": "https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-time-service-stopped.html"}
+        ]
+      }
+    ]
+  }
+  </script>
 </head>
 <body>
-<header><nav class="wrap"><a class="brand" href="../">Windows Diagnostics Toolkit</a><div class="nav-links"><a href="./">Cases</a><a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a></div></nav></header>
-<main><section class="wrap"><div class="eyebrow">Troubleshooting case</div><h1>Windows Time service is stopped</h1><p class="lead">Inspect time-service context without starting the service, changing peers, or requesting resynchronization.</p><pre><code>pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Time -PrivacyMode -ExportMarkdown</code></pre><div class="grid"><article class="card"><h3>What it checks</h3><p>W32Time state and start mode, domain membership, timezone, local and UTC clock, configured source, and verbose status.</p></article><article class="card"><h3>Optional evidence</h3><p>The standalone module can include recent Time-Service warning and error events.</p></article></div><h2>Interpretation</h2><p>A stopped service can be normal on a non-domain computer until Windows needs it. Use the source, status, domain context, and events together rather than treating service state alone as a failure.</p><p><a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit">Open the project on GitHub</a></p></section></main>
-<footer><div class="wrap">No time-service configuration or resynchronization is performed.</div></footer>
+<a class="skip-link" href="#main-content">Skip to content</a>
+<header>
+  <nav class="wrap" aria-label="Primary navigation">
+    <a class="brand" href="../">Windows Diagnostics Toolkit</a>
+    <div class="nav-links"><a href="./">Guides</a><a href="../#checks">Checks</a><a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a></div>
+  </nav>
+</header>
+<main id="main-content">
+  <div class="article breadcrumb" aria-label="Breadcrumb"><a href="../">Home</a><span aria-hidden="true">/</span><a href="./">Guides</a><span aria-hidden="true">/</span><span>Windows Time service</span></div>
+  <article class="article">
+    <div class="eyebrow">Windows time synchronization</div>
+    <h1>Diagnose a stopped Windows Time service with PowerShell</h1>
+    <p class="lead">Inspect W32Time state, start mode, timezone, local and UTC clock values, configured source, verbose status and optional events without starting the service or changing its configuration.</p>
+    <p class="article-meta">Windows 10 and Windows 11 · Windows PowerShell 5.1 or PowerShell 7 · Read-only</p>
+
+    <div class="toc"><strong>On this page</strong><ul><li><a href="#command">Command to run</a></li><li><a href="#checks">What the report checks</a></li><li><a href="#interpretation">How to interpret a stopped service</a></li><li><a href="#limits">Limits and next steps</a></li></ul></div>
+
+    <h2 id="command">Run the Windows Time diagnostic</h2>
+    <pre><code>pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
+  -Time -PrivacyMode -ExportMarkdown</code></pre>
+    <p>The combined report summarizes the current time-service context. For additional event evidence, the standalone module can include recent Time-Service warnings and errors:</p>
+    <pre><code>pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 `
+  -IncludeTimeServiceEvents</code></pre>
+
+    <h2>When this guide is useful</h2>
+    <ul class="checklist">
+      <li>The Windows clock is visibly incorrect or changes after reboot.</li>
+      <li>A domain sign-in, certificate, browser or update problem may be related to time drift.</li>
+      <li>The Windows Time service appears stopped and you need context before treating it as a fault.</li>
+      <li>A support engineer asks for the configured time source and W32Time status.</li>
+    </ul>
+
+    <h2 id="checks">What the report checks</h2>
+    <div class="article-grid">
+      <section class="card"><h3>Service state</h3><p>Current W32Time status and start mode, including whether the computer is domain joined.</p></section>
+      <section class="card"><h3>Clock context</h3><p>Timezone plus current local and UTC values to make obvious offsets or display confusion easier to spot.</p></section>
+      <section class="card"><h3>Configured source</h3><p>The source reported by <code>w32tm.exe /query /source</code>, collected without changing peers or requesting synchronization.</p></section>
+      <section class="card"><h3>Verbose status and events</h3><p>Read-only status details and optional recent Time-Service warning or error events.</p></section>
+    </div>
+
+    <h2 id="interpretation">How to interpret a stopped Windows Time service</h2>
+    <h3>A stopped service is not always an error</h3>
+    <p>On a non-domain computer, Windows may start the time service when needed rather than keeping it continuously active. Service state should be considered together with start mode, source, status and recent events.</p>
+    <h3>Domain membership changes the expectation</h3>
+    <p>Domain-joined systems normally depend on the domain time hierarchy. A stopped service or unavailable source on such a machine deserves closer review than the same state on an isolated home computer.</p>
+    <h3>Check the reported source</h3>
+    <p>A local hardware clock, unavailable source or unexpected provider can explain why synchronization is not occurring. The source alone is not a complete diagnosis, but it narrows the investigation.</p>
+    <h3>Separate timezone errors from synchronization errors</h3>
+    <p>A correct UTC clock with an incorrect timezone can look like time drift to the user. Compare both local and UTC values before assuming the synchronization service is at fault.</p>
+
+    <div class="callout"><strong>Read-only boundary:</strong> the toolkit never runs a resynchronization command, changes peers, starts or stops W32Time, or edits time-service configuration.</div>
+
+    <h2 id="limits">What the toolkit does not do</h2>
+    <ul>
+      <li>It does not correct the clock or timezone.</li>
+      <li>It does not configure an NTP server or domain time source.</li>
+      <li>It does not start, stop or restart the Windows Time service.</li>
+      <li>It does not prove that an upstream time source is accurate.</li>
+    </ul>
+
+    <h2>Reasonable next steps</h2>
+    <ol>
+      <li>Compare local time, UTC time and timezone in the report.</li>
+      <li>Check whether the computer is domain joined and whether the reported source matches the expected environment.</li>
+      <li>Review recent Time-Service events if the source is unavailable or the clock repeatedly drifts.</li>
+      <li>Apply any configuration change only through documented Windows or organization procedures.</li>
+    </ol>
+
+    <h2>Related Windows troubleshooting guides</h2>
+    <div class="related-links">
+      <a href="windows-update-pending-reboot.html">Check update and reboot indicators</a>
+      <a href="windows-network-routes.html">Inspect network routes and proxy settings</a>
+      <a href="windows-diagnostic-report-for-tech-support.html">Collect a complete support report</a>
+      <a href="windows-firewall-disabled.html">Check Windows security posture</a>
+    </div>
+
+    <div class="actions"><a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start">Open the toolkit on GitHub</a><a class="button" href="./">Browse all guides</a></div>
+  </article>
+</main>
+<footer><div class="wrap">No Windows Time configuration or resynchronization is performed.</div></footer>
 </body>
 </html>
