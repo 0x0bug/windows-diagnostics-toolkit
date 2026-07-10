@@ -350,7 +350,7 @@ function Get-WdtCommandSafetyIssue {
 
     if ($leaf -eq 'Clear-Host') {
         if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
-            (Get-WdtEnclosingFunctionName $CommandAst) -in @('Show-WdtTuiScreen', 'Invoke-WdtInteractiveSession') -and
+            (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Show-WdtTuiFrame' -and
             $CommandAst.Redirections.Count -eq 0) { return }
         return New-WdtSafetyIssue $CommandAst 'Clear-Host is only allowed in approved TUI rendering functions without redirection.'
     }
@@ -403,6 +403,14 @@ function Get-WdtMemberSafetyIssue {
             (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
             (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtInteractiveSession' -and
             $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -ceq '$true') {
+            return
+        }
+        if ($typeName -eq 'System.Console' -and $member -eq 'SetCursorPosition' -and
+            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Show-WdtTuiFrame' -and
+            $argumentCount -eq 2 -and
+            $MemberAst.Arguments[0].Extent.Text -ceq '0' -and
+            $MemberAst.Arguments[1].Extent.Text -ceq '0') {
             return
         }
         if ($typeName -eq 'System.IO.File' -and $member -eq 'WriteAllLines' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and $argumentCount -eq 3) {
@@ -476,6 +484,19 @@ function Get-WdtMemberSafetyIssue {
     return New-WdtSafetyIssue $MemberAst 'Instance method is not in the reviewed safe allowlist.'
 }
 
+function Get-WdtConsolePropertySafetyIssue {
+    param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot)
+
+    if ($MemberAst.Expression -isnot [System.Management.Automation.Language.TypeExpressionAst]) { return }
+    if ($MemberAst.Expression.TypeName.FullName -ne 'System.Console') { return }
+    if ([string]$MemberAst.Member.Value -ne 'CursorVisible') { return }
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtInteractiveSession') {
+        return
+    }
+    return New-WdtSafetyIssue $MemberAst 'Console cursor visibility is only allowed in Invoke-WdtInteractiveSession.'
+}
+
 function Get-WdtSafetyIssues {
     param([Parameter(Mandatory = $true)]$Ast, [Parameter(Mandatory = $true)][string]$ScriptPath, [Parameter(Mandatory = $true)][string]$RepositoryRoot)
     $localFunctionNames = @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
@@ -502,6 +523,7 @@ function Get-WdtSafetyIssues {
     }
     foreach ($command in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))) { Get-WdtCommandSafetyIssue $command $ScriptPath $RepositoryRoot $localFunctionNames }
     foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtMemberSafetyIssue $member $ScriptPath $RepositoryRoot }
+    foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.MemberExpressionAst] -and $n -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtConsolePropertySafetyIssue $member $ScriptPath $RepositoryRoot }
     foreach ($variable in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -like 'function:*' }, $true))) {
         New-WdtSafetyIssue $variable 'Dynamic function provider access is not allowed in production scripts.'
     }

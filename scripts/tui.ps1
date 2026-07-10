@@ -6,39 +6,71 @@ function Get-WdtRecommendedSelection {
 }
 
 function New-WdtTuiState {
-    param([Parameter(Mandatory = $true)][string]$OutputDirectory, [string[]]$InitialSelection)
+    param(
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [string[]]$InitialSelection
+    )
 
     $selectedNames = @($InitialSelection)
-    if ($null -eq $InitialSelection -or $InitialSelection.Count -eq 0) { $selectedNames = @(Get-WdtRecommendedSelection) }
+    if ($null -eq $InitialSelection -or $InitialSelection.Count -eq 0) {
+        $selectedNames = @(Get-WdtRecommendedSelection)
+    }
+
     return [pscustomobject]@{
-        Diagnostics = @(Get-WdtDiagnosticDefinition | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Label = $_.Label; Selected = $_.Name -in $selectedNames } })
-        PrivacyMode = $true; ExportMarkdown = $true; OutputDirectory = $OutputDirectory; CursorIndex = 0
-        ErrorMessage = $null; ExitRequested = $false; ActionRequested = $null
+        Diagnostics = @(Get-WdtDiagnosticDefinition | ForEach-Object {
+                [pscustomobject]@{
+                    Name = $_.Name
+                    Label = $_.Label
+                    Selected = $_.Name -in $selectedNames
+                }
+            })
+        PrivacyMode = $true
+        ExportMarkdown = $true
+        OutputDirectory = $OutputDirectory
+        CursorIndex = 0
+        ErrorMessage = $null
+        ExitRequested = $false
+        ActionRequested = $null
     }
 }
 
-function Get-WdtTuiSelectedModule { param([Parameter(Mandatory = $true)]$State) return @($State.Diagnostics | Where-Object { $_.Selected } | ForEach-Object { $_.Name }) }
+function Get-WdtTuiSelectedModule {
+    param([Parameter(Mandatory = $true)]$State)
+    return @($State.Diagnostics | Where-Object { $_.Selected } | ForEach-Object { $_.Name })
+}
 
 function ConvertTo-WdtReportParameters {
     param([Parameter(Mandatory = $true)]$State)
-    return @{ SelectedModules = @(Get-WdtTuiSelectedModule -State $State); OutputDirectory = $State.OutputDirectory; PrivacyMode = [bool]$State.PrivacyMode; ExportMarkdown = [bool]$State.ExportMarkdown }
+
+    return @{
+        SelectedModules = @(Get-WdtTuiSelectedModule -State $State)
+        OutputDirectory = $State.OutputDirectory
+        PrivacyMode = [bool]$State.PrivacyMode
+        ExportMarkdown = [bool]$State.ExportMarkdown
+    }
 }
 
 function Get-WdtTuiMenuItem {
     param([Parameter(Mandatory = $true)]$State)
-    $items = @($State.Diagnostics | ForEach-Object { [pscustomobject]@{ Kind = 'Diagnostic'; Name = $_.Name; Label = $_.Label } })
+
+    $items = @($State.Diagnostics | ForEach-Object {
+            [pscustomobject]@{ Kind = 'Diagnostic'; Name = $_.Name; Label = $_.Label }
+        })
     $items += @(
         [pscustomobject]@{ Kind = 'Privacy'; Name = 'PrivacyMode'; Label = 'Privacy Mode' },
         [pscustomobject]@{ Kind = 'Markdown'; Name = 'ExportMarkdown'; Label = 'Markdown report' },
         [pscustomobject]@{ Kind = 'Output'; Name = 'OutputDirectory'; Label = 'Output directory' },
-        [pscustomobject]@{ Kind = 'Run'; Name = 'Run'; Label = 'Run diagnostics' },
+        [pscustomobject]@{ Kind = 'Run'; Name = 'Run'; Label = 'RUN DIAGNOSTICS' },
         [pscustomobject]@{ Kind = 'Exit'; Name = 'Exit'; Label = 'Exit' }
     )
     return $items
 }
 
 function Get-WdtTuiMenuIndex {
-    param([Parameter(Mandatory = $true)]$State, [Parameter(Mandatory = $true)][string]$Kind)
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)][string]$Kind
+    )
 
     $items = @(Get-WdtTuiMenuItem -State $State)
     for ($index = 0; $index -lt $items.Count; $index++) {
@@ -55,30 +87,73 @@ function Update-WdtTuiState {
     )
 
     $nextState = [pscustomobject]@{
-        Diagnostics = @($State.Diagnostics | ForEach-Object { [pscustomobject]@{ Name = $_.Name; Label = $_.Label; Selected = [bool]$_.Selected } })
-        PrivacyMode = [bool]$State.PrivacyMode; ExportMarkdown = [bool]$State.ExportMarkdown; OutputDirectory = [string]$State.OutputDirectory
-        CursorIndex = [int]$State.CursorIndex; ErrorMessage = $State.ErrorMessage; ExitRequested = [bool]$State.ExitRequested; ActionRequested = $null
+        Diagnostics = @($State.Diagnostics | ForEach-Object {
+                [pscustomobject]@{ Name = $_.Name; Label = $_.Label; Selected = [bool]$_.Selected }
+            })
+        PrivacyMode = [bool]$State.PrivacyMode
+        ExportMarkdown = [bool]$State.ExportMarkdown
+        OutputDirectory = [string]$State.OutputDirectory
+        CursorIndex = [int]$State.CursorIndex
+        ErrorMessage = $State.ErrorMessage
+        ExitRequested = [bool]$State.ExitRequested
+        ActionRequested = $null
     }
     $items = @(Get-WdtTuiMenuItem -State $nextState)
-    if ($Action -eq 'MoveUp') { $nextState.CursorIndex = if ($nextState.CursorIndex -le 0) { $items.Count - 1 } else { $nextState.CursorIndex - 1 }; return $nextState }
-    if ($Action -eq 'MoveDown') { $nextState.CursorIndex = if ($nextState.CursorIndex -ge $items.Count - 1) { 0 } else { $nextState.CursorIndex + 1 }; return $nextState }
-    if ($Action -eq 'SelectAll') { foreach ($diagnostic in $nextState.Diagnostics) { $diagnostic.Selected = $true }; return $nextState }
-    if ($Action -eq 'SelectRecommended') { $recommended = @(Get-WdtRecommendedSelection); foreach ($diagnostic in $nextState.Diagnostics) { $diagnostic.Selected = $diagnostic.Name -in $recommended }; return $nextState }
-    if ($Action -eq 'SetOutputDirectory') { $nextState.OutputDirectory = $Value; return $nextState }
-    if ($Action -eq 'Exit') { $nextState.ExitRequested = $true; $nextState.ActionRequested = 'Exit'; return $nextState }
+
+    if ($Action -eq 'MoveUp') {
+        $nextState.CursorIndex = if ($nextState.CursorIndex -le 0) { $items.Count - 1 } else { $nextState.CursorIndex - 1 }
+        return $nextState
+    }
+    if ($Action -eq 'MoveDown') {
+        $nextState.CursorIndex = if ($nextState.CursorIndex -ge $items.Count - 1) { 0 } else { $nextState.CursorIndex + 1 }
+        return $nextState
+    }
+    if ($Action -eq 'SelectAll') {
+        foreach ($diagnostic in $nextState.Diagnostics) { $diagnostic.Selected = $true }
+        return $nextState
+    }
+    if ($Action -eq 'SelectRecommended') {
+        $recommended = @(Get-WdtRecommendedSelection)
+        foreach ($diagnostic in $nextState.Diagnostics) { $diagnostic.Selected = $diagnostic.Name -in $recommended }
+        return $nextState
+    }
+    if ($Action -eq 'SetOutputDirectory') {
+        $nextState.OutputDirectory = $Value
+        return $nextState
+    }
+    if ($Action -eq 'Exit') {
+        $nextState.ExitRequested = $true
+        $nextState.ActionRequested = 'Exit'
+        return $nextState
+    }
 
     $currentItem = $items[$nextState.CursorIndex]
     if ($Action -eq 'ToggleCurrent' -or $Action -eq 'SelectCurrent') {
-        if ($currentItem.Kind -eq 'Diagnostic') { foreach ($diagnostic in $nextState.Diagnostics) { if ($diagnostic.Name -eq $currentItem.Name) { $diagnostic.Selected = -not $diagnostic.Selected; break } } }
-        elseif ($currentItem.Kind -eq 'Privacy') { $nextState.PrivacyMode = -not $nextState.PrivacyMode }
-        elseif ($currentItem.Kind -eq 'Markdown') { $nextState.ExportMarkdown = -not $nextState.ExportMarkdown }
-        elseif ($Action -eq 'SelectCurrent') { $nextState.ActionRequested = $currentItem.Kind; if ($currentItem.Kind -eq 'Exit') { $nextState.ExitRequested = $true } }
+        if ($currentItem.Kind -eq 'Diagnostic') {
+            foreach ($diagnostic in $nextState.Diagnostics) {
+                if ($diagnostic.Name -eq $currentItem.Name) {
+                    $diagnostic.Selected = -not $diagnostic.Selected
+                    break
+                }
+            }
+        }
+        elseif ($currentItem.Kind -eq 'Privacy') {
+            $nextState.PrivacyMode = -not $nextState.PrivacyMode
+        }
+        elseif ($currentItem.Kind -eq 'Markdown') {
+            $nextState.ExportMarkdown = -not $nextState.ExportMarkdown
+        }
+        elseif ($Action -eq 'SelectCurrent') {
+            $nextState.ActionRequested = $currentItem.Kind
+            if ($currentItem.Kind -eq 'Exit') { $nextState.ExitRequested = $true }
+        }
     }
     return $nextState
 }
 
 function Format-WdtTuiText {
     param([AllowEmptyString()][string]$Text, [int]$Width)
+
     $safeText = if ($null -eq $Text) { '' } else { $Text }
     if ($Width -le 0) { return '' }
     if ($safeText.Length -le $Width) { return $safeText }
@@ -86,10 +161,19 @@ function Format-WdtTuiText {
     return $safeText.Substring(0, $Width - 3) + '...'
 }
 
-function Format-WdtTuiPath { param([string]$Path, [int]$Width) return (Format-WdtTuiText -Text $Path -Width $Width) }
+function Format-WdtTuiPath {
+    param([string]$Path, [int]$Width)
+
+    if ($Width -le 0) { return '' }
+    if ([string]::IsNullOrWhiteSpace($Path) -or $Path.Length -le $Width) { return $Path }
+    if ($Width -lt 4) { return $Path.Substring($Path.Length - $Width) }
+    return '...' + $Path.Substring($Path.Length - ($Width - 3))
+}
 
 function Get-WdtTuiLayoutMode {
     param([int]$Width, [int]$Height)
+
+    if ($Width -ge 110 -and $Height -ge 28) { return 'Wide' }
     if ($Width -ge 60 -and $Height -ge 25) { return 'Normal' }
     if ($Width -ge 40 -and $Height -ge 18) { return 'Compact' }
     return 'TooSmall'
@@ -100,9 +184,29 @@ function New-WdtTuiSegment {
     return [pscustomobject]@{ Text = $Text; Color = $Color }
 }
 
+function Expand-WdtTuiSegments {
+    param([object[]]$Segments)
+
+    foreach ($segment in @($Segments)) {
+        if ($segment -is [System.Array]) {
+            foreach ($nestedSegment in @($segment)) {
+                if ($null -ne $nestedSegment) { $nestedSegment }
+            }
+        }
+        elseif ($null -ne $segment) {
+            $segment
+        }
+    }
+}
+
 function New-WdtTuiLine {
     param([object[]]$Segments)
-    return [pscustomobject]@{ Segments = @($Segments) }
+    return [pscustomobject]@{ Segments = @(Expand-WdtTuiSegments -Segments $Segments) }
+}
+
+function New-WdtTuiTextLine {
+    param([string]$Text, [string]$Color = 'White')
+    return New-WdtTuiLine -Segments @((New-WdtTuiSegment -Text $Text -Color $Color))
 }
 
 function ConvertTo-WdtTuiPlainText {
@@ -115,7 +219,7 @@ function Limit-WdtTuiSegments {
 
     $remaining = [Math]::Max(0, $Width)
     $limited = @()
-    foreach ($segment in @($Segments | Where-Object { $null -ne $_ })) {
+    foreach ($segment in @(Expand-WdtTuiSegments -Segments $Segments)) {
         if ($remaining -le 0) { break }
         $text = Format-WdtTuiText -Text $segment.Text -Width $remaining
         if ($text.Length -gt 0) {
@@ -124,6 +228,85 @@ function Limit-WdtTuiSegments {
         }
     }
     return @($limited)
+}
+
+function Add-WdtTuiLinePadding {
+    param([Parameter(Mandatory = $true)]$Line, [int]$Width)
+
+    $segments = @(Limit-WdtTuiSegments -Segments $Line.Segments -Width $Width)
+    $length = @($segments | ForEach-Object { $_.Text.Length } | Measure-Object -Sum).Sum
+    if ($null -eq $length) { $length = 0 }
+    if ($length -lt $Width) {
+        $segments += New-WdtTuiSegment -Text (' ' * ($Width - $length)) -Color 'White'
+    }
+    return New-WdtTuiLine -Segments $segments
+}
+
+function New-WdtTuiBorderLine {
+    param([int]$Width, [string]$Color = 'Cyan')
+
+    if ($Width -le 0) { return New-WdtTuiTextLine -Text '' -Color $Color }
+    if ($Width -eq 1) { return New-WdtTuiTextLine -Text '+' -Color $Color }
+    return New-WdtTuiTextLine -Text ('+' + ('-' * [Math]::Max(0, $Width - 2)) + '+') -Color $Color
+}
+
+function New-WdtTuiFramedLine {
+    param([Parameter(Mandatory = $true)]$Line, [int]$Width)
+
+    $content = Add-WdtTuiLinePadding -Line $Line -Width ([Math]::Max(0, $Width - 2))
+    return New-WdtTuiLine -Segments @(
+        (New-WdtTuiSegment -Text '|' -Color 'Cyan'),
+        $content.Segments,
+        (New-WdtTuiSegment -Text '|' -Color 'Cyan')
+    )
+}
+
+function New-WdtTuiAlignedLine {
+    param(
+        [string]$LeftText,
+        [string]$RightText,
+        [int]$Width,
+        [string]$LeftColor = 'White',
+        [string]$RightColor = 'White'
+    )
+
+    $left = Format-WdtTuiText -Text $LeftText -Width $Width
+    $rightCapacity = [Math]::Max(0, $Width - $left.Length - 1)
+    $right = Format-WdtTuiText -Text $RightText -Width $rightCapacity
+    $spacing = [Math]::Max(0, $Width - $left.Length - $right.Length)
+    return New-WdtTuiLine -Segments @(
+        (New-WdtTuiSegment -Text $left -Color $LeftColor),
+        (New-WdtTuiSegment -Text (' ' * $spacing) -Color 'White'),
+        (New-WdtTuiSegment -Text $right -Color $RightColor)
+    )
+}
+
+function Join-WdtTuiColumns {
+    param(
+        [Parameter(Mandatory = $true)]$LeftLine,
+        [Parameter(Mandatory = $true)]$RightLine,
+        [int]$LeftWidth,
+        [int]$RightWidth
+    )
+
+    $left = Add-WdtTuiLinePadding -Line $LeftLine -Width $LeftWidth
+    $right = Add-WdtTuiLinePadding -Line $RightLine -Width $RightWidth
+    return New-WdtTuiLine -Segments @(
+        (New-WdtTuiSegment -Text '|' -Color 'Cyan'),
+        $left.Segments,
+        (New-WdtTuiSegment -Text '|' -Color 'Cyan'),
+        $right.Segments,
+        (New-WdtTuiSegment -Text '|' -Color 'Cyan')
+    )
+}
+
+function Get-WdtTuiLogo {
+    return @(
+        'W   W  DDDD   TTTTT',
+        'W   W  D   D    T',
+        'W W W  D   D    T',
+        ' W W   DDDD     T'
+    )
 }
 
 function New-WdtTuiMenuLine {
@@ -145,24 +328,32 @@ function New-WdtTuiMenuLine {
         $diagnostic = @($State.Diagnostics | Where-Object { $_.Name -eq $Item.Name })[0]
         $checked = [bool]$diagnostic.Selected
         $mark = if ($checked) { '[x]' } else { '[ ]' }
-        $separator = ' '
-        $labelWidth = [Math]::Max(0, $Width - $numberPrefix.Length - $pointer.Length - $mark.Length - $separator.Length)
-        $label = Format-WdtTuiText -Text $Item.Label -Width $labelWidth
         $markColor = if ($checked) { 'Green' } else { 'DarkGray' }
-        $labelColor = if ($checked) { 'White' } else { 'Gray' }
-        $segments = @($numberSegment, (New-WdtTuiSegment $pointer $pointerColor), (New-WdtTuiSegment $mark $markColor), (New-WdtTuiSegment ($separator + $label) $labelColor))
+        $labelColor = if ($active) { 'Yellow' } elseif ($checked) { 'White' } else { 'Gray' }
+        $labelWidth = [Math]::Max(0, $Width - $numberPrefix.Length - $pointer.Length - $mark.Length - 1)
+        $label = Format-WdtTuiText -Text $Item.Label -Width $labelWidth
+        $segments = @(
+            $numberSegment,
+            (New-WdtTuiSegment -Text $pointer -Color $pointerColor),
+            (New-WdtTuiSegment -Text $mark -Color $markColor),
+            (New-WdtTuiSegment -Text (' ' + $label) -Color $labelColor)
+        )
         return New-WdtTuiLine -Segments (Limit-WdtTuiSegments -Segments $segments -Width $Width)
     }
 
     if ($Item.Kind -in @('Privacy', 'Markdown')) {
         $enabled = if ($Item.Kind -eq 'Privacy') { [bool]$State.PrivacyMode } else { [bool]$State.ExportMarkdown }
         $mark = if ($enabled) { '[x]' } else { '[ ]' }
-        $separator = ' '
-        $labelWidth = [Math]::Max(0, $Width - $numberPrefix.Length - $pointer.Length - $mark.Length - $separator.Length)
-        $label = Format-WdtTuiText -Text $Item.Label -Width $labelWidth
         $markColor = if ($enabled) { 'Green' } else { 'DarkGray' }
-        $labelColor = if ($enabled) { 'White' } else { 'Gray' }
-        $segments = @($numberSegment, (New-WdtTuiSegment $pointer $pointerColor), (New-WdtTuiSegment $mark $markColor), (New-WdtTuiSegment ($separator + $label) $labelColor))
+        $labelColor = if ($active) { 'Yellow' } elseif ($enabled) { 'White' } else { 'Gray' }
+        $labelWidth = [Math]::Max(0, $Width - $numberPrefix.Length - $pointer.Length - $mark.Length - 1)
+        $label = Format-WdtTuiText -Text $Item.Label -Width $labelWidth
+        $segments = @(
+            $numberSegment,
+            (New-WdtTuiSegment -Text $pointer -Color $pointerColor),
+            (New-WdtTuiSegment -Text $mark -Color $markColor),
+            (New-WdtTuiSegment -Text (' ' + $label) -Color $labelColor)
+        )
         return New-WdtTuiLine -Segments (Limit-WdtTuiSegments -Segments $segments -Width $Width)
     }
 
@@ -170,19 +361,27 @@ function New-WdtTuiMenuLine {
         $prefix = 'Output: '
         $pathWidth = [Math]::Max(0, $Width - $numberPrefix.Length - $pointer.Length - $prefix.Length)
         $path = Format-WdtTuiPath -Path $State.OutputDirectory -Width $pathWidth
-        $segments = @($numberSegment, (New-WdtTuiSegment $pointer $pointerColor), (New-WdtTuiSegment $prefix 'White'), (New-WdtTuiSegment $path 'DarkGray'))
+        $segments = @(
+            $numberSegment,
+            (New-WdtTuiSegment -Text $pointer -Color $pointerColor),
+            (New-WdtTuiSegment -Text $prefix -Color $(if ($active) { 'Yellow' } else { 'White' })),
+            (New-WdtTuiSegment -Text $path -Color 'DarkGray')
+        )
         return New-WdtTuiLine -Segments (Limit-WdtTuiSegments -Segments $segments -Width $Width)
     }
 
-    $color = if ($Item.Kind -eq 'Run') { 'Green' } elseif ($active) { 'Yellow' } else { 'Gray' }
-    $labelWidth = [Math]::Max(0, $Width - $numberPrefix.Length - $pointer.Length)
-    $label = Format-WdtTuiText -Text $Item.Label -Width $labelWidth
-    $segments = @($numberSegment, (New-WdtTuiSegment $pointer $pointerColor), (New-WdtTuiSegment $label $color))
+    $shortcut = if ($Item.Kind -eq 'Run') { 'Enter' } else { 'Esc' }
+    $labelColor = if ($Item.Kind -eq 'Run') { 'Green' } elseif ($active) { 'Yellow' } else { 'Gray' }
+    $prefixLength = $numberPrefix.Length + $pointer.Length
+    $contentWidth = [Math]::Max(0, $Width - $prefixLength)
+    $actionLine = New-WdtTuiAlignedLine -LeftText $Item.Label -RightText $shortcut -Width $contentWidth -LeftColor $labelColor -RightColor 'DarkGray'
+    $segments = @($numberSegment, (New-WdtTuiSegment -Text $pointer -Color $pointerColor), $actionLine.Segments)
     return New-WdtTuiLine -Segments (Limit-WdtTuiSegments -Segments $segments -Width $Width)
 }
 
 function Get-WdtTuiViewport {
     param([int]$ItemCount, [int]$CursorIndex, [int]$Capacity)
+
     $visible = [Math]::Max(1, [Math]::Min($ItemCount, $Capacity))
     $start = [Math]::Max(0, [Math]::Min($CursorIndex - [Math]::Floor($visible / 2), $ItemCount - $visible))
     return [pscustomobject]@{ Start = $start; End = $start + $visible - 1; Capacity = $visible }
@@ -210,14 +409,164 @@ function ConvertTo-WdtTuiFallbackMenuAction {
 
 function Get-WdtTuiTooSmallLayout {
     param([int]$Width, [int]$Height)
+
     $lines = @(
         'WDT - terminal window is too small.',
         'Minimum size: 40x18.',
         ('Current size: {0}x{1}.' -f $Width, $Height),
         'Resize the window and press any key.',
         'Esc exits.'
-    ) | ForEach-Object { New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text $_ -Width $Width) $(if ($_ -like 'WDT*') { 'Yellow' } else { 'DarkGray' }))) }
-    return [pscustomobject]@{ Mode = 'TooSmall'; Lines = @($lines); Viewport = $null }
+    ) | ForEach-Object {
+        New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $_ -Width $Width) -Color $(if ($_ -like 'WDT*') { 'Yellow' } else { 'DarkGray' })
+    }
+    return [pscustomobject]@{ Mode = 'TooSmall'; Lines = @($lines); Viewport = $null; VisibleIndexes = @() }
+}
+
+function Get-WdtTuiHelpText {
+    param([string]$Mode)
+
+    if ($Mode -eq 'Wide') { return 'Up/Down Navigate | Space Toggle | Enter Select | A All | R Recommended | Esc Exit' }
+    if ($Mode -eq 'Normal') { return 'Up/Down | Space Toggle | Enter Select | A All | R Recommended | Esc Exit' }
+    return 'Up/Down | Space | Enter | A | R | Esc'
+}
+
+function Get-WdtTuiFooterText {
+    return 'Safe. Local. Transparent. | No changes made to your system.'
+}
+
+function Get-WdtTuiWideLayout {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [int]$Width,
+        [bool]$ShowItemNumbers
+    )
+
+    $items = @(Get-WdtTuiMenuItem -State $State)
+    $selectedCount = @(Get-WdtTuiSelectedModule -State $State).Count
+    $contentWidth = $Width - 3
+    $leftWidth = [Math]::Floor($contentWidth * 0.56)
+    $rightWidth = $contentWidth - $leftWidth
+    $headerLeftWidth = [Math]::Min(38, $leftWidth)
+    $headerRightWidth = $contentWidth - $headerLeftWidth
+    $logo = @(Get-WdtTuiLogo)
+    $lines = @((New-WdtTuiBorderLine -Width $Width))
+
+    for ($index = 0; $index -lt $logo.Count; $index++) {
+        $headerText = if ($index -eq 1) { 'Windows Diagnostics Toolkit' } elseif ($index -eq 2) { 'Read-only | Local reports | No telemetry' } else { '' }
+        $leftLine = New-WdtTuiTextLine -Text ('  ' + $logo[$index]) -Color 'Cyan'
+        $rightLine = New-WdtTuiTextLine -Text ('  ' + $headerText) -Color $(if ($index -eq 1) { 'White' } else { 'DarkGray' })
+        $lines += Join-WdtTuiColumns -LeftLine $leftLine -RightLine $rightLine -LeftWidth $headerLeftWidth -RightWidth $headerRightWidth
+    }
+    $lines += New-WdtTuiBorderLine -Width $Width
+
+    $leftPanel = @()
+    $leftPanel += New-WdtTuiAlignedLine -LeftText ' DIAGNOSTICS' -RightText ('Selected: {0} / {1} ' -f $selectedCount, $State.Diagnostics.Count) -Width $leftWidth -LeftColor 'Cyan' -RightColor 'Cyan'
+    $leftPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $leftWidth - 2))) -Color 'DarkGray'
+    for ($index = 0; $index -lt $State.Diagnostics.Count; $index++) {
+        $leftPanel += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $leftWidth -ShowItemNumbers $ShowItemNumbers
+    }
+    $leftPanel += New-WdtTuiTextLine -Text ''
+
+    $rightPanel = @()
+    $rightPanel += New-WdtTuiTextLine -Text ' OPTIONS' -Color 'Cyan'
+    $rightPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $rightWidth - 2))) -Color 'DarkGray'
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[10] -Index 10 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[11] -Index 11 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiTextLine -Text ''
+    $rightPanel += New-WdtTuiTextLine -Text ' OUTPUT' -Color 'Cyan'
+    $rightPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $rightWidth - 2))) -Color 'DarkGray'
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[12] -Index 12 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiTextLine -Text ''
+    $rightPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $rightWidth - 2))) -Color 'DarkGray'
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[13] -Index 13 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[14] -Index 14 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiTextLine -Text ''
+
+    for ($index = 0; $index -lt $leftPanel.Count; $index++) {
+        $lines += Join-WdtTuiColumns -LeftLine $leftPanel[$index] -RightLine $rightPanel[$index] -LeftWidth $leftWidth -RightWidth $rightWidth
+    }
+    $lines += New-WdtTuiBorderLine -Width $Width
+    $help = Format-WdtTuiText -Text (Get-WdtTuiHelpText -Mode 'Wide') -Width ($Width - 2)
+    $lines += New-WdtTuiFramedLine -Line (New-WdtTuiTextLine -Text (' ' + $help) -Color 'DarkGray') -Width $Width
+    $lines += New-WdtTuiBorderLine -Width $Width
+    $footerText = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { Get-WdtTuiFooterText } else { 'Error: ' + $State.ErrorMessage }
+    $footerColor = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { 'Cyan' } else { 'Red' }
+    $footer = Format-WdtTuiText -Text $footerText -Width ($Width - 2)
+    $lines += New-WdtTuiFramedLine -Line (New-WdtTuiTextLine -Text (' ' + $footer) -Color $footerColor) -Width $Width
+    $lines += New-WdtTuiBorderLine -Width $Width
+
+    return [pscustomobject]@{ Mode = 'Wide'; Lines = @($lines); Viewport = $null; VisibleIndexes = @(0..14) }
+}
+
+function Get-WdtTuiNormalLayout {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [int]$Width,
+        [bool]$ShowItemNumbers
+    )
+
+    $items = @(Get-WdtTuiMenuItem -State $State)
+    $selectedCount = @(Get-WdtTuiSelectedModule -State $State).Count
+    $lines = @()
+    foreach ($logoLine in @(Get-WdtTuiLogo)) {
+        $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $logoLine -Width $Width) -Color 'Cyan'
+    }
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Windows Diagnostics Toolkit' -Width $Width) -Color 'White'
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Read-only | Local reports | No telemetry' -Width $Width) -Color 'DarkGray'
+    $lines += New-WdtTuiAlignedLine -LeftText 'DIAGNOSTICS' -RightText ('Selected: {0} / {1}' -f $selectedCount, $State.Diagnostics.Count) -Width $Width -LeftColor 'Cyan' -RightColor 'Cyan'
+    for ($index = 0; $index -lt $State.Diagnostics.Count; $index++) {
+        $lines += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $Width -ShowItemNumbers $ShowItemNumbers
+    }
+    $lines += New-WdtTuiAlignedLine -LeftText 'OPTIONS' -RightText 'OUTPUT / ACTIONS' -Width $Width -LeftColor 'Cyan' -RightColor 'Cyan'
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[10] -Index 10 -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[11] -Index 11 -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[12] -Index 12 -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[13] -Index 13 -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[14] -Index 14 -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text (Get-WdtTuiHelpText -Mode 'Normal') -Width $Width) -Color 'DarkGray'
+    $footerText = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { Get-WdtTuiFooterText } else { 'Error: ' + $State.ErrorMessage }
+    $footerColor = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { 'Cyan' } else { 'Red' }
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $footerText -Width $Width) -Color $footerColor
+
+    return [pscustomobject]@{ Mode = 'Normal'; Lines = @($lines); Viewport = $null; VisibleIndexes = @(0..14) }
+}
+
+function Get-WdtTuiCompactLayout {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [int]$Width,
+        [int]$Height,
+        [bool]$ShowItemNumbers
+    )
+
+    $items = @(Get-WdtTuiMenuItem -State $State)
+    $selectedCount = @(Get-WdtTuiSelectedModule -State $State).Count
+    $lines = @()
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'WDT - Windows Diagnostics Toolkit' -Width $Width) -Color 'Cyan'
+    $status = 'Selected: {0} | Privacy: {1} | Markdown: {2}' -f $selectedCount, $(if ($State.PrivacyMode) { 'On' } else { 'Off' }), $(if ($State.ExportMarkdown) { 'On' } else { 'Off' })
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $status -Width $Width) -Color 'DarkGray'
+
+    $fixedRows = 5
+    $errorRows = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { 0 } else { 1 }
+    $menuCapacity = [Math]::Max(1, $Height - $fixedRows - $errorRows)
+    $viewport = Get-WdtTuiViewport -ItemCount $items.Count -CursorIndex $State.CursorIndex -Capacity $menuCapacity
+    $range = 'Items {0}-{1} of {2}' -f ($viewport.Start + 1), ($viewport.End + 1), $items.Count
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $range -Width $Width) -Color 'Cyan'
+    for ($index = $viewport.Start; $index -le $viewport.End; $index++) {
+        $lines += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $Width -ShowItemNumbers $ShowItemNumbers
+    }
+    if (-not [string]::IsNullOrWhiteSpace($State.ErrorMessage)) {
+        $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Error: ' + $State.ErrorMessage) -Width $Width) -Color 'Red'
+    }
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text (Get-WdtTuiHelpText -Mode 'Compact') -Width $Width) -Color 'DarkGray'
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Safe. Local. No system changes.' -Width $Width) -Color 'Cyan'
+
+    return [pscustomobject]@{
+        Mode = 'Compact'
+        Lines = @($lines)
+        Viewport = $viewport
+        VisibleIndexes = @($viewport.Start..$viewport.End)
+    }
 }
 
 function Get-WdtTuiLayout {
@@ -229,68 +578,65 @@ function Get-WdtTuiLayout {
     )
 
     $mode = Get-WdtTuiLayoutMode -Width $Width -Height $Height
-    if ($mode -eq 'TooSmall') {
-        return Get-WdtTuiTooSmallLayout -Width $Width -Height $Height
-    }
-
-    $items = @(Get-WdtTuiMenuItem -State $State)
-    $lines = @()
-    $selected = @(Get-WdtTuiSelectedModule -State $State).Count
-
-    if ($mode -eq 'Normal') {
-        foreach ($logo in @('W   W  DDD   TTTTT', 'W W W  D  D    T', ' W W   DDD     T')) {
-            $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text $logo -Width $Width) 'Cyan'))
-        }
-        $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text 'Windows Diagnostics Toolkit' -Width $Width) 'White'))
-        $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text 'Read-only | Local reports | No telemetry' -Width $Width) 'DarkGray'))
-        $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text 'Diagnostics' -Width $Width) 'Cyan'))
-        for ($index = 0; $index -lt $State.Diagnostics.Count; $index++) {
-            $lines += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $Width -ShowItemNumbers $ShowItemNumbers
-        }
-        $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text ('Selected: {0}' -f $selected) -Width $Width) 'DarkGray'))
-        for ($index = $State.Diagnostics.Count; $index -lt $items.Count; $index++) {
-            $lines += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $Width -ShowItemNumbers $ShowItemNumbers
-        }
-    }
-    else {
-        $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text 'WDT - Windows Diagnostics Toolkit' -Width $Width) 'White'))
-        $status = 'Selected: {0} | Privacy: {1} | Markdown: {2}' -f $selected, $(if ($State.PrivacyMode) { 'On' } else { 'Off' }), $(if ($State.ExportMarkdown) { 'On' } else { 'Off' })
-        $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text $status -Width $Width) 'DarkGray'))
-        $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment '' 'Cyan'))
-
-        $headerRows = 1
-        $statusRows = 1
-        $viewportIndicatorRows = 1
-        $helpRows = 2
-        $errorRows = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { 0 } else { 1 }
-        $menuCapacity = [Math]::Max(1, $Height - $headerRows - $statusRows - $viewportIndicatorRows - $helpRows - $errorRows)
-        $viewport = Get-WdtTuiViewport -ItemCount $items.Count -CursorIndex $State.CursorIndex -Capacity $menuCapacity
-        $range = 'Items {0}-{1} of {2}' -f ($viewport.Start + 1), ($viewport.End + 1), $items.Count
-        $lines[$lines.Count - 1] = New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text $range -Width $Width) 'Cyan'))
-        for ($index = $viewport.Start; $index -le $viewport.End; $index++) {
-            $lines += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $Width -ShowItemNumbers $ShowItemNumbers
-        }
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($State.ErrorMessage)) {
-        $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text ('Error: ' + $State.ErrorMessage) -Width $Width) 'Red'))
-    }
-    $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text 'Up/Down Navigate  Space Toggle  Enter Select' -Width $Width) 'DarkGray'))
-    $lines += New-WdtTuiLine -Segments @((New-WdtTuiSegment (Format-WdtTuiText -Text 'A All  R Recommended  Esc Exit' -Width $Width) 'DarkGray'))
-    return [pscustomobject]@{
-        Mode = $mode
-        Lines = @($lines)
-        Viewport = $(if ($mode -eq 'Compact') { $viewport } else { $null })
-        VisibleIndexes = $(if ($mode -eq 'Compact') { @($viewport.Start..$viewport.End) } else { @(0..($items.Count - 1)) })
-    }
+    if ($mode -eq 'Wide') { return Get-WdtTuiWideLayout -State $State -Width $Width -ShowItemNumbers $ShowItemNumbers }
+    if ($mode -eq 'Normal') { return Get-WdtTuiNormalLayout -State $State -Width $Width -ShowItemNumbers $ShowItemNumbers }
+    if ($mode -eq 'Compact') { return Get-WdtTuiCompactLayout -State $State -Width $Width -Height $Height -ShowItemNumbers $ShowItemNumbers }
+    return Get-WdtTuiTooSmallLayout -Width $Width -Height $Height
 }
 
-function Get-WdtTuiLines { param([Parameter(Mandatory = $true)]$State, [int]$Width = 80, [int]$Height = 25) return @((Get-WdtTuiLayout -State $State -Width $Width -Height $Height).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText $_ }) }
+function Get-WdtTuiLines {
+    param([Parameter(Mandatory = $true)]$State, [int]$Width = 80, [int]$Height = 25)
+    return @((Get-WdtTuiLayout -State $State -Width $Width -Height $Height).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText $_ })
+}
+
+function Get-WdtTuiRunningLayout {
+    param([int]$SelectedCount, [int]$Width = 80)
+
+    $lines = @(
+        (New-WdtTuiBorderLine -Width $Width),
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Windows Diagnostics Toolkit' -Width $Width) -Color 'Cyan'),
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Running diagnostics...' -Width $Width) -Color 'Yellow'),
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Progress: 0 / {0}' -f $SelectedCount) -Width $Width) -Color 'White'),
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Reports remain local. No system changes are made.' -Width $Width) -Color 'DarkGray'),
+        (New-WdtTuiBorderLine -Width $Width)
+    )
+    return [pscustomobject]@{ Mode = 'Running'; Lines = $lines }
+}
+
 function Get-WdtTuiRunResultLayout {
-    param([Parameter(Mandatory = $true)]$Result)
-    $text = if ($Result.ExitCode -eq 0) { 'Diagnostics completed successfully.' } else { 'Diagnostics completed with partial failures.' }
-    $color = if ($Result.ExitCode -eq 0) { 'Green' } else { 'Yellow' }
-    return @((New-WdtTuiLine -Segments @((New-WdtTuiSegment $text $color))))
+    param([Parameter(Mandatory = $true)]$Result, [int]$Width = 80)
+
+    $isSuccess = $Result.ExitCode -eq 0
+    $status = if ($isSuccess) { 'Diagnostics completed successfully.' } else { 'Diagnostics completed with partial failures.' }
+    $statusColor = if ($isSuccess) { 'Green' } else { 'Yellow' }
+    $lines = @(
+        (New-WdtTuiBorderLine -Width $Width),
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $status -Width $Width) -Color $statusColor),
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('TXT: {0}' -f $Result.TextReportPath) -Width $Width) -Color 'DarkGray')
+    )
+    if (-not [string]::IsNullOrWhiteSpace($Result.MarkdownReportPath)) {
+        $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Markdown: {0}' -f $Result.MarkdownReportPath) -Width $Width) -Color 'DarkGray'
+    }
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('WARN: {0} | ERROR: {1}' -f $Result.WarningCount, $Result.ErrorCount) -Width $Width) -Color $(if ($Result.ErrorCount -gt 0) { 'Red' } elseif ($Result.WarningCount -gt 0) { 'Yellow' } else { 'Green' })
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Elapsed: {0}' -f $Result.ElapsedTime) -Width $Width) -Color 'DarkGray'
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Enter returns to menu | Esc exits' -Width $Width) -Color 'DarkGray'
+    $lines += New-WdtTuiBorderLine -Width $Width
+    return [pscustomobject]@{ Mode = $(if ($isSuccess) { 'Success' } else { 'Warning' }); Lines = @($lines) }
+}
+
+function Get-WdtTuiErrorLayout {
+    param([string]$Message, [int]$Width = 80)
+
+    return [pscustomobject]@{
+        Mode = 'Error'
+        Lines = @(
+            (New-WdtTuiBorderLine -Width $Width),
+            (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Diagnostics failed.' -Width $Width) -Color 'Red'),
+            (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $Message -Width $Width) -Color 'Red'),
+            (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Enter returns to menu | Esc exits' -Width $Width) -Color 'DarkGray'),
+            (New-WdtTuiBorderLine -Width $Width)
+        )
+    }
 }
 
 function Test-WdtTuiColorOutput {
@@ -299,19 +645,50 @@ function Test-WdtTuiColorOutput {
 }
 
 function Write-WdtTuiLine {
-    param([Parameter(Mandatory = $true)]$Line, [bool]$UseColor)
-    $plainText = ConvertTo-WdtTuiPlainText -Line $Line
-    if (-not $UseColor) { Write-Host $plainText; return }
+    param([Parameter(Mandatory = $true)]$Line, [bool]$UseColor, [int]$Width)
+
+    $renderLine = Add-WdtTuiLinePadding -Line $Line -Width $Width
+    $plainText = ConvertTo-WdtTuiPlainText -Line $renderLine
+    if (-not $UseColor) {
+        Write-Host $plainText
+        return
+    }
     try {
-        foreach ($segment in @($Line.Segments)) { Write-Host $segment.Text -NoNewline -ForegroundColor $segment.Color }
+        foreach ($segment in @($renderLine.Segments)) {
+            Write-Host $segment.Text -NoNewline -ForegroundColor $segment.Color
+        }
         Write-Host
     }
-    catch { Write-Host $plainText }
+    catch {
+        Write-Host $plainText
+    }
 }
 
-function Show-WdtTuiScreen {
-    param([Parameter(Mandatory = $true)]$State, [bool]$ShowItemNumbers)
+function Show-WdtTuiFrame {
+    param([Parameter(Mandatory = $true)]$Layout, [int]$Width)
 
+    $renderWidth = [Math]::Max(1, $Width)
+    $positioned = $false
+    try {
+        [System.Console]::SetCursorPosition(0, 0)
+        $positioned = $true
+    }
+    catch { }
+    if (-not $positioned) {
+        try { Clear-Host } catch { }
+    }
+
+    $previousHeight = if ($null -eq $script:WdtTuiPreviousFrameHeight) { 0 } else { [int]$script:WdtTuiPreviousFrameHeight }
+    $frameHeight = [Math]::Max($previousHeight, @($Layout.Lines).Count)
+    $useColor = Test-WdtTuiColorOutput
+    for ($index = 0; $index -lt $frameHeight; $index++) {
+        $line = if ($index -lt @($Layout.Lines).Count) { $Layout.Lines[$index] } else { New-WdtTuiTextLine -Text '' }
+        Write-WdtTuiLine -Line $line -UseColor $useColor -Width $renderWidth
+    }
+    $script:WdtTuiPreviousFrameHeight = @($Layout.Lines).Count
+}
+
+function Get-WdtTuiHostSize {
     $width = 80
     $height = 25
     try {
@@ -319,24 +696,27 @@ function Show-WdtTuiScreen {
         $height = $Host.UI.RawUI.WindowSize.Height
     }
     catch { }
-    try {
-        Clear-Host
-    }
-    catch { }
+    return [pscustomobject]@{ Width = $width; Height = $height }
+}
 
-    $useColor = Test-WdtTuiColorOutput
-    $layout = Get-WdtTuiLayout -State $State -Width $width -Height $height -ShowItemNumbers $ShowItemNumbers
-    foreach ($line in @($layout.Lines)) {
-        Write-WdtTuiLine -Line $line -UseColor $useColor
-    }
+function Show-WdtTuiScreen {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [int]$Width,
+        [int]$Height,
+        [bool]$ShowItemNumbers
+    )
+
+    $layout = Get-WdtTuiLayout -State $State -Width $Width -Height $Height -ShowItemNumbers $ShowItemNumbers
+    Show-WdtTuiFrame -Layout $layout -Width $Width
+    return $layout
 }
 
 function Show-WdtTuiRunResult {
-    param($Result)
-    foreach ($line in @(Get-WdtTuiRunResultLayout -Result $Result)) { Write-WdtTuiLine -Line $line -UseColor (Test-WdtTuiColorOutput) }
-    Write-Host ('TXT report: {0}' -f $Result.TextReportPath)
-    if (-not [string]::IsNullOrWhiteSpace($Result.MarkdownReportPath)) { Write-Host ('Markdown report: {0}' -f $Result.MarkdownReportPath) }
-    Write-Host ('WARN findings: {0}' -f $Result.WarningCount); Write-Host ('ERROR findings: {0}' -f $Result.ErrorCount); Write-Host ('Elapsed: {0}' -f $Result.ElapsedTime)
+    param([Parameter(Mandatory = $true)]$Result, [int]$Width)
+
+    $layout = Get-WdtTuiRunResultLayout -Result $Result -Width $Width
+    Show-WdtTuiFrame -Layout $layout -Width $Width
 }
 
 function Invoke-WdtInteractiveSession {
@@ -354,26 +734,23 @@ function Invoke-WdtInteractiveSession {
     $state = New-WdtTuiState -OutputDirectory $OutputDirectory -InitialSelection $InitialSelection
     $useReadKey = $true
     $lastExitCode = 0
-
+    $originalCursorVisible = $null
     try {
-        while (-not $state.ExitRequested) {
-            $width = 80
-            $height = 25
-            try {
-                $width = $Host.UI.RawUI.WindowSize.Width
-                $height = $Host.UI.RawUI.WindowSize.Height
-            }
-            catch { }
+        try {
+            $originalCursorVisible = [System.Console]::CursorVisible
+            [System.Console]::CursorVisible = $false
+        }
+        catch { }
 
-            $layout = Get-WdtTuiLayout -State $state -Width $width -Height $height -ShowItemNumbers (-not $useReadKey)
-            Show-WdtTuiScreen -State $state -ShowItemNumbers (-not $useReadKey)
-            $mode = $layout.Mode
+        while (-not $state.ExitRequested) {
+            $size = Get-WdtTuiHostSize
+            $layout = Show-WdtTuiScreen -State $state -Width $size.Width -Height $size.Height -ShowItemNumbers (-not $useReadKey)
             $action = $null
 
             if ($useReadKey) {
                 try {
                     $keyInfo = [System.Console]::ReadKey($true)
-                    if ($mode -eq 'TooSmall') {
+                    if ($layout.Mode -eq 'TooSmall') {
                         if ($keyInfo.Key -eq [System.ConsoleKey]::Escape) { return $lastExitCode }
                         continue
                     }
@@ -392,7 +769,7 @@ function Invoke-WdtInteractiveSession {
                 }
             }
             else {
-                if ($mode -eq 'TooSmall') {
+                if ($layout.Mode -eq 'TooSmall') {
                     $answer = Read-Host 'Resize the window, then press Enter (or type Exit)'
                     if ((ConvertTo-WdtTuiFallbackAction -Answer $answer) -eq 'Exit') { return $lastExitCode }
                     continue
@@ -414,7 +791,6 @@ function Invoke-WdtInteractiveSession {
             }
 
             $state.ErrorMessage = $null
-
             if ($action -eq 'Up') { $state = Update-WdtTuiState -State $state -Action MoveUp; continue }
             if ($action -eq 'Down') { $state = Update-WdtTuiState -State $state -Action MoveDown; continue }
             if ($action -eq 'All') { $state = Update-WdtTuiState -State $state -Action SelectAll; continue }
@@ -422,7 +798,8 @@ function Invoke-WdtInteractiveSession {
             if ($action -eq 'Exit') { $state = Update-WdtTuiState -State $state -Action Exit; continue }
             if ($action -notin @('Toggle', 'Select')) { continue }
 
-            $state = Update-WdtTuiState -State $state -Action $(if ($action -eq 'Toggle') { 'ToggleCurrent' } else { 'SelectCurrent' })
+            $transition = if ($action -eq 'Toggle') { 'ToggleCurrent' } else { 'SelectCurrent' }
+            $state = Update-WdtTuiState -State $state -Action $transition
             if ($state.ActionRequested -eq 'Output') {
                 $path = Read-Host 'Output directory'
                 if ([string]::IsNullOrWhiteSpace($path)) {
@@ -439,6 +816,7 @@ function Invoke-WdtInteractiveSession {
                 continue
             }
             if ($state.ExitRequested -or $state.ActionRequested -ne 'Run') { continue }
+
             try {
                 $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($state.OutputDirectory)
                 $state = Update-WdtTuiState -State $state -Action SetOutputDirectory -Value $resolvedPath
@@ -447,23 +825,31 @@ function Invoke-WdtInteractiveSession {
                 $state.ErrorMessage = ('Invalid output directory: ' + $_.Exception.Message)
                 continue
             }
+
             $reportParameters = ConvertTo-WdtReportParameters -State $state
-            if (@($reportParameters.SelectedModules).Count -eq 0) { $state.ErrorMessage = 'Select at least one diagnostic module.'; continue }
+            if (@($reportParameters.SelectedModules).Count -eq 0) {
+                $state.ErrorMessage = 'Select at least one diagnostic module.'
+                continue
+            }
+
+            $size = Get-WdtTuiHostSize
+            $runningLayout = Get-WdtTuiRunningLayout -SelectedCount @($reportParameters.SelectedModules).Count -Width $size.Width
+            Show-WdtTuiFrame -Layout $runningLayout -Width $size.Width
             try {
-                try { Clear-Host } catch { }
-                Write-Host 'Running diagnostics...'
                 $result = Invoke-WdtReport @reportParameters
                 $lastExitCode = $result.ExitCode
-                Show-WdtTuiRunResult -Result $result
+                Show-WdtTuiRunResult -Result $result -Width $size.Width
             }
             catch {
                 $lastExitCode = 1
-                Write-Host ('Diagnostics failed: ' + $_.Exception.Message) -ForegroundColor Red
+                $errorLayout = Get-WdtTuiErrorLayout -Message $_.Exception.Message -Width $size.Width
+                Show-WdtTuiFrame -Layout $errorLayout -Width $size.Width
             }
+
             if ($useReadKey) {
-                Write-Host 'Press Enter to return to the menu or Escape to exit.'
                 try {
-                    if ([System.Console]::ReadKey($true).Key -eq [System.ConsoleKey]::Escape) { return $lastExitCode }
+                    $completionKey = [System.Console]::ReadKey($true)
+                    if ($completionKey.Key -eq [System.ConsoleKey]::Escape) { return $lastExitCode }
                 }
                 catch { $useReadKey = $false }
             }
@@ -471,6 +857,9 @@ function Invoke-WdtInteractiveSession {
         }
     }
     finally {
+        if ($null -ne $originalCursorVisible) {
+            try { [System.Console]::CursorVisible = $originalCursorVisible } catch { }
+        }
         Write-Host ''
     }
     return $lastExitCode
