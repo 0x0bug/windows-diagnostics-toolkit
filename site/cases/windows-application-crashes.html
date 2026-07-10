@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Find repeated Windows application crashes — Windows Diagnostics Toolkit</title>
+  <meta name="description" content="Use read-only PowerShell diagnostics to find repeated application crashes, hangs, BugCheck events, and recent dump metadata on Windows.">
+  <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/cases/windows-application-crashes.html">
+  <link rel="stylesheet" href="../assets/style.css">
+</head>
+<body>
+<header><nav class="wrap"><a class="brand" href="../">Windows Diagnostics Toolkit</a><div class="nav-links"><a href="./">Cases</a><a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a></div></nav></header>
+<main><section class="wrap"><div class="eyebrow">Troubleshooting case</div><h1>Windows application keeps crashing</h1><p class="lead">Confirm repeated failures using Event Log metadata and recent dump-file metadata without opening dump contents or changing Windows Error Reporting.</p><pre><code>pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Crashes -PrivacyMode -ExportMarkdown</code></pre><div class="grid"><article class="card"><h3>What it checks</h3><p>Application Error, Windows Error Reporting, Application Hang, system BugCheck events, and recent dump-file metadata.</p></article><article class="card"><h3>What it does not do</h3><p>It does not debug the dump, delete files, restart applications, or change recovery settings.</p></article></div><h2>Use the result</h2><p>Look for repeated providers, timestamps, application names, and fresh dumps. A repeated pattern is useful evidence for a vendor issue, driver conflict, or application-specific investigation.</p><p><a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit">Open the project on GitHub</a></p></section></main>
+<footer><div class="wrap">Review Privacy Mode reports before publishing them.</div></footer>
+</body>
+</html>
