@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://0x0bug.github.io/windows-diagnostics-toolkit/sitemap.xml
