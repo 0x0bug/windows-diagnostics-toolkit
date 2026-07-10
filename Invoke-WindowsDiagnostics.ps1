@@ -13,6 +13,14 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+$repositoryRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$reportCommonPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\report-common.ps1'
+if (-not (Test-Path -LiteralPath $reportCommonPath -PathType Leaf)) {
+    throw "Missing report helper: $reportCommonPath"
+}
+
+. $reportCommonPath
+
 function Get-CurrentPowerShellPath {
     try {
         $processPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
@@ -83,7 +91,7 @@ function Invoke-DiagnosticScript {
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
         $result.ExitCode = 1
         $result.ErrorLines = @("Missing script: $ScriptPath")
-        return [pscustomobject]$result
+        return Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
     }
 
     try {
@@ -101,6 +109,7 @@ function Invoke-DiagnosticScript {
         $startInfo.CreateNoWindow = $true
         $startInfo.StandardOutputEncoding = $utf8NoBom
         $startInfo.StandardErrorEncoding = $utf8NoBom
+        $startInfo.EnvironmentVariables['WDT_FINDING_PROTOCOL'] = '1'
 
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $startInfo
@@ -119,7 +128,7 @@ function Invoke-DiagnosticScript {
         $result.ErrorLines = @("Failed to run script: $($_.Exception.Message)")
     }
 
-    return [pscustomobject]$result
+    return Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
 }
 
 function Add-TextSection {
@@ -186,7 +195,80 @@ function Add-MarkdownSection {
     $Lines.Add('```')
 }
 
-$repositoryRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+function ConvertTo-MarkdownInlineText {
+    param([AllowEmptyString()][string]$Text)
+
+    if ($null -eq $Text) {
+        return ''
+    }
+
+    return $Text.Replace('\', '\\').Replace('`', '\`').Replace('*', '\*').Replace('[', '\[').Replace(']', '\]').Replace('<', '&lt;').Replace('>', '&gt;')
+}
+
+function Add-TextFindingsSummary {
+    param(
+        [System.Collections.Generic.List[string]]$Lines,
+        $Summary
+    )
+
+    $Lines.Add('')
+    $Lines.Add('== Findings Summary ==')
+    $Lines.Add(('Overall status : {0}' -f $Summary.OverallStatus))
+    $Lines.Add(('Errors         : {0}' -f $Summary.ErrorCount))
+    $Lines.Add(('Warnings       : {0}' -f $Summary.WarningCount))
+    $Lines.Add(('OK modules     : {0}' -f $Summary.OkModuleCount))
+    $Lines.Add('')
+
+    foreach ($finding in @($Summary.Items)) {
+        if ($finding.Severity -eq 'OK') {
+            $Lines.Add(('[OK] {0} - {1}' -f $finding.Module, $finding.Message))
+            continue
+        }
+
+        $line = '[{0}] {1} / {2} - {3}' -f $finding.Severity, $finding.Module, $finding.Code, $finding.Message
+        if (-not [string]::IsNullOrWhiteSpace($finding.Evidence)) {
+            $line += ' Evidence: {0}' -f $finding.Evidence
+        }
+
+        $Lines.Add($line)
+    }
+}
+
+function Add-MarkdownFindingsSummary {
+    param(
+        [System.Collections.Generic.List[string]]$Lines,
+        $Summary
+    )
+
+    $Lines.Add('')
+    $Lines.Add('## Findings Summary')
+    $Lines.Add('')
+    $Lines.Add(('- Overall status: `{0}`' -f $Summary.OverallStatus))
+    $Lines.Add(('- Errors: `{0}`' -f $Summary.ErrorCount))
+    $Lines.Add(('- Warnings: `{0}`' -f $Summary.WarningCount))
+    $Lines.Add(('- OK modules: `{0}`' -f $Summary.OkModuleCount))
+    $Lines.Add('')
+
+    foreach ($finding in @($Summary.Items)) {
+        $module = ConvertTo-MarkdownInlineText -Text $finding.Module
+        $message = ConvertTo-MarkdownInlineText -Text $finding.Message
+
+        if ($finding.Severity -eq 'OK') {
+            $Lines.Add(('- `[OK]` **{0}** - {1}' -f $module, $message))
+            continue
+        }
+
+        $code = ConvertTo-MarkdownInlineText -Text $finding.Code
+        $line = '- `[{0}]` **{1} / {2}** - {3}' -f $finding.Severity, $module, $code, $message
+        if (-not [string]::IsNullOrWhiteSpace($finding.Evidence)) {
+            $evidence = ConvertTo-MarkdownInlineText -Text $finding.Evidence
+            $line += ' Evidence: {0}' -f $evidence
+        }
+
+        $Lines.Add($line)
+    }
+}
+
 $selectedAll = $All -or (-not $System -and -not $Network -and -not $Disk -and -not $Events -and -not $Services -and -not $Updates)
 $selectedChecks = New-Object System.Collections.Generic.List[object]
 
@@ -256,6 +338,8 @@ foreach ($check in $selectedChecks) {
     $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot))
 }
 
+$findingsSummary = Get-WdtFindingsSummary -Results @($results.ToArray())
+
 $textLines = New-Object System.Collections.Generic.List[string]
 $textLines.Add('Windows Diagnostics Toolkit - Support Report')
 $textLines.Add(('Created at    : {0}' -f $createdAt))
@@ -263,6 +347,8 @@ $textLines.Add(('Computer name : {0}' -f $env:COMPUTERNAME))
 $textLines.Add(('Mode          : read-only'))
 $textLines.Add(('Output        : {0}' -f $textReportPath))
 $textLines.Add(('Selected      : {0}' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
+
+Add-TextFindingsSummary -Lines $textLines -Summary $findingsSummary
 
 foreach ($result in $results) {
     Add-TextSection -Lines $textLines -Result $result
@@ -280,6 +366,8 @@ if ($ExportMarkdown) {
     $markdownLines.Add(('- Mode: `read-only`'))
     $markdownLines.Add(('- TXT report: `{0}`' -f $textReportPath))
     $markdownLines.Add(('- Selected: `{0}`' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
+
+    Add-MarkdownFindingsSummary -Lines $markdownLines -Summary $findingsSummary
 
     foreach ($result in $results) {
         Add-MarkdownSection -Lines $markdownLines -Result $result
