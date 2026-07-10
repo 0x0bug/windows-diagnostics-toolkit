@@ -69,8 +69,8 @@ Assert-Allowed '[System.IO.File]::WriteAllLines($textReportPath, $textLines, [Sy
 Assert-Allowed 'function Invoke-DiagnosticScript { $process.Start() }' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { [System.Console]::ReadKey($true) }' 'scripts\tui.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { Read-Host ''Output directory'' }' 'scripts\tui.ps1'
-Assert-Allowed 'function Show-WdtTuiScreen { Clear-Host }' 'scripts\tui.ps1'
-Assert-Allowed 'function Invoke-WdtInteractiveSession { Clear-Host }' 'scripts\tui.ps1'
+Assert-Allowed 'function Show-WdtTuiFrame { Clear-Host; [System.Console]::SetCursorPosition(0, 0) }' 'scripts\tui.ps1'
+Assert-Allowed 'function Invoke-WdtInteractiveSession { $old = [System.Console]::CursorVisible; [System.Console]::CursorVisible = $false; [System.Console]::CursorVisible = $old }' 'scripts\tui.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { Invoke-WdtReport @reportParameters }' 'scripts\tui.ps1'
 
 $allowedCallbacks = @'
@@ -145,6 +145,9 @@ foreach ($source in @(
 Assert-Denied 'function Other { [System.Console]::ReadKey($true) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
 Assert-Denied 'function Invoke-WdtInteractiveSession { [System.Console]::ReadKey($false) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
 Assert-Denied 'function Invoke-WdtInteractiveSession { [System.Console]::ReadKey() }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
+Assert-Denied 'function Other { [System.Console]::SetCursorPosition(0, 0) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
+Assert-Denied 'function Show-WdtTuiFrame { [System.Console]::SetCursorPosition(1, 0) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
+Assert-Denied 'function Other { [System.Console]::CursorVisible = $false }' '*cursor visibility is only allowed*' 'scripts\tui.ps1'
 
 foreach ($source in @(
         'Start-Process calc.exe',
