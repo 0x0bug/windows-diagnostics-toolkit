@@ -30,6 +30,17 @@ cd windows-diagnostics-toolkit
 Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default; the menu lets you change the selected modules and output directory.
 The TUI uses a normal layout from 60x25 and a compact layout from 40x18. It uses console colors when available and keeps the same text markers in monochrome terminals. Below 40x18 it asks you to resize the window before showing the menu.
 
+If Windows PowerShell reports that script execution is disabled, use this process-only launch command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\Invoke-WindowsDiagnostics.ps1
+```
+
+This opens the same interactive TUI. The one-run execution-policy bypass applies only to the new PowerShell process; it does not change the machine-wide or current-user execution policy and does not require PowerShell 7.
+
+If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`. Installing PowerShell 7 is optional because the toolkit supports the built-in Windows PowerShell 5.1 command above.
+
 ### Command-line mode
 
 Explicit module switches run diagnostics immediately without opening the TUI:
@@ -39,16 +50,14 @@ Explicit module switches run diagnostics immediately without opening the TUI:
 .\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
 ```
 
-Windows PowerShell 5.1:
+Windows PowerShell 5.1 non-interactive example:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 ```
 
-The one-run execution-policy bypass applies only to that process. It does not change the machine-wide policy.
-
-If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`. Use the `powershell.exe` command above; installing PowerShell 7 is optional because the toolkit also supports the built-in Windows PowerShell 5.1.
+Without module switches the Windows PowerShell command opens the TUI. With `-All` or one or more module switches it runs directly in command-line mode.
 
 Reports are written to the current directory unless `-OutputDirectory` is provided:
 
