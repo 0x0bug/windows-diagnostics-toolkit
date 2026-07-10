@@ -3,6 +3,8 @@ param()
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path -Path $PSScriptRoot -ChildPath 'report-common.ps1')
+
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
     Write-Host ''
@@ -63,6 +65,7 @@ function Convert-CimDateTime {
     }
     catch {
         Write-Warning "Could not parse CIM date value. $($_.Exception.Message)"
+        Write-WdtFinding -Severity 'WARN' -Code 'SYSTEM_BOOT_TIME_UNAVAILABLE' -Message 'The last boot time could not be parsed, so uptime is unavailable.' -Evidence $_.Exception.Message
         return $null
     }
 }
@@ -98,6 +101,7 @@ if ($null -ne $os) {
 }
 else {
     Write-Host 'Windows details: unavailable'
+    Write-WdtFinding -Severity 'WARN' -Code 'SYSTEM_OS_UNAVAILABLE' -Message 'Windows operating system details are unavailable.' -Evidence 'Source: Win32_OperatingSystem'
 }
 
 Write-Section 'Hardware'
@@ -106,6 +110,7 @@ if ($null -ne $processor) {
 }
 else {
     Write-Host 'CPU           : unavailable'
+    Write-WdtFinding -Severity 'WARN' -Code 'SYSTEM_CPU_UNAVAILABLE' -Message 'Processor details are unavailable.' -Evidence 'Source: Win32_Processor'
 }
 
 if ($null -ne $computer) {
@@ -113,6 +118,7 @@ if ($null -ne $computer) {
 }
 else {
     Write-Host 'Memory        : unavailable'
+    Write-WdtFinding -Severity 'WARN' -Code 'SYSTEM_MEMORY_UNAVAILABLE' -Message 'Physical memory details are unavailable.' -Evidence 'Source: Win32_ComputerSystem'
 }
 
 if ($null -ne $gpuList) {
@@ -122,6 +128,7 @@ if ($null -ne $gpuList) {
 }
 else {
     Write-Host 'GPU           : unavailable'
+    Write-WdtFinding -Severity 'WARN' -Code 'SYSTEM_GPU_UNAVAILABLE' -Message 'Graphics adapter details are unavailable.' -Evidence 'Source: Win32_VideoController'
 }
 
 Write-Section 'System Drive'
@@ -138,4 +145,5 @@ if ($null -ne $systemDisk) {
 }
 else {
     Write-Host 'System drive details: unavailable'
+    Write-WdtFinding -Severity 'WARN' -Code 'SYSTEM_DRIVE_UNAVAILABLE' -Message 'System drive details are unavailable.' -Evidence 'Source: Win32_LogicalDisk'
 }

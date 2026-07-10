@@ -6,6 +6,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path -Path $PSScriptRoot -ChildPath 'report-common.ps1')
+
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
     Write-Host ''
@@ -151,6 +153,7 @@ $volumes = @(Get-VolumeInfo)
 Write-Section 'Physical Disks'
 if ($physicalDisks.Count -eq 0) {
     Write-Host 'No physical disk information available.'
+    Write-WdtFinding -Severity 'WARN' -Code 'DISK_INFORMATION_UNAVAILABLE' -Message 'Physical disk health information is unavailable.'
 }
 else {
     foreach ($disk in $physicalDisks) {
@@ -160,6 +163,18 @@ else {
         Write-Host ('Health       : {0}' -f $disk.HealthStatus)
         Write-Host ('Size         : {0}' -f (Format-Bytes -Bytes $disk.Size))
         Write-Host ('Source       : {0}' -f $disk.Source)
+
+        $healthStatus = [string]$disk.HealthStatus
+        if ([string]::IsNullOrWhiteSpace($healthStatus) -or $healthStatus -eq 'Unknown') {
+            Write-WdtFinding -Severity 'WARN' -Code 'DISK_HEALTH_UNKNOWN' -Message "Health status is unavailable for disk '$($disk.FriendlyName)'." -Evidence "Source: $($disk.Source)"
+        }
+        elseif ($healthStatus -eq 'Warning') {
+            Write-WdtFinding -Severity 'WARN' -Code 'DISK_HEALTH_WARNING' -Message "Disk '$($disk.FriendlyName)' reports a warning health state." -Evidence "Health status: $healthStatus"
+        }
+        elseif ($healthStatus -notin @('Healthy', 'OK')) {
+            Write-WdtFinding -Severity 'ERROR' -Code 'DISK_UNHEALTHY' -Message "Disk '$($disk.FriendlyName)' reports an unhealthy state." -Evidence "Health status: $healthStatus"
+        }
+
         Write-Host ''
     }
 }
@@ -167,6 +182,7 @@ else {
 Write-Section 'Volumes'
 if ($volumes.Count -eq 0) {
     Write-Host 'No volume information available.'
+    Write-WdtFinding -Severity 'WARN' -Code 'VOLUME_INFORMATION_UNAVAILABLE' -Message 'Volume free-space information is unavailable.'
 }
 else {
     foreach ($volume in $volumes) {
@@ -182,6 +198,7 @@ else {
 
         if ($null -ne $volume.FreePercent -and $volume.FreePercent -lt $LowFreeSpacePercent) {
             Write-Warning ("Drive {0} has less than {1}% free space." -f $volume.DriveLetter, $LowFreeSpacePercent)
+            Write-WdtFinding -Severity 'WARN' -Code 'VOLUME_LOW_FREE_SPACE' -Message ("Drive {0} has less than {1}% free space." -f $volume.DriveLetter, $LowFreeSpacePercent) -Evidence ('Free space: {0:N1}%' -f $volume.FreePercent)
         }
 
         Write-Host ''

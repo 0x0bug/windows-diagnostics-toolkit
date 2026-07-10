@@ -7,6 +7,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path -Path $PSScriptRoot -ChildPath 'report-common.ps1')
+
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
     Write-Host ''
@@ -172,6 +174,7 @@ $adapterConfigurations = @(Get-AdapterConfiguration)
 Write-Section 'Active Network Adapters'
 if ($adapterConfigurations.Count -eq 0) {
     Write-Host 'No active network adapters found.'
+    Write-WdtFinding -Severity 'WARN' -Code 'NETWORK_NO_ACTIVE_ADAPTER' -Message 'No active network adapters were found.'
 }
 else {
     foreach ($adapter in $adapterConfigurations) {
@@ -195,15 +198,31 @@ $gateways = $adapterConfigurations |
 
 if ($gateways) {
     foreach ($gateway in $gateways) {
-        Write-Host ('{0}: {1}' -f $gateway, (Test-HostReachability -Target $gateway -Timeout $TimeoutSeconds))
+        $gatewayResult = Test-HostReachability -Target $gateway -Timeout $TimeoutSeconds
+        Write-Host ('{0}: {1}' -f $gateway, $gatewayResult)
+
+        if ($gatewayResult -ne 'Reachable') {
+            Write-WdtFinding -Severity 'WARN' -Code 'NETWORK_GATEWAY_UNREACHABLE' -Message "The default gateway '$gateway' is not reachable." -Evidence $gatewayResult
+        }
     }
 }
 else {
     Write-Host 'No IPv4 gateway detected.'
+    Write-WdtFinding -Severity 'WARN' -Code 'NETWORK_NO_GATEWAY' -Message 'No IPv4 default gateway was detected.'
 }
 
 Write-Section 'DNS Resolution'
-Write-Host ('{0}: {1}' -f $DnsTestName, (Test-DnsResolution -Name $DnsTestName))
+$dnsResult = Test-DnsResolution -Name $DnsTestName
+Write-Host ('{0}: {1}' -f $DnsTestName, $dnsResult)
+
+if ($dnsResult -ne 'Skipped' -and $dnsResult -notmatch '^Resolved:') {
+    Write-WdtFinding -Severity 'WARN' -Code 'NETWORK_DNS_FAILED' -Message "DNS resolution failed for '$DnsTestName'." -Evidence $dnsResult
+}
 
 Write-Section 'Internet Connectivity'
-Write-Host ('{0}: {1}' -f $InternetTestHost, (Test-HostReachability -Target $InternetTestHost -Timeout $TimeoutSeconds))
+$internetResult = Test-HostReachability -Target $InternetTestHost -Timeout $TimeoutSeconds
+Write-Host ('{0}: {1}' -f $InternetTestHost, $internetResult)
+
+if ($internetResult -ne 'Reachable' -and $internetResult -ne 'Skipped') {
+    Write-WdtFinding -Severity 'WARN' -Code 'NETWORK_INTERNET_UNREACHABLE' -Message "The internet connectivity target '$InternetTestHost' is not reachable." -Evidence $internetResult
+}
