@@ -149,6 +149,7 @@ foreach ($routingCase in @(
     Assert-True ($childText.Contains('Interactive input is unavailable.')) ("Redirected stdin message is missing for {0}." -f $routingCase.Name)
     Assert-True ($childText.Contains('Use -All or select one or more diagnostic modules.')) ("Redirected stdin guidance is missing for {0}." -f $routingCase.Name)
 }
+$global:LASTEXITCODE = 0
 
 foreach ($routingCase in @(
         [pscustomobject]@{ Arguments = @('-System'); Expected = 'CommandLine' },
