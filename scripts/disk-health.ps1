@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-. (Join-Path -Path $PSScriptRoot -ChildPath 'report-common.ps1')
+. $PSScriptRoot\report-common.ps1
 
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
@@ -33,27 +33,16 @@ function Format-Bytes {
     return ('{0:N2} {1}' -f $value, $units[$index])
 }
 
-function Invoke-SafeCommand {
-    param(
-        [Parameter(Mandatory = $true)][scriptblock]$ScriptBlock,
-        [Parameter(Mandatory = $true)][string]$WarningMessage
-    )
-
-    try {
-        return & $ScriptBlock
-    }
-    catch {
-        Write-Warning "$WarningMessage $($_.Exception.Message)"
-        return $null
-    }
-}
-
 function Get-PhysicalDiskInfo {
     $physicalDiskCommand = Get-Command -Name Get-PhysicalDisk -ErrorAction SilentlyContinue
 
     if ($null -ne $physicalDiskCommand) {
-        $physicalDisks = Invoke-SafeCommand -WarningMessage 'Could not read physical disks with Get-PhysicalDisk. Some systems require elevated permissions for storage details.' -ScriptBlock {
-            Get-PhysicalDisk
+        $physicalDisks = $null
+        try {
+            $physicalDisks = Get-PhysicalDisk
+        }
+        catch {
+            Write-Warning "Could not read physical disks with Get-PhysicalDisk. Some systems require elevated permissions for storage details. $($_.Exception.Message)"
         }
 
         if ($null -ne $physicalDisks) {
@@ -72,7 +61,7 @@ function Get-PhysicalDiskInfo {
         }
     }
 
-    Invoke-SafeCommand -WarningMessage 'Could not read physical disks with CIM fallback.' -ScriptBlock {
+    try {
         Get-CimInstance -ClassName Win32_DiskDrive |
             ForEach-Object {
                 [pscustomobject]@{
@@ -85,14 +74,22 @@ function Get-PhysicalDiskInfo {
                 }
             }
     }
+    catch {
+        Write-Warning "Could not read physical disks with CIM fallback. $($_.Exception.Message)"
+        return $null
+    }
 }
 
 function Get-VolumeInfo {
     $volumeCommand = Get-Command -Name Get-Volume -ErrorAction SilentlyContinue
 
     if ($null -ne $volumeCommand) {
-        $volumes = Invoke-SafeCommand -WarningMessage 'Could not read volumes with Get-Volume. Some systems require elevated permissions for storage details.' -ScriptBlock {
-            Get-Volume | Where-Object { $_.DriveLetter }
+        $volumes = $null
+        try {
+            $volumes = Get-Volume | Where-Object { $_.DriveLetter }
+        }
+        catch {
+            Write-Warning "Could not read volumes with Get-Volume. Some systems require elevated permissions for storage details. $($_.Exception.Message)"
         }
 
         if ($null -ne $volumes) {
@@ -120,7 +117,7 @@ function Get-VolumeInfo {
         }
     }
 
-    Invoke-SafeCommand -WarningMessage 'Could not read logical disks with CIM fallback.' -ScriptBlock {
+    try {
         Get-CimInstance -ClassName Win32_LogicalDisk -Filter 'DriveType=3' |
             ForEach-Object {
                 $size = $_.Size
@@ -141,6 +138,10 @@ function Get-VolumeInfo {
                     Source      = 'Win32_LogicalDisk'
                 }
             }
+    }
+    catch {
+        Write-Warning "Could not read logical disks with CIM fallback. $($_.Exception.Message)"
+        return $null
     }
 }
 
