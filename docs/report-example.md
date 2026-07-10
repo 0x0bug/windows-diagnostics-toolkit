@@ -16,17 +16,18 @@ Computer name : <HOST-1>
 Mode          : read-only
 Privacy mode  : enabled
 Output        : <USER-1>\WindowsDiagnosticsReport-20260709-101530.txt
-Selected      : System Information, Security Posture, Performance Snapshot, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check
+Selected      : System Information, Security Posture, Performance Snapshot, Network Check, Disk Health, Crash and Hang Diagnostics, Event Log Check, Services Check, Windows Update Check
 
 == Findings Summary ==
 Overall status : ERROR
 Errors         : 1
-Warnings       : 5
+Warnings       : 6
 OK modules     : 2
 
 [ERROR] Disk Health / DISK_UNHEALTHY - An example disk reported an unhealthy state. Evidence: Health=Unhealthy
 [WARN] Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED - One or more BitLocker volumes are not protected.
 [WARN] Performance Snapshot / PERFORMANCE_MEMORY_LOW - Available physical memory is below the warning threshold.
+[WARN] Crash and Hang Diagnostics / CRASH_RECENT_DUMPS_FOUND - Recent crash dump files were found.
 [WARN] Network Check / NETWORK_DNS_FAILED - DNS resolution did not complete successfully.
 [WARN] Event Log Check / RECENT_ERROR_EVENTS - Recent error events were found.
 [WARN] Services Check / SERVICE_STATE_ISSUES - One or more services need attention.
@@ -166,6 +167,27 @@ Free space   : 420.00 GB
 Free percent : 45.2%
 Source       : Get-Volume
 
+== Crash and Hang Diagnostics ==
+Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\crash-hang-diagnostics.ps1
+Exit code: 0
+
+Windows Diagnostics Toolkit - Crash and Hang Diagnostics
+Mode: read-only
+
+== Summary ==
+Time window       : Last 7 day(s)
+Event limit       : 50
+Dump metadata limit: 20
+Application events: 1
+BugCheck events   : 0
+Recent dump files : 1
+
+== Recent Dump Metadata ==
+Name          : ExampleApp.exe.1234.dmp
+LastWriteTime : 07/09/2026 11:22:00
+Size          : 4.00 MB
+Source        : User CrashDumps
+
 == Event Log Check ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\event-log-check.ps1
 Exit code: 0
@@ -298,18 +320,19 @@ Skipped. Use -IncludeEventLog to include recent Windows Update related events.
 - Mode: `read-only`
 - Privacy mode: `enabled`
 - TXT report: `<USER-1>\WindowsDiagnosticsReport-20260709-101530.txt`
-- Selected: `System Information, Security Posture, Performance Snapshot, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check`
+- Selected: `System Information, Security Posture, Performance Snapshot, Network Check, Disk Health, Crash and Hang Diagnostics, Event Log Check, Services Check, Windows Update Check`
 
 ## Findings Summary
 
 - Overall status: `WARN`
 - Errors: `0`
-- Warnings: `4`
+- Warnings: `5`
 - OK modules: `2`
 
 - `[WARN]` **Event Log Check / RECENT_ERROR_EVENTS** - Recent error events were found.
 - `[WARN]` **Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED** - One or more BitLocker volumes are not protected.
 - `[WARN]` **Performance Snapshot / PERFORMANCE_MEMORY_LOW** - Available physical memory is below the warning threshold.
+- `[WARN]` **Crash and Hang Diagnostics / CRASH_RECENT_DUMPS_FOUND** - Recent crash dump files were found.
 - `[WARN]` **Services Check / SERVICE_STATE_ISSUES** - One or more services need attention.
 - `[OK]` **System Information** - No findings.
 - `[OK]` **Windows Update Check** - No findings.
@@ -362,6 +385,21 @@ Available percent     : 10.0%
 
 == Top Processes by Working Set ==
 ExampleApp                       512.00 MB
+```
+
+## Crash and Hang Diagnostics
+
+- Command: `pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\crash-hang-diagnostics.ps1`
+- Exit code: `0`
+
+```text
+Windows Diagnostics Toolkit - Crash and Hang Diagnostics
+Mode: read-only
+
+== Recent Dump Metadata ==
+Name          : ExampleApp.exe.1234.dmp
+Size          : 4.00 MB
+Source        : User CrashDumps
 ```
 
 ## Event Log Check

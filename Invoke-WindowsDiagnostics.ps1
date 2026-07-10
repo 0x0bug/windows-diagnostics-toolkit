@@ -6,6 +6,7 @@ param(
     [switch]$Performance,
     [switch]$Network,
     [switch]$Disk,
+    [switch]$Crashes,
     [switch]$Events,
     [switch]$Services,
     [switch]$Updates,
@@ -307,7 +308,7 @@ function Protect-WdtDiagnosticResults {
     }
 }
 
-$selectedAll = $All -or (-not $System -and -not $Security -and -not $Performance -and -not $Network -and -not $Disk -and -not $Events -and -not $Services -and -not $Updates)
+$selectedAll = $All -or (-not $System -and -not $Security -and -not $Performance -and -not $Network -and -not $Disk -and -not $Crashes -and -not $Events -and -not $Services -and -not $Updates)
 $selectedChecks = New-Object System.Collections.Generic.List[object]
 
 if ($selectedAll -or $System) {
@@ -342,6 +343,13 @@ if ($selectedAll -or $Disk) {
     $selectedChecks.Add([pscustomobject]@{
         Title = 'Disk Health'
         Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\disk-health.ps1'
+    })
+}
+
+if ($selectedAll -or $Crashes) {
+    $selectedChecks.Add([pscustomobject]@{
+        Title = 'Crash and Hang Diagnostics'
+        Path  = Join-Path -Path $repositoryRoot -ChildPath 'scripts\crash-hang-diagnostics.ps1'
     })
 }
 
