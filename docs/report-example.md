@@ -1,17 +1,21 @@
 # Support Report Example
 
 This is an anonymized example of the report structure created by
-`Invoke-WindowsDiagnostics.ps1`. Values such as computer names, addresses, MAC
-addresses, and labels are placeholders.
+`Invoke-WindowsDiagnostics.ps1 -PrivacyMode`. Privacy Mode assigns stable typed
+tokens within one report and resets its token map before the next report. The
+examples use `<HOST-1>`, `<USER-1>`, `<IP-1>`, and `<MAC-1>`;
+when present, SIDs, GUIDs, and device identifiers use tokens such as `<ID-1>`.
+Process, application, and dump-file names remain visible for diagnostic context.
 
 ## TXT Report
 
 ```text
 Windows Diagnostics Toolkit - Support Report
 Created at    : 2026-07-09 10:15:30 +02:00
-Computer name : DESKTOP-EXAMPLE
+Computer name : <HOST-1>
 Mode          : read-only
-Output        : C:\Example\WindowsDiagnosticsReport-20260709-101530.txt
+Privacy mode  : enabled
+Output        : <USER-1>\WindowsDiagnosticsReport-20260709-101530.txt
 Selected      : System Information, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check
 
 == Findings Summary ==
@@ -35,7 +39,7 @@ Windows Diagnostics Toolkit - System Information
 Mode: read-only
 
 == Windows ==
-Computer name : DESKTOP-EXAMPLE
+Computer name : <HOST-1>
 Caption       : Microsoft Windows 11 Pro
 Version       : 10.0.26100
 Build number  : 26100
@@ -65,20 +69,20 @@ Mode: read-only
 Name        : Ethernet
 Description : Example Network Adapter
 Status      : Up
-MAC         : 00-00-00-00-00-00
-IPv4        : 192.0.2.10
+MAC         : <MAC-1>
+IPv4        : <IP-1>
 IPv6        : None
-Gateway     : 192.0.2.1
-DNS servers : 192.0.2.53
+Gateway     : <IP-2>
+DNS servers : <IP-3>
 
 == Gateway Reachability ==
-192.0.2.1: Reachable
+<IP-2>: Reachable
 
 == DNS Resolution ==
 example.invalid: Resolution failed.
 
 == Internet Connectivity ==
-192.0.2.200: Reachable
+<IP-4>: Reachable
 
 == Disk Health ==
 Command: pwsh.exe -NoProfile -ExecutionPolicy Bypass -File scripts\disk-health.ps1
@@ -204,12 +208,12 @@ Indicators found: None
 HotFixID   : KB5000001
 Description: Security Update
 InstalledOn: 07/08/2026 00:00:00
-InstalledBy: ExampleUser
+InstalledBy: <USER-1>
 
 HotFixID   : KB5000002
 Description: Update
 InstalledOn: 07/05/2026 00:00:00
-InstalledBy: ExampleUser
+InstalledBy: <USER-1>
 
 == Windows Update Services ==
 Name       : wuauserv
@@ -232,10 +236,11 @@ Skipped. Use -IncludeEventLog to include recent Windows Update related events.
 # Windows Diagnostics Toolkit - Support Report
 
 - Created at: `2026-07-09 10:15:30 +02:00`
-- Computer name: `DESKTOP-EXAMPLE`
+- Computer name: `<HOST-1>`
 - Mode: `read-only`
-- TXT report: `C:\Example\WindowsDiagnosticsReport-20260709-101530.txt`
-- Selected: `System Information, Event Log Check, Services Check, Windows Update Check`
+- Privacy mode: `enabled`
+- TXT report: `<USER-1>\WindowsDiagnosticsReport-20260709-101530.txt`
+- Selected: `System Information, Network Check, Disk Health, Event Log Check, Services Check, Windows Update Check`
 
 ## Findings Summary
 
@@ -259,7 +264,7 @@ Windows Diagnostics Toolkit - System Information
 Mode: read-only
 
 == Windows ==
-Computer name : DESKTOP-EXAMPLE
+Computer name : <HOST-1>
 Caption       : Microsoft Windows 11 Pro
 Version       : 10.0.26100
 Build number  : 26100

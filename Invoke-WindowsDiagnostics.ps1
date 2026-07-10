@@ -8,7 +8,8 @@ param(
     [switch]$Services,
     [switch]$Updates,
     [string]$OutputDirectory = (Get-Location).Path,
-    [switch]$ExportMarkdown
+    [switch]$ExportMarkdown,
+    [switch]$PrivacyMode
 )
 
 $ErrorActionPreference = 'Stop'
@@ -269,6 +270,41 @@ function Add-MarkdownFindingsSummary {
     }
 }
 
+function Protect-WdtDiagnosticResults {
+    param(
+        [Parameter(Mandatory = $true)][object[]]$Results,
+        $Context
+    )
+
+    foreach ($result in @($Results)) {
+        $result.Command = Protect-WdtSensitiveUrlText -Text ([string]$result.Command)
+        $result.OutputLines = @($result.OutputLines | ForEach-Object { Protect-WdtSensitiveUrlText -Text ([string]$_) })
+        $result.ErrorLines = @($result.ErrorLines | ForEach-Object { Protect-WdtSensitiveUrlText -Text ([string]$_) })
+
+        foreach ($finding in @($result.Findings)) {
+            $finding.Message = Protect-WdtSensitiveUrlText -Text ([string]$finding.Message)
+            if (-not [string]::IsNullOrWhiteSpace($finding.Evidence)) {
+                $finding.Evidence = Protect-WdtSensitiveUrlText -Text ([string]$finding.Evidence)
+            }
+        }
+
+        if ($null -eq $Context) {
+            continue
+        }
+
+        $result.Command = Protect-WdtText -Text ([string]$result.Command) -Context $Context
+        $result.OutputLines = @($result.OutputLines | ForEach-Object { Protect-WdtText -Text ([string]$_) -Context $Context })
+        $result.ErrorLines = @($result.ErrorLines | ForEach-Object { Protect-WdtText -Text ([string]$_) -Context $Context })
+
+        foreach ($finding in @($result.Findings)) {
+            $finding.Message = Protect-WdtText -Text ([string]$finding.Message) -Context $Context
+            if (-not [string]::IsNullOrWhiteSpace($finding.Evidence)) {
+                $finding.Evidence = Protect-WdtText -Text ([string]$finding.Evidence) -Context $Context
+            }
+        }
+    }
+}
+
 $selectedAll = $All -or (-not $System -and -not $Network -and -not $Disk -and -not $Events -and -not $Services -and -not $Updates)
 $selectedChecks = New-Object System.Collections.Generic.List[object]
 
@@ -338,14 +374,32 @@ foreach ($check in $selectedChecks) {
     $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot))
 }
 
+$privacyModeLabel = if ($PrivacyMode) { 'enabled' } else { 'disabled' }
+$displayComputerName = [string]$env:COMPUTERNAME
+$displayTextReportPath = $textReportPath
+$displayMarkdownReportPath = $markdownReportPath
+$redactionContext = $null
+
+if ($PrivacyMode) {
+    $redactionContext = New-WdtRedactionContext
+    if (-not [string]::IsNullOrWhiteSpace($displayComputerName)) {
+        $displayComputerName = Get-WdtRedactionToken -Context $redactionContext -Category HOST -Value $displayComputerName
+    }
+    $displayTextReportPath = Protect-WdtText -Text $textReportPath -Context $redactionContext
+    $displayMarkdownReportPath = Protect-WdtText -Text $markdownReportPath -Context $redactionContext
+}
+
+Protect-WdtDiagnosticResults -Results @($results.ToArray()) -Context $redactionContext
+
 $findingsSummary = Get-WdtFindingsSummary -Results @($results.ToArray())
 
 $textLines = New-Object System.Collections.Generic.List[string]
 $textLines.Add('Windows Diagnostics Toolkit - Support Report')
 $textLines.Add(('Created at    : {0}' -f $createdAt))
-$textLines.Add(('Computer name : {0}' -f $env:COMPUTERNAME))
+$textLines.Add(('Computer name : {0}' -f $displayComputerName))
 $textLines.Add(('Mode          : read-only'))
-$textLines.Add(('Output        : {0}' -f $textReportPath))
+$textLines.Add(('Privacy mode  : {0}' -f $privacyModeLabel))
+$textLines.Add(('Output        : {0}' -f $displayTextReportPath))
 $textLines.Add(('Selected      : {0}' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
 
 Add-TextFindingsSummary -Lines $textLines -Summary $findingsSummary
@@ -355,16 +409,17 @@ foreach ($result in $results) {
 }
 
 [System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)
-Write-Host ("TXT report written: {0}" -f $textReportPath)
+Write-Host ("TXT report written: {0}" -f $displayTextReportPath)
 
 if ($ExportMarkdown) {
     $markdownLines = New-Object System.Collections.Generic.List[string]
     $markdownLines.Add('# Windows Diagnostics Toolkit - Support Report')
     $markdownLines.Add('')
     $markdownLines.Add(('- Created at: `{0}`' -f $createdAt))
-    $markdownLines.Add(('- Computer name: `{0}`' -f $env:COMPUTERNAME))
+    $markdownLines.Add(('- Computer name: `{0}`' -f $displayComputerName))
     $markdownLines.Add(('- Mode: `read-only`'))
-    $markdownLines.Add(('- TXT report: `{0}`' -f $textReportPath))
+    $markdownLines.Add(('- Privacy mode: `{0}`' -f $privacyModeLabel))
+    $markdownLines.Add(('- TXT report: `{0}`' -f $displayTextReportPath))
     $markdownLines.Add(('- Selected: `{0}`' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
 
     Add-MarkdownFindingsSummary -Lines $markdownLines -Summary $findingsSummary
@@ -374,7 +429,7 @@ if ($ExportMarkdown) {
     }
 
     [System.IO.File]::WriteAllLines($markdownReportPath, $markdownLines, [System.Text.Encoding]::UTF8)
-    Write-Host ("Markdown report written: {0}" -f $markdownReportPath)
+    Write-Host ("Markdown report written: {0}" -f $displayMarkdownReportPath)
 }
 
 if (($results | Where-Object { $_.ExitCode -ne 0 }).Count -gt 0) {
