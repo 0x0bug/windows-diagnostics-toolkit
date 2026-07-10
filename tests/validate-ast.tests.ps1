@@ -55,8 +55,7 @@ foreach ($source in @(
         'Get-NetAdapter',
         'Get-ChildItem .',
         'Test-Path .',
-        'Resolve-Path .',
-        '[guid]::Parse("00000000-0000-0000-0000-000000000000")',
+        '[System.Guid]::TryParse("00000000-0000-0000-0000-000000000000", [ref]$guid)',
         '[System.Text.RegularExpressions.Regex]::Replace("a", "a", "b")',
         '$value.Trim().Replace("a", "b")'
     )) { Assert-Allowed $source }
@@ -145,14 +144,16 @@ Assert-Denied 'Invoke-CimMethod -InputObject $volume -MethodName GetProtectionSt
 
 foreach ($source in @(
         'Add-Type -TypeDefinition "public class X {}"',
-        'New-Object -ComObject WScript.Shell',
-        'New-Object -TypeName $typeName',
         'Invoke-Command -ScriptBlock { Get-Date }',
         'Start-Job { Get-Date }',
         'New-Alias bad Get-ChildItem',
         'Set-Alias bad Get-ChildItem',
         'iex "Get-Date"'
-    )) { Assert-Denied $source '*not permitted*' }
+    )) { Assert-Denied $source '*reviewed read-only allowlist*' }
+foreach ($source in @(
+        'New-Object -ComObject WScript.Shell',
+        'New-Object -TypeName $typeName'
+    )) { Assert-Denied $source '*reviewed safe-type allowlist*' }
 
 foreach ($source in @(
         '[Microsoft.Win32.Registry]::SetValue("HKCU\Software\Test", "X", "Y")',
@@ -166,13 +167,72 @@ foreach ($source in @(
         '[System.Environment]::SetEnvironmentVariable("X", "Y")',
         '[type]::GetType($name)',
         '[System.IO.File]::WriteAllLines($otherPath, $lines, [System.Text.Encoding]::UTF8)'
-    )) { Assert-Denied $source '*Static method can mutate system state or load dynamic code*' }
-Assert-Denied '[System.IO.File]::WriteAllLines($textReportPath, $lines, [System.Text.Encoding]::UTF8)' '*Static method can mutate system state or load dynamic code*' 'scripts\fixture.ps1'
+    )) { Assert-Denied $source '*Static method is not in the reviewed safe allowlist*' }
+Assert-Denied '[System.IO.File]::WriteAllLines($textReportPath, $lines, [System.Text.Encoding]::UTF8)' '*Static method is not in the reviewed safe allowlist*' 'scripts\fixture.ps1'
 
 foreach ($source in @(
         '$object.Delete()', '$object.Remove()', '$object.Put()', '$object.SetValue("x", "y")',
         '$service.Start()', '$process.Kill()', '$stream.Write($bytes)', '$client.DownloadFile("x", "y")'
-    )) { Assert-Denied $source '*Instance method can mutate system state*' }
-Assert-Denied '$process.Start()' '*Instance method can mutate system state*' 'scripts\fixture.ps1'
+    )) { Assert-Denied $source '*Instance method is not in the reviewed safe allowlist*' }
+Assert-Denied '$process.Start()' '*Instance method is not in the reviewed safe allowlist*' 'scripts\fixture.ps1'
+
+foreach ($source in @(
+        'Set-Content .\owned.txt ''data''',
+        'Add-Content .\owned.txt ''data''',
+        '''data'' | Out-File .\owned.txt',
+        'Copy-Item source destination',
+        'Move-Item source destination',
+        'Rename-Item old new',
+        'Stop-Process -Id $PID',
+        'Import-Module .\untrusted.psm1'
+    )) { Assert-Denied $source '*PowerShell command is not in the reviewed read-only allowlist*' }
+
+foreach ($source in @(
+        'Write-Output ''data'' > .\owned.txt',
+        'Write-Output ''data'' >> .\owned.txt',
+        'Get-ChildItem 2> .\error.txt',
+        'Write-Output ''data'' *> .\owned.txt'
+    )) { Assert-Denied $source '*PowerShell redirection is not permitted in production scripts*' }
+
+foreach ($source in @(
+        'New-Object System.IO.StreamWriter ''.\owned.txt''',
+        'New-Object System.Management.Automation.PowerShell',
+        'New-Object -TypeName System.Uri -ComObject WScript.Shell'
+    )) { Assert-Denied $source '*New-Object type is not in the reviewed safe-type allowlist*' }
+
+Assert-Denied '[System.IO.File]::Create(''.\owned.txt'')' '*Static method is not in the reviewed safe allowlist*'
+Assert-Denied '[System.IO.File]::OpenWrite(''.\owned.txt'')' '*Static method is not in the reviewed safe allowlist*'
+Assert-Denied '[System.IO.FileStream]::new(''.\owned.txt'', [System.IO.FileMode]::Create)' '*Static method is not in the reviewed safe allowlist*'
+Assert-Denied '[System.IO.StreamWriter]::new(''.\owned.txt'')' '*Static method is not in the reviewed safe allowlist*'
+Assert-Denied '([scriptblock]::Create(''Set-Content .\owned.txt data'')).Invoke()' '*reviewed safe allowlist*'
+Assert-Denied '[System.Management.Automation.PowerShell]::Create().AddScript(''Set-Content .\owned.txt data'').Invoke()' '*reviewed safe allowlist*'
+Assert-Denied '$ExecutionContext.InvokeCommand.InvokeScript(''Get-Date'')' '*Instance method is not in the reviewed safe allowlist*'
+
+foreach ($source in @(
+        'New-Item -ItemType Directory -Path $otherPath -Force',
+        'New-Item -ItemType File -Path $resolvedOutputDirectory -Force',
+        'New-Item -ItemType Directory -Path $resolvedOutputDirectory',
+        'New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force -Name extra',
+        'New-Item -ItemType Directory -Path $otherPath -Force -Name ''-Path $resolvedOutputDirectory''',
+        'New-Item -Path $resolvedOutputDirectory -Path $otherPath -ItemType Directory -Force',
+        'New-Item @parameters'
+    )) { Assert-Denied $source '*New-Item is only allowed*' 'Invoke-WindowsDiagnostics.ps1' }
+
+Assert-Denied 'using module .\module.psm1' '*Module import is not permitted in production scripts*'
+Assert-Denied '#requires -Modules SomeModule' '*Script module requirements are not permitted in production scripts*'
+
+function Assert-ProductionPolicyClassification {
+    $productionScripts = @((Get-Item (Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'))) + @(Get-ChildItem (Join-Path $repositoryRoot 'scripts') -Filter '*.ps1' -File)
+    foreach ($script in $productionScripts) {
+        $tokens = $null
+        $parseErrors = $null
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($script.FullName, [ref]$tokens, [ref]$parseErrors)
+        Assert-True (@($parseErrors).Count -eq 0) ("Production script did not parse: {0}" -f $script.Name)
+        $issues = @(Get-WdtSafetyIssues -Ast $ast -ScriptPath $script.FullName -RepositoryRoot $repositoryRoot)
+        Assert-True ($issues.Count -eq 0) ("Production command inventory contains unclassified policy entries in {0}: {1}" -f $script.Name, (($issues | ForEach-Object Message) -join '; '))
+    }
+}
+
+Assert-ProductionPolicyClassification
 
 Write-Host 'Validation AST policy tests passed.'

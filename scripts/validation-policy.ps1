@@ -54,9 +54,31 @@ function Test-WdtAllowedDotSource {
 function Test-WdtAllowedNewItemCommand {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
     if (-not (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return $false }
+    if ($CommandAst.Redirections.Count -ne 0) { return $false }
+
     $elements = @($CommandAst.CommandElements)
-    $text = $CommandAst.Extent.Text
-    return $text -match '(?i)-ItemType\s+Directory' -and $text -match '(?i)-Path\s+\$resolvedOutputDirectory' -and $text -match '(?i)-Force'
+    $parameters = @{}
+    for ($index = 1; $index -lt $elements.Count; $index++) {
+        if ($elements[$index] -isnot [System.Management.Automation.Language.CommandParameterAst]) { return $false }
+
+        $parameter = $elements[$index]
+        $name = $parameter.ParameterName
+        if ($name -notin @('ItemType', 'Path', 'Force') -or $parameters.ContainsKey($name)) { return $false }
+        if ($name -eq 'Force') {
+            if ($parameter.ArgumentName) { return $false }
+            $parameters[$name] = $true
+            continue
+        }
+
+        if ($index + 1 -ge $elements.Count) { return $false }
+        $parameters[$name] = $elements[$index + 1]
+        $index++
+    }
+
+    if ($parameters.Count -ne 3 -or -not $parameters.ContainsKey('ItemType') -or -not $parameters.ContainsKey('Path') -or -not $parameters.ContainsKey('Force')) { return $false }
+    return $parameters['ItemType'] -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+        $parameters['ItemType'].Value -ceq 'Directory' -and
+        (Test-WdtSimpleVariable $parameters['Path'] 'resolvedOutputDirectory')
 }
 
 function Test-WdtScriptPath {
@@ -149,6 +171,134 @@ function Test-WdtAllowedBitLockerCimQuery {
     return $true
 }
 
+function Test-WdtAllowedNativeRedirection {
+    param($CommandAst)
+
+    if ($CommandAst.Redirections.Count -eq 0) { return $true }
+    if ($CommandAst.Redirections.Count -ne 1) { return $false }
+
+    $redirection = $CommandAst.Redirections[0]
+    return $redirection -is [System.Management.Automation.Language.MergingRedirectionAst] -and
+        $redirection.FromStream -eq [System.Management.Automation.Language.RedirectionStream]::Error -and
+        $redirection.ToStream -eq [System.Management.Automation.Language.RedirectionStream]::Output
+}
+
+function Get-WdtNewObjectTypeName {
+    param($CommandAst)
+
+    $elements = @($CommandAst.CommandElements)
+    if ($elements.Count -lt 2) { return $null }
+    if ($elements[1] -is [System.Management.Automation.Language.CommandParameterAst]) {
+        if ($elements[1].ParameterName -ine 'TypeName' -or $elements.Count -lt 3) { return $null }
+        $typeElement = $elements[2]
+    }
+    else {
+        $typeElement = $elements[1]
+    }
+
+    if ($typeElement -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) { return $null }
+    return $typeElement.Value
+}
+
+function Test-WdtAllowedNewObjectCommand {
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
+
+    if ($CommandAst.Redirections.Count -ne 0) { return $false }
+    $elements = @($CommandAst.CommandElements)
+    $hasPositionalTypeName = $elements.Count -gt 1 -and $elements[1] -isnot [System.Management.Automation.Language.CommandParameterAst]
+    $seenParameters = @{}
+    for ($index = 1; $index -lt $elements.Count; $index++) {
+        $element = $elements[$index]
+        if ($element -is [System.Management.Automation.Language.VariableExpressionAst] -and $element.Splatted) { return $false }
+        if ($element -isnot [System.Management.Automation.Language.CommandParameterAst]) { continue }
+
+        $parameterName = $element.ParameterName
+        if ($parameterName -notin @('TypeName', 'ArgumentList') -or $seenParameters.ContainsKey($parameterName)) { return $false }
+        if ($hasPositionalTypeName -and $parameterName -eq 'TypeName') { return $false }
+        $seenParameters[$parameterName] = $true
+        if ($index + 1 -ge $elements.Count) { return $false }
+        if ($parameterName -eq 'TypeName' -and $elements[$index + 1] -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) { return $false }
+        $index++
+    }
+
+    $typeName = Get-WdtNewObjectTypeName $CommandAst
+    if ([string]::IsNullOrWhiteSpace($typeName)) { return $false }
+
+    $safeTypes = @(
+        'System.Uri',
+        'System.Text.UTF8Encoding',
+        'System.Collections.Hashtable',
+        'System.Text.StringBuilder',
+        'System.Text.RegularExpressions.Regex',
+        'System.Collections.Generic.List[object]',
+        'System.Collections.Generic.List[string]',
+        'System.Collections.Generic.List[System.IO.FileInfo]',
+        'System.Collections.Generic.Queue[System.IO.DirectoryInfo]'
+    )
+    if ($typeName -in $safeTypes) { return $true }
+
+    if ($typeName -in @('System.Diagnostics.ProcessStartInfo', 'System.Diagnostics.Process') -and
+        (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+        (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-DiagnosticScript' -and
+        $CommandAst.CommandElements.Count -eq 2) {
+        return $true
+    }
+
+    return $false
+}
+
+function Test-WdtAllowedPowerShellCommand {
+    param([string]$CommandName)
+
+    return $CommandName -in @(
+        'Add-Member',
+        'Confirm-SecureBootUEFI',
+        'ConvertFrom-Json',
+        'ConvertTo-Json',
+        'ForEach-Object',
+        'Get-BitLockerVolume',
+        'Get-ChildItem',
+        'Get-CimInstance',
+        'Get-Command',
+        'Get-Date',
+        'Get-DnsClient',
+        'Get-DnsClientGlobalSetting',
+        'Get-HotFix',
+        'Get-Item',
+        'Get-ItemProperty',
+        'Get-Location',
+        'Get-MpComputerStatus',
+        'Get-NetAdapter',
+        'Get-NetFirewallProfile',
+        'Get-NetIPConfiguration',
+        'Get-NetIPInterface',
+        'Get-NetRoute',
+        'Get-PhysicalDisk',
+        'Get-Process',
+        'Get-ScheduledTask',
+        'Get-ScheduledTaskInfo',
+        'Get-TimeZone',
+        'Get-Tpm',
+        'Get-Volume',
+        'Get-WinEvent',
+        'Group-Object',
+        'Join-Path',
+        'Measure-Object',
+        'Out-Null',
+        'Resolve-DnsName',
+        'Select-Object',
+        'Sort-Object',
+        'Split-Path',
+        'Start-Sleep',
+        'Test-Connection',
+        'Test-Path',
+        'Where-Object',
+        'Write-Host',
+        'Write-Output',
+        'Write-Warning'
+    )
+}
+
 function Get-WdtCommandSafetyIssue {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot, [string[]]$LocalFunctionNames)
     if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Dot) {
@@ -160,32 +310,48 @@ function Get-WdtCommandSafetyIssue {
         if (Test-WdtAllowedInternalCallbackInvocation $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts. Only approved internal callbacks are permitted.'
     }
+
     $leaf = Split-Path -Leaf ($rawName -replace '/', '\\')
-    if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Ampersand -and $leaf -notmatch '(?i)^(w32tm|netsh)\.exe$') { return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts.' }
-    $extension = [IO.Path]::GetExtension($leaf)
-    $resolved = Get-Command -Name $leaf -ErrorAction SilentlyContinue | Select-Object -First 1
-    $name = if ($resolved -and $resolved.CommandType -eq 'Alias') { $resolved.ResolvedCommandName } else { $leaf }
-    if ($name -in @('New-Alias', 'Set-Alias')) { return New-WdtSafetyIssue $CommandAst 'Alias creation is not permitted.' }
-    if ($name -eq 'Invoke-CimMethod') {
+    if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Ampersand -and $leaf -notin @('w32tm.exe', 'netsh.exe')) { return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts.' }
+
+    if ($leaf -eq 'Invoke-CimMethod') {
         if (Test-WdtAllowedBitLockerCimQuery $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'Invoke-CimMethod is only allowed for approved read-only BitLocker status queries.'
     }
-    $forbidden = @('Add-Type','Invoke-Command','Enter-PSSession','New-PSSession','Register-PSSessionConfiguration','Set-PSSessionConfiguration','Remove-PSSession','Start-Job','Start-ThreadJob','Register-ScheduledJob','Register-ObjectEvent','Register-WmiEvent','Invoke-WmiMethod','Set-WmiInstance','Remove-WmiObject','Invoke-Expression','Invoke-WebRequest','Invoke-RestMethod','Start-Process','Start-Service','Stop-Service','Restart-Service','Set-Service','New-Service','Remove-Service','Set-ItemProperty','New-ItemProperty','Remove-ItemProperty','Remove-Item','Clear-EventLog')
-    if ($name -in $forbidden -or $name -like 'Install-*' -or $name -like 'Update-*' -or $name -like 'Reset-*' -or $name -like 'Enable-*' -or $name -like 'Disable-*' -or $name -like 'Clear-*') { return New-WdtSafetyIssue $CommandAst ("{0} is not permitted." -f $name) }
-    if ($name -eq 'New-Object') {
-        if ($CommandAst.Extent.Text -match '(?i)-(ComObject|TypeName)\s+(\$|\()') { return New-WdtSafetyIssue $CommandAst 'Dynamic COM object or type creation is not permitted.' }
-        if ($CommandAst.Extent.Text -match '(?i)-ComObject') { return New-WdtSafetyIssue $CommandAst 'COM object creation is not permitted.' }
+
+    if ($leaf -eq 'New-Item') {
+        if (Test-WdtAllowedNewItemCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
+        return New-WdtSafetyIssue $CommandAst 'New-Item is only allowed in Invoke-WindowsDiagnostics.ps1 for -OutputDirectory creation.'
     }
-    if ($name -eq 'New-Item' -and -not (Test-WdtAllowedNewItemCommand $CommandAst $ScriptPath $RepositoryRoot)) { return New-WdtSafetyIssue $CommandAst 'New-Item is only allowed in Invoke-WindowsDiagnostics.ps1 for -OutputDirectory creation.' }
-    $isNative = $extension -in @('.exe','.com','.cmd','.bat') -or ($resolved -and $resolved.CommandType -eq 'Application')
-    if ($isNative) {
-        $nativeName = $leaf.ToLowerInvariant()
-        if ($nativeName -eq 'w32tm.exe' -and (Test-WdtAllowedW32tmCommand $CommandAst)) { return }
-        if ($nativeName -eq 'netsh.exe' -and (Test-WdtAllowedNetshCommand $CommandAst)) { return }
-        if ($nativeName -in @('w32tm.exe','netsh.exe')) { return New-WdtSafetyIssue $CommandAst 'Native executable arguments are not an allowed read-only form.' }
+
+    if ($leaf -eq 'New-Object') {
+        if (Test-WdtAllowedNewObjectCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
+        return New-WdtSafetyIssue $CommandAst 'New-Object type is not in the reviewed safe-type allowlist.'
+    }
+
+    if ($leaf -in @('w32tm.exe', 'netsh.exe')) {
+        if (-not (Test-WdtAllowedNativeRedirection $CommandAst)) { return New-WdtSafetyIssue $CommandAst 'PowerShell redirection is not permitted in production scripts.' }
+        if ($leaf -eq 'w32tm.exe' -and (Test-WdtAllowedW32tmCommand $CommandAst)) { return }
+        if ($leaf -eq 'netsh.exe' -and (Test-WdtAllowedNetshCommand $CommandAst)) { return }
+        return New-WdtSafetyIssue $CommandAst 'Native executable arguments are not an allowed read-only form.'
+    }
+
+    if ($leaf -in @('cmd', 'powershell', 'pwsh', 'rundll32', 'regsvr32', 'schtasks', 'fsutil', 'diskpart', 'wmic', 'sc', 'reg', 'bcdedit', 'powercfg', 'netsh', 'w32tm')) {
         return New-WdtSafetyIssue $CommandAst 'Native executable is not in the read-only allowlist.'
     }
-    if (-not $resolved -and $leaf -notin $LocalFunctionNames) { return New-WdtSafetyIssue $CommandAst 'Unresolved command is not allowed in production scripts.' }
+
+    if ($CommandAst.Redirections.Count -ne 0) {
+        return New-WdtSafetyIssue $CommandAst 'PowerShell redirection is not permitted in production scripts.'
+    }
+
+    if ($leaf -in $LocalFunctionNames) { return }
+    if (Test-WdtAllowedPowerShellCommand $leaf) { return }
+
+    if ([System.IO.Path]::GetExtension($leaf) -in @('.exe', '.com', '.cmd', '.bat')) {
+        return New-WdtSafetyIssue $CommandAst 'Native executable is not in the read-only allowlist.'
+    }
+
+    return New-WdtSafetyIssue $CommandAst 'PowerShell command is not in the reviewed read-only allowlist.'
 }
 
 function Get-WdtMemberSafetyIssue {
@@ -202,12 +368,66 @@ function Get-WdtMemberSafetyIssue {
                 ($pathVariable -ceq 'markdownReportPath' -and $linesVariable -ceq 'markdownLines')
             if ($isReportPair -and $MemberAst.Arguments[2].Extent.Text -ceq '[System.Text.Encoding]::UTF8') { return }
         }
-        if (($typeName -in @('Microsoft.Win32.Registry','Microsoft.Win32.RegistryKey','System.IO.File','IO.File','System.IO.Directory','IO.Directory','System.Diagnostics.Process','Diagnostics.Process','System.Reflection.Assembly','Reflection.Assembly','System.Activator','Activator','System.Runtime.InteropServices.Marshal','System.Environment','Environment','System.GC','GC','System.Type','type')) -and $member -in @('SetValue','OpenBaseKey','Delete','WriteAllText','AppendAllText','CreateDirectory','Start','Load','LoadFrom','LoadFile','LoadWithPartialName','CreateInstance','GetActiveObject','BindToMoniker','SetEnvironmentVariable','Collect','InvokeMember','GetType','WriteAllLines','Move','Copy','Replace')) { return New-WdtSafetyIssue $MemberAst 'Static method can mutate system state or load dynamic code.' }
-        return
+
+        $safeStaticMethods = @(
+            'IO.Path::GetExtension',
+            'IO.Path::GetFullPath',
+            'Management.ManagementDateTimeConverter::ToDateTime',
+            'Math::Max',
+            'string::Equals',
+            'string::IsNullOrEmpty',
+            'string::IsNullOrWhiteSpace',
+            'System.Diagnostics.Process::GetCurrentProcess',
+            'System.Guid::TryParse',
+            'System.IO.Path::GetExtension',
+            'System.IO.Path::GetFullPath',
+            'System.Management.Automation.Language.Parser::ParseFile',
+            'System.Net.Dns::GetHostAddresses',
+            'System.Net.IPAddress::TryParse',
+            'System.Text.RegularExpressions.Regex::Escape',
+            'System.Text.RegularExpressions.Regex::Matches',
+            'System.Text.RegularExpressions.Regex::Replace',
+            'System.Uri::UnescapeDataString'
+        )
+        if (("{0}::{1}" -f $typeName, $member) -in $safeStaticMethods) { return }
+        return New-WdtSafetyIssue $MemberAst 'Static method is not in the reviewed safe allowlist.'
     }
+
     $receiver = if ($MemberAst.Expression -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Expression.VariablePath.UserPath } else { '' }
     if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return }
-    if ($member -in @('Delete','Remove','Put','SetValue','Create','CreateInstance','InvokeMethod','CopyTo','MoveTo','Start','Stop','Kill','CloseMainWindow','RegisterTaskDefinition','Write','WriteLine','DownloadFile','UploadFile','InvokeMember')) { return New-WdtSafetyIssue $MemberAst 'Instance method can mutate system state.' }
+
+    $safeInstanceMethods = @(
+        'Add',
+        'AddDays',
+        'AddHours',
+        'Append',
+        'Contains',
+        'ContainsKey',
+        'Dequeue',
+        'Enqueue',
+        'Equals',
+        'FindAll',
+        'GetAddressBytes',
+        'GetCommandName',
+        'GetUnresolvedProviderPathFromPSPath',
+        'IndexOf',
+        'LastIndexOf',
+        'MakeRelativeUri',
+        'Matches',
+        'ReadToEnd',
+        'Replace',
+        'StartsWith',
+        'Substring',
+        'ToArray',
+        'ToLowerInvariant',
+        'ToString',
+        'ToUpperInvariant',
+        'Trim',
+        'TrimEnd',
+        'WaitForExit'
+    )
+    if ($member -in $safeInstanceMethods) { return }
+    return New-WdtSafetyIssue $MemberAst 'Instance method is not in the reviewed safe allowlist.'
 }
 
 function Get-WdtSafetyIssues {
@@ -232,5 +452,11 @@ function Get-WdtSafetyIssues {
     foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtMemberSafetyIssue $member $ScriptPath $RepositoryRoot }
     foreach ($variable in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -like 'function:*' }, $true))) {
         New-WdtSafetyIssue $variable 'Dynamic function provider access is not allowed in production scripts.'
+    }
+    foreach ($usingStatement in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.UsingStatementAst] -and $n.Extent.Text -match '(?i)^\s*using\s+module\b' }, $true))) {
+        New-WdtSafetyIssue $usingStatement 'Module import is not permitted in production scripts.'
+    }
+    if ($null -ne $Ast.ScriptRequirements -and @($Ast.ScriptRequirements.RequiredModules).Count -gt 0) {
+        New-WdtSafetyIssue $Ast 'Script module requirements are not permitted in production scripts.'
     }
 }
