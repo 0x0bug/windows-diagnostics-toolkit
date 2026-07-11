@@ -207,6 +207,8 @@ Assert-Equal 1 $shorterFrame.Count 'A shorter frame did not clear its removed ro
 Assert-Equal 1 $shorterFrame[0].Row 'Removed frame row index is incorrect.'
 Assert-Equal (' ' * 10) $shorterFrame[0].Text 'Removed frame row is not cleared with spaces.'
 Assert-True ($shorterFrame[0].ClearsRemovedRow) 'Removed frame operation is not marked as a clear.'
+$invalidatedFrame = @(Get-WdtTuiFrameOperations -PreviousFrame @() -CurrentFrame @('alpha     ', 'beta      ') -RenderWidth 10)
+Assert-Equal 2 $invalidatedFrame.Count 'Frame invalidation did not create a full set of row operations.'
 Assert-Equal 'Full' (Get-WdtTuiRenderStrategy -IsOutputRedirected $false -CursorPositioningAvailable $false) 'Unavailable cursor positioning did not select full-render fallback.'
 Assert-Equal 'Full' (Get-WdtTuiRenderStrategy -IsOutputRedirected $true -CursorPositioningAvailable $true) 'Redirected output did not select full-render fallback.'
 Assert-Equal 'Diff' (Get-WdtTuiRenderStrategy -IsOutputRedirected $false -CursorPositioningAvailable $true) 'Interactive cursor support did not select diff rendering.'
@@ -262,6 +264,7 @@ if ([System.Console]::IsOutputRedirected) {
 
 $parameters = ConvertTo-WdtReportParameters -State $renderState
 Assert-Equal @(Get-WdtTuiSelectedModule -State $renderState).Count @($parameters.SelectedModules).Count 'Selected modules were not preserved in report parameters.'
+Assert-True ($parameters.SuppressConsoleOutput) 'TUI report parameters do not suppress runner console output.'
 
 $tokens = $null; $parseErrors = $null
 $entrypointAst = [System.Management.Automation.Language.Parser]::ParseFile($entrypointPath, [ref]$tokens, [ref]$parseErrors)
@@ -284,10 +287,30 @@ foreach ($reference in $cursorVisibilityReferences) {
 $interactiveFunction = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-WdtInteractiveSession' }, $true))[0]
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{.*CursorVisible\s*=\s*\$originalCursorVisible') 'Cursor visibility is not restored in finally.'
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)do\s*\{\s*\$completionKey\s*=\s*\[System\.Console\]::ReadKey\(\$true\).*?while\s*\(\$completionKey\.Key\s+-notin') 'Result screen does not wait specifically for Enter or Esc.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)try\s*\{\s*Reset-WdtTuiFrame.*?while\s*\(') 'Interactive session does not invalidate a previous session frame on entry.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{\s*Reset-WdtTuiFrame') 'Interactive session does not invalidate its frame in finally.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)catch\s*\{.*?Reset-WdtTuiFrame\s*\r?\n\s*Show-WdtTuiFrame.*?-ForceFull\s+\$true') 'Error screen is not force-rendered from a clean frame.'
 Assert-True ($tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrame')) 'Renderer does not keep the previous plain-text frame.'
 Assert-True (-not $tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrameHeight')) 'Renderer still uses the legacy frame-height buffer.'
+$diffWriter = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Write-WdtTuiDiffRow' }, $true))[0]
+$diffWriteCommands = @($diffWriter.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Write-Host' }, $true))
+Assert-True ($diffWriteCommands.Count -gt 0) 'Diff row writer has no output commands.'
+foreach ($writeCommand in $diffWriteCommands) {
+    Assert-True ($writeCommand.Extent.Text -match '(?i)-NoNewline\b') 'Diff row writer contains a newline-producing Write-Host call.'
+}
+$fullWriter = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Write-WdtTuiFullFrame' }, $true))[0]
+Assert-True ($fullWriter.Extent.Text -match '(?s)\$isLastLine\s*=.*?-NoNewline\s+\$isLastLine') 'Full frame writer does not suppress newline after its last row.'
+$resultRenderer = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Show-WdtTuiRunResult' }, $true))[0]
+Assert-True ($resultRenderer.Extent.Text -match '(?s)Reset-WdtTuiFrame.*?Show-WdtTuiFrame.*?-ForceFull\s+\$true') 'Result screen is not force-rendered from a clean frame.'
 $runnerFunction = @($entrypointAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-WdtReport' }, $true))
 Assert-Equal 1 $runnerFunction.Count 'Invoke-WdtReport is missing.'
+$runnerConsoleCommands = @($runnerFunction[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -in @('Write-Host', 'Write-Warning') }, $true))
+Assert-Equal 3 $runnerConsoleCommands.Count 'Unexpected runner console output inventory.'
+foreach ($runnerCommand in $runnerConsoleCommands) {
+    $guard = $runnerCommand.Parent
+    while ($null -ne $guard -and $guard -isnot [System.Management.Automation.Language.IfStatementAst]) { $guard = $guard.Parent }
+    Assert-True ($null -ne $guard -and $guard.Extent.Text -match 'SuppressConsoleOutput') 'Runner console output is not guarded for TUI execution.'
+}
 . ([scriptblock]::Create($runnerFunction[0].Extent.Text))
 Assert-Throws { Invoke-WdtReport -SelectedModules @() -OutputDirectory 'C:\Reports' } '*At least one diagnostic module*' 'Empty runner selection was accepted.'
 Assert-Throws { Invoke-WdtReport -SelectedModules @('Unknown') -OutputDirectory 'C:\Reports' } '*Unknown diagnostic module*' 'Unknown runner module was accepted.'

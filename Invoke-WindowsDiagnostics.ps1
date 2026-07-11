@@ -322,7 +322,8 @@ function Invoke-WdtReport {
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$SelectedModules,
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
         [bool]$ExportMarkdown,
-        [bool]$PrivacyMode
+        [bool]$PrivacyMode,
+        [bool]$SuppressConsoleOutput
     )
 
     $startedAt = Get-Date
@@ -402,7 +403,9 @@ function Invoke-WdtReport {
     }
 
     [System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)
-    Write-Host ("TXT report written: {0}" -f $displayTextReportPath)
+    if (-not $SuppressConsoleOutput) {
+        Write-Host ("TXT report written: {0}" -f $displayTextReportPath)
+    }
 
     $writtenMarkdownPath = $null
     if ($ExportMarkdown) {
@@ -421,12 +424,14 @@ function Invoke-WdtReport {
         }
 
         [System.IO.File]::WriteAllLines($markdownReportPath, $markdownLines, [System.Text.Encoding]::UTF8)
-        Write-Host ("Markdown report written: {0}" -f $displayMarkdownReportPath)
+        if (-not $SuppressConsoleOutput) {
+            Write-Host ("Markdown report written: {0}" -f $displayMarkdownReportPath)
+        }
         $writtenMarkdownPath = $markdownReportPath
     }
 
     $exitCode = if (($results | Where-Object { $_.ExitCode -ne 0 }).Count -gt 0) { 1 } else { 0 }
-    if ($exitCode -ne 0) {
+    if ($exitCode -ne 0 -and -not $SuppressConsoleOutput) {
         Write-Warning 'One or more diagnostics completed with a non-zero exit code. See the report for details.'
     }
 

@@ -47,6 +47,7 @@ function ConvertTo-WdtReportParameters {
         OutputDirectory = $State.OutputDirectory
         PrivacyMode = [bool]$State.PrivacyMode
         ExportMarkdown = [bool]$State.ExportMarkdown
+        SuppressConsoleOutput = $true
     }
 }
 
@@ -688,27 +689,60 @@ function Get-WdtTuiRenderStrategy {
 }
 
 function Write-WdtTuiLine {
-    param([Parameter(Mandatory = $true)]$Line, [bool]$UseColor, [int]$Width)
+    param([Parameter(Mandatory = $true)]$Line, [bool]$UseColor, [int]$Width, [bool]$NoNewline)
 
     $renderLine = Add-WdtTuiLinePadding -Line $Line -Width $Width
     $plainText = ConvertTo-WdtTuiPlainText -Line $renderLine
     if (-not $UseColor) {
-        Write-Host $plainText
+        Write-Host $plainText -NoNewline:$NoNewline
         return
     }
     try {
         foreach ($segment in @($renderLine.Segments)) {
             Write-Host $segment.Text -NoNewline -ForegroundColor $segment.Color
         }
-        Write-Host
+        if (-not $NoNewline) { Write-Host }
     }
     catch {
-        Write-Host $plainText
+        Write-Host $plainText -NoNewline:$NoNewline
     }
 }
 
+function Write-WdtTuiDiffRow {
+    param([Parameter(Mandatory = $true)]$Line, [bool]$UseColor, [int]$Width)
+
+    $renderLine = Add-WdtTuiLinePadding -Line $Line -Width $Width
+    $plainText = ConvertTo-WdtTuiPlainText -Line $renderLine
+    if (-not $UseColor) {
+        Write-Host $plainText -NoNewline
+        return
+    }
+    try {
+        foreach ($segment in @($renderLine.Segments)) {
+            Write-Host $segment.Text -NoNewline -ForegroundColor $segment.Color
+        }
+    }
+    catch {
+        Write-Host $plainText -NoNewline
+    }
+}
+
+function Write-WdtTuiFullFrame {
+    param([Parameter(Mandatory = $true)]$Layout, [bool]$UseColor, [int]$Width)
+
+    $lines = @($Layout.Lines)
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        $isLastLine = $index -eq $lines.Count - 1
+        Write-WdtTuiLine -Line $lines[$index] -UseColor $UseColor -Width $Width -NoNewline $isLastLine
+    }
+}
+
+function Reset-WdtTuiFrame {
+    $script:WdtTuiPreviousFrame = @()
+}
+
 function Show-WdtTuiFrame {
-    param([Parameter(Mandatory = $true)]$Layout, [int]$Width)
+    param([Parameter(Mandatory = $true)]$Layout, [int]$Width, [bool]$ForceFull)
 
     $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $Width
     $currentFrame = @(ConvertTo-WdtTuiFrame -Layout $Layout -WindowWidth $Width)
@@ -718,12 +752,10 @@ function Show-WdtTuiFrame {
     $outputRedirected = $false
     try { $outputRedirected = [System.Console]::IsOutputRedirected } catch { $outputRedirected = $true }
     $cursorPositioningAvailable = -not $outputRedirected
-    $strategy = Get-WdtTuiRenderStrategy -IsOutputRedirected $outputRedirected -CursorPositioningAvailable $cursorPositioningAvailable
+    $strategy = if ($ForceFull) { 'Full' } else { Get-WdtTuiRenderStrategy -IsOutputRedirected $outputRedirected -CursorPositioningAvailable $cursorPositioningAvailable }
 
     if ($outputRedirected) {
-        foreach ($line in @($Layout.Lines)) {
-            Write-WdtTuiLine -Line $line -UseColor $false -Width $renderWidth
-        }
+        Write-WdtTuiFullFrame -Layout $Layout -UseColor $false -Width $renderWidth
         $script:WdtTuiPreviousFrame = @($currentFrame)
         return
     }
@@ -735,7 +767,7 @@ function Show-WdtTuiFrame {
                 $row = [int]$operation.Row
                 [System.Console]::SetCursorPosition($column, $row)
                 $line = if ($row -lt @($Layout.Lines).Count) { $Layout.Lines[$row] } else { New-WdtTuiTextLine -Text '' }
-                Write-WdtTuiLine -Line $line -UseColor $useColor -Width $renderWidth
+                Write-WdtTuiDiffRow -Line $line -UseColor $useColor -Width $renderWidth
             }
             $script:WdtTuiPreviousFrame = @($currentFrame)
             return
@@ -747,9 +779,7 @@ function Show-WdtTuiFrame {
 
     if ($strategy -eq 'Full') {
         try { Clear-Host } catch { }
-        foreach ($line in @($Layout.Lines)) {
-            Write-WdtTuiLine -Line $line -UseColor $useColor -Width $renderWidth
-        }
+        Write-WdtTuiFullFrame -Layout $Layout -UseColor $useColor -Width $renderWidth
         $script:WdtTuiPreviousFrame = @($currentFrame)
     }
 }
@@ -782,7 +812,8 @@ function Show-WdtTuiRunResult {
     param([Parameter(Mandatory = $true)]$Result, [int]$Width)
 
     $layout = Get-WdtTuiRunResultLayout -Result $Result -Width $Width
-    Show-WdtTuiFrame -Layout $layout -Width $Width
+    Reset-WdtTuiFrame
+    Show-WdtTuiFrame -Layout $layout -Width $Width -ForceFull $true
 }
 
 function Invoke-WdtInteractiveSession {
@@ -802,6 +833,7 @@ function Invoke-WdtInteractiveSession {
     $lastExitCode = 0
     $originalCursorVisible = $null
     try {
+        Reset-WdtTuiFrame
         try {
             $originalCursorVisible = [System.Console]::CursorVisible
             [System.Console]::CursorVisible = $false
@@ -909,7 +941,8 @@ function Invoke-WdtInteractiveSession {
             catch {
                 $lastExitCode = 1
                 $errorLayout = Get-WdtTuiErrorLayout -Message $_.Exception.Message -Width $size.Width
-                Show-WdtTuiFrame -Layout $errorLayout -Width $size.Width
+                Reset-WdtTuiFrame
+                Show-WdtTuiFrame -Layout $errorLayout -Width $size.Width -ForceFull $true
             }
 
             if ($useReadKey) {
@@ -925,6 +958,7 @@ function Invoke-WdtInteractiveSession {
         }
     }
     finally {
+        Reset-WdtTuiFrame
         if ($null -ne $originalCursorVisible) {
             try { [System.Console]::CursorVisible = $originalCursorVisible } catch { }
         }
