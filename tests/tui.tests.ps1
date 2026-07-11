@@ -174,6 +174,10 @@ foreach ($statusLayout in $statusLayouts) {
         Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le 40) ("Status layout line is too wide: {0}" -f $statusLayout.Mode)
     }
 }
+$runningText = @((Get-WdtTuiRunningLayout -SelectedCount 7 -Width 80).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True ($runningText.Contains('Selected modules: 7')) 'Running screen is missing selected module count.'
+Assert-True ($runningText.Contains('Diagnostics are running. This may take a moment.')) 'Running screen is missing honest status guidance.'
+Assert-True (-not $runningText.Contains('Progress:')) 'Running screen contains misleading progress.'
 foreach ($width in 1..5) { foreach ($line in @((Get-WdtTuiLayout -State $renderState -Width $width -Height 5).Lines)) { Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $width) 'Too-small text exceeded its width.' } }
 foreach ($size in @(@(140, 36), @(120, 30), @(110, 28), @(109, 28), @(80, 25), @(60, 25), @(59, 25), @(40, 18), @(39, 18), @(40, 17), @(20, 10), @(5, 5))) {
     $sizedLayout = Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1]
@@ -181,7 +185,31 @@ foreach ($size in @(@(140, 36), @(120, 30), @(110, 28), @(109, 28), @(80, 25), @
     foreach ($line in @($sizedLayout.Lines)) {
         Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $size[0]) ("Layout exceeded {0} columns." -f $size[0])
     }
+    $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $size[0]
+    $frame = @(ConvertTo-WdtTuiFrame -Layout $sizedLayout -WindowWidth $size[0])
+    foreach ($frameLine in $frame) {
+        Assert-Equal $renderWidth $frameLine.Length ("Frame line does not use safe render width for {0}." -f $size[0])
+        Assert-True ($frameLine.Length -lt $size[0]) ("Frame writes into the final terminal column for {0}." -f $size[0])
+    }
 }
+
+Assert-Equal 79 (Get-WdtTuiRenderWidth -WindowWidth 80) 'Render width must reserve the final terminal column.'
+$sameFrame = @('alpha     ', 'beta      ')
+Assert-Equal 0 @(Get-WdtTuiFrameOperations -PreviousFrame $sameFrame -CurrentFrame $sameFrame -RenderWidth 10).Count 'Identical frames created update operations.'
+$oneChange = @(Get-WdtTuiFrameOperations -PreviousFrame @('alpha     ', 'beta      ') -CurrentFrame @('alpha     ', 'gamma     ') -RenderWidth 10)
+Assert-Equal 1 $oneChange.Count 'A single changed row did not create exactly one operation.'
+Assert-Equal 1 $oneChange[0].Row 'The changed row index is incorrect.'
+$shortenedLine = @(Get-WdtTuiFrameOperations -PreviousFrame @('abcdefghij') -CurrentFrame @('abc       ') -RenderWidth 10)
+Assert-Equal 1 $shortenedLine.Count 'A shortened row did not create one operation.'
+Assert-Equal 'abc       ' $shortenedLine[0].Text 'A shortened row does not clear its old tail.'
+$shorterFrame = @(Get-WdtTuiFrameOperations -PreviousFrame @('alpha     ', 'obsolete  ') -CurrentFrame @('alpha     ') -RenderWidth 10)
+Assert-Equal 1 $shorterFrame.Count 'A shorter frame did not clear its removed row.'
+Assert-Equal 1 $shorterFrame[0].Row 'Removed frame row index is incorrect.'
+Assert-Equal (' ' * 10) $shorterFrame[0].Text 'Removed frame row is not cleared with spaces.'
+Assert-True ($shorterFrame[0].ClearsRemovedRow) 'Removed frame operation is not marked as a clear.'
+Assert-Equal 'Full' (Get-WdtTuiRenderStrategy -IsOutputRedirected $false -CursorPositioningAvailable $false) 'Unavailable cursor positioning did not select full-render fallback.'
+Assert-Equal 'Full' (Get-WdtTuiRenderStrategy -IsOutputRedirected $true -CursorPositioningAvailable $true) 'Redirected output did not select full-render fallback.'
+Assert-Equal 'Diff' (Get-WdtTuiRenderStrategy -IsOutputRedirected $false -CursorPositioningAvailable $true) 'Interactive cursor support did not select diff rendering.'
 $lastItemState = $renderState
 for ($move = 0; $move -lt 14; $move++) { $lastItemState = Update-WdtTuiState -State $lastItemState -Action MoveDown }
 $lastCompact = Get-WdtTuiLayout -State $lastItemState -Width 40 -Height 18
@@ -244,6 +272,8 @@ Assert-Equal 1 $cursorCalls.Count 'TUI must have exactly one SetCursorPosition c
 $cursorFunction = $cursorCalls[0].Parent
 while ($null -ne $cursorFunction -and $cursorFunction -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { $cursorFunction = $cursorFunction.Parent }
 Assert-Equal 'Show-WdtTuiFrame' $cursorFunction.Name 'SetCursorPosition is outside the frame renderer.'
+Assert-Equal '$column' $cursorCalls[0].Arguments[0].Extent.Text 'SetCursorPosition column must use the reviewed variable.'
+Assert-Equal '$row' $cursorCalls[0].Arguments[1].Extent.Text 'SetCursorPosition row must use the reviewed variable.'
 $cursorVisibilityReferences = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.MemberExpressionAst] -and $node.Member.Value -eq 'CursorVisible' }, $true))
 Assert-True ($cursorVisibilityReferences.Count -ge 3) 'Cursor visibility is not saved, hidden, and restored.'
 foreach ($reference in $cursorVisibilityReferences) {
@@ -253,6 +283,9 @@ foreach ($reference in $cursorVisibilityReferences) {
 }
 $interactiveFunction = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-WdtInteractiveSession' }, $true))[0]
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{.*CursorVisible\s*=\s*\$originalCursorVisible') 'Cursor visibility is not restored in finally.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)do\s*\{\s*\$completionKey\s*=\s*\[System\.Console\]::ReadKey\(\$true\).*?while\s*\(\$completionKey\.Key\s+-notin') 'Result screen does not wait specifically for Enter or Esc.'
+Assert-True ($tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrame')) 'Renderer does not keep the previous plain-text frame.'
+Assert-True (-not $tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrameHeight')) 'Renderer still uses the legacy frame-height buffer.'
 $runnerFunction = @($entrypointAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-WdtReport' }, $true))
 Assert-Equal 1 $runnerFunction.Count 'Invoke-WdtReport is missing.'
 . ([scriptblock]::Create($runnerFunction[0].Extent.Text))

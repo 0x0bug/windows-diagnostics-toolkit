@@ -409,8 +409,10 @@ function Get-WdtMemberSafetyIssue {
             (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
             (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Show-WdtTuiFrame' -and
             $argumentCount -eq 2 -and
-            $MemberAst.Arguments[0].Extent.Text -ceq '0' -and
-            $MemberAst.Arguments[1].Extent.Text -ceq '0') {
+            $MemberAst.Arguments[0] -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $MemberAst.Arguments[0].VariablePath.UserPath -ceq 'column' -and
+            $MemberAst.Arguments[1] -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $MemberAst.Arguments[1].VariablePath.UserPath -ceq 'row') {
             return
         }
         if ($typeName -eq 'System.IO.File' -and $member -eq 'WriteAllLines' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and $argumentCount -eq 3) {

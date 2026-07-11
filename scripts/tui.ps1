@@ -596,7 +596,8 @@ function Get-WdtTuiRunningLayout {
         (New-WdtTuiBorderLine -Width $Width),
         (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Windows Diagnostics Toolkit' -Width $Width) -Color 'Cyan'),
         (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Running diagnostics...' -Width $Width) -Color 'Yellow'),
-        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Progress: 0 / {0}' -f $SelectedCount) -Width $Width) -Color 'White'),
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Selected modules: {0}' -f $SelectedCount) -Width $Width) -Color 'White'),
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Diagnostics are running. This may take a moment.' -Width $Width) -Color 'DarkGray'),
         (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Reports remain local. No system changes are made.' -Width $Width) -Color 'DarkGray'),
         (New-WdtTuiBorderLine -Width $Width)
     )
@@ -644,6 +645,48 @@ function Test-WdtTuiColorOutput {
     catch { return $false }
 }
 
+function Get-WdtTuiRenderWidth {
+    param([int]$WindowWidth)
+    return [Math]::Max(1, $WindowWidth - 1)
+}
+
+function ConvertTo-WdtTuiFrame {
+    param([Parameter(Mandatory = $true)]$Layout, [int]$WindowWidth)
+
+    $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $WindowWidth
+    return @($Layout.Lines | ForEach-Object {
+            ConvertTo-WdtTuiPlainText -Line (Add-WdtTuiLinePadding -Line $_ -Width $renderWidth)
+        })
+}
+
+function Get-WdtTuiFrameOperations {
+    param([string[]]$PreviousFrame, [string[]]$CurrentFrame, [int]$RenderWidth)
+
+    $previous = @($PreviousFrame)
+    $current = @($CurrentFrame)
+    $rowCount = [Math]::Max($previous.Count, $current.Count)
+    $operations = @()
+    for ($row = 0; $row -lt $rowCount; $row++) {
+        $oldText = if ($row -lt $previous.Count) { [string]$previous[$row] } else { '' }
+        $newText = if ($row -lt $current.Count) { [string]$current[$row] } else { ' ' * $RenderWidth }
+        if ($oldText -cne $newText) {
+            $operations += [pscustomobject]@{
+                Row = $row
+                Text = $newText
+                ClearsRemovedRow = $row -ge $current.Count
+            }
+        }
+    }
+    return @($operations)
+}
+
+function Get-WdtTuiRenderStrategy {
+    param([bool]$IsOutputRedirected, [bool]$CursorPositioningAvailable)
+
+    if ($IsOutputRedirected -or -not $CursorPositioningAvailable) { return 'Full' }
+    return 'Diff'
+}
+
 function Write-WdtTuiLine {
     param([Parameter(Mandatory = $true)]$Line, [bool]$UseColor, [int]$Width)
 
@@ -667,25 +710,48 @@ function Write-WdtTuiLine {
 function Show-WdtTuiFrame {
     param([Parameter(Mandatory = $true)]$Layout, [int]$Width)
 
-    $renderWidth = [Math]::Max(1, $Width)
-    $positioned = $false
-    try {
-        [System.Console]::SetCursorPosition(0, 0)
-        $positioned = $true
-    }
-    catch { }
-    if (-not $positioned) {
-        try { Clear-Host } catch { }
+    $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $Width
+    $currentFrame = @(ConvertTo-WdtTuiFrame -Layout $Layout -WindowWidth $Width)
+    $previousFrame = if ($null -eq $script:WdtTuiPreviousFrame) { @() } else { @($script:WdtTuiPreviousFrame) }
+    $operations = @(Get-WdtTuiFrameOperations -PreviousFrame $previousFrame -CurrentFrame $currentFrame -RenderWidth $renderWidth)
+    $useColor = Test-WdtTuiColorOutput
+    $outputRedirected = $false
+    try { $outputRedirected = [System.Console]::IsOutputRedirected } catch { $outputRedirected = $true }
+    $cursorPositioningAvailable = -not $outputRedirected
+    $strategy = Get-WdtTuiRenderStrategy -IsOutputRedirected $outputRedirected -CursorPositioningAvailable $cursorPositioningAvailable
+
+    if ($outputRedirected) {
+        foreach ($line in @($Layout.Lines)) {
+            Write-WdtTuiLine -Line $line -UseColor $false -Width $renderWidth
+        }
+        $script:WdtTuiPreviousFrame = @($currentFrame)
+        return
     }
 
-    $previousHeight = if ($null -eq $script:WdtTuiPreviousFrameHeight) { 0 } else { [int]$script:WdtTuiPreviousFrameHeight }
-    $frameHeight = [Math]::Max($previousHeight, @($Layout.Lines).Count)
-    $useColor = Test-WdtTuiColorOutput
-    for ($index = 0; $index -lt $frameHeight; $index++) {
-        $line = if ($index -lt @($Layout.Lines).Count) { $Layout.Lines[$index] } else { New-WdtTuiTextLine -Text '' }
-        Write-WdtTuiLine -Line $line -UseColor $useColor -Width $renderWidth
+    if ($strategy -eq 'Diff') {
+        try {
+            foreach ($operation in $operations) {
+                $column = 0
+                $row = [int]$operation.Row
+                [System.Console]::SetCursorPosition($column, $row)
+                $line = if ($row -lt @($Layout.Lines).Count) { $Layout.Lines[$row] } else { New-WdtTuiTextLine -Text '' }
+                Write-WdtTuiLine -Line $line -UseColor $useColor -Width $renderWidth
+            }
+            $script:WdtTuiPreviousFrame = @($currentFrame)
+            return
+        }
+        catch {
+            $strategy = 'Full'
+        }
     }
-    $script:WdtTuiPreviousFrameHeight = @($Layout.Lines).Count
+
+    if ($strategy -eq 'Full') {
+        try { Clear-Host } catch { }
+        foreach ($line in @($Layout.Lines)) {
+            Write-WdtTuiLine -Line $line -UseColor $useColor -Width $renderWidth
+        }
+        $script:WdtTuiPreviousFrame = @($currentFrame)
+    }
 }
 
 function Get-WdtTuiHostSize {
@@ -848,7 +914,9 @@ function Invoke-WdtInteractiveSession {
 
             if ($useReadKey) {
                 try {
-                    $completionKey = [System.Console]::ReadKey($true)
+                    do {
+                        $completionKey = [System.Console]::ReadKey($true)
+                    } while ($completionKey.Key -notin @([System.ConsoleKey]::Enter, [System.ConsoleKey]::Escape))
                     if ($completionKey.Key -eq [System.ConsoleKey]::Escape) { return $lastExitCode }
                 }
                 catch { $useReadKey = $false }
