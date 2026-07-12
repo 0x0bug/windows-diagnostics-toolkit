@@ -321,9 +321,20 @@ if ([System.Console]::IsOutputRedirected) {
     Assert-True (-not (Test-WdtTuiColorOutput)) 'Redirected output did not disable colors.'
 }
 
-$parameters = ConvertTo-WdtReportParameters -State $renderState
+$parameters = ConvertTo-WdtReportParameters `
+    -State $renderState `
+    -ModuleTimeoutSeconds 37 `
+    -NoExternalNetworkTests $true `
+    -NetworkDnsTestName 'dns.fixture.example' `
+    -NetworkHttpsEndpoint 'https://tcp.fixture.example/' `
+    -NetworkIcmpTarget '192.0.2.44'
 Assert-Equal @(Get-WdtTuiSelectedModule -State $renderState).Count @($parameters.SelectedModules).Count 'Selected modules were not preserved in report parameters.'
 Assert-True ($parameters.SuppressConsoleOutput) 'TUI report parameters do not suppress runner console output.'
+Assert-Equal 37 $parameters.ModuleTimeoutSeconds 'TUI did not preserve ModuleTimeoutSeconds.'
+Assert-Equal $true $parameters.NoExternalNetworkTests 'TUI did not preserve NoExternalNetworkTests.'
+Assert-Equal 'dns.fixture.example' $parameters.NetworkDnsTestName 'TUI did not preserve NetworkDnsTestName.'
+Assert-Equal 'https://tcp.fixture.example/' $parameters.NetworkHttpsEndpoint 'TUI did not preserve NetworkHttpsEndpoint.'
+Assert-Equal '192.0.2.44' $parameters.NetworkIcmpTarget 'TUI did not preserve NetworkIcmpTarget.'
 
 $tokens = $null; $parseErrors = $null
 $entrypointAst = [System.Management.Automation.Language.Parser]::ParseFile($entrypointPath, [ref]$tokens, [ref]$parseErrors)
@@ -350,6 +361,10 @@ Assert-True ($interactiveFunction.Extent.Text -match '(?s)try\s*\{\s*Reset-WdtTu
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{\s*Reset-WdtTuiFrame') 'Interactive session does not invalidate its frame in finally.'
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)catch\s*\{.*?Reset-WdtTuiFrame\s*\r?\n\s*Show-WdtTuiFrame.*?-ForceFull\s+\$true') 'Error screen is not force-rendered from a clean frame.'
 $sessionText = $interactiveFunction.Extent.Text
+foreach ($forwardedParameter in @('ModuleTimeoutSeconds', 'NoExternalNetworkTests', 'NetworkDnsTestName', 'NetworkHttpsEndpoint', 'NetworkIcmpTarget')) {
+    Assert-True ($sessionText -match (('-{0}\s+\${0}' -f $forwardedParameter))) ("Interactive session does not forward {0} to report parameters." -f $forwardedParameter)
+}
+Assert-True ($sessionText -match 'Invoke-WdtReport\s+@reportParameters') 'Interactive report parameters are not splatted into Invoke-WdtReport.'
 $firstFrameInitialization = $sessionText.IndexOf('$isFirstMenuFrame = $true')
 $firstFrameRender = $sessionText.IndexOf('-ForceFull $isFirstMenuFrame')
 $diffFrameTransition = $sessionText.IndexOf('$isFirstMenuFrame = $false')
@@ -388,11 +403,40 @@ foreach ($runnerCommand in $runnerConsoleCommands) {
 Assert-Throws { Invoke-WdtReport -SelectedModules @() -OutputDirectory 'C:\Reports' } '*At least one diagnostic module*' 'Empty runner selection was accepted.'
 Assert-Throws { Invoke-WdtReport -SelectedModules @('Unknown') -OutputDirectory 'C:\Reports' } '*Unknown diagnostic module*' 'Unknown runner module was accepted.'
 
+. (Join-Path $repositoryRoot 'scripts\report-common.ps1')
+foreach ($definition in @($entrypointAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true))) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$interactiveSmokeOutput = Join-Path $env:TEMP ('wdt-tui-parameters-' + [guid]::NewGuid().ToString('N'))
+try {
+    $interactiveSmokeState = New-WdtTuiState -OutputDirectory $interactiveSmokeOutput
+    foreach ($diagnostic in $interactiveSmokeState.Diagnostics) { $diagnostic.Selected = ($diagnostic.Name -eq 'Network') }
+    $interactiveReportParameters = ConvertTo-WdtReportParameters `
+        -State $interactiveSmokeState `
+        -ModuleTimeoutSeconds 17 `
+        -NoExternalNetworkTests $true `
+        -NetworkDnsTestName 'dns.interactive.fixture' `
+        -NetworkHttpsEndpoint 'https://interactive.fixture/' `
+        -NetworkIcmpTarget '192.0.2.55'
+    $interactiveReportResult = Invoke-WdtReport @interactiveReportParameters
+    Assert-Equal 0 $interactiveReportResult.ExitCode 'Interactive parameter-flow smoke failed.'
+    $interactiveTextReport = Get-Content -LiteralPath $interactiveReportResult.TextReportPath -Raw
+    Assert-True ($interactiveTextReport.Contains('External tests: NotTested (-NoExternalNetworkTests)')) 'Interactive NoExternalNetworkTests did not reach the network module.'
+}
+finally {
+    if (Test-Path -LiteralPath $interactiveSmokeOutput) { Remove-Item -LiteralPath $interactiveSmokeOutput -Recurse -Force }
+}
+
 $tuiImports = @($entrypointAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Dot -and $node.Extent.Text -eq '. $PSScriptRoot\scripts\tui.ps1' }, $true))
 Assert-Equal 1 $tuiImports.Count 'Entrypoint TUI import is missing.'
 $parent = $tuiImports[0].Parent
 while ($null -ne $parent -and $parent -isnot [System.Management.Automation.Language.IfStatementAst]) { $parent = $parent.Parent }
 Assert-True ($null -ne $parent -and $parent.Extent.Text -match '\$launchMode\s+-eq\s+''Interactive''') 'TUI import is not isolated to interactive launch mode.'
+$interactiveCalls = @($entrypointAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Invoke-WdtInteractiveSession' }, $true))
+Assert-Equal 1 $interactiveCalls.Count 'Entrypoint must invoke exactly one interactive session.'
+foreach ($forwardedParameter in @('ModuleTimeoutSeconds', 'NoExternalNetworkTests', 'NetworkDnsTestName', 'NetworkHttpsEndpoint', 'NetworkIcmpTarget')) {
+    Assert-True ($interactiveCalls[0].Extent.Text -match (('-{0}\b' -f $forwardedParameter))) ("Entrypoint does not pass {0} into the interactive session." -f $forwardedParameter)
+}
 
 $cliOutput = Join-Path $env:TEMP ('wdt-tui-cli-' + [guid]::NewGuid().ToString('N'))
 try {

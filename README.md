@@ -110,7 +110,7 @@ Explicit module switches run diagnostics immediately without opening the TUI:
 .\Invoke-WindowsDiagnostics.ps1 -Network -NetworkDnsTestName www.microsoft.com -NetworkHttpsEndpoint https://www.microsoft.com/ -NetworkIcmpTarget 1.1.1.1
 ```
 
-Each module has an independent 180-second timeout by default; change it with `-ModuleTimeoutSeconds`. On timeout WDT terminates only the process tree rooted at the child it started, preserves other module results, and records `MODULE_EXECUTION_TIMEOUT`, execution status, duration, and partial completeness.
+Each module has an independent 180-second timeout by default; change it with `-ModuleTimeoutSeconds`. On timeout WDT makes a bounded best-effort cleanup of the process tree it observed, revalidating PID, parent relationship, and creation time before termination. Cleanup failures are reported explicitly; absolute protection from every PID-reuse race is not claimed. Other module results are preserved, and the report records `MODULE_EXECUTION_TIMEOUT`, execution status, duration, and partial completeness.
 
 Windows PowerShell 5.1 non-interactive example:
 
@@ -211,7 +211,7 @@ The safety guard reduces accidental scope expansion, but it is not a formal proo
 - No third-party runtime dependencies
 - Administrator rights are not required for normal use where Windows exposes the requested data to the current user
 
-Reports state elevation, collection completeness (`Complete`, `Partial`, or `Unavailable`), limited modules, and unavailable data sources. Standard-user execution is not itself a problem; completeness follows actual source availability.
+Reports state elevation and execution completeness: `Success` is `Complete`, timeout or non-zero exit is `Partial`, and launch failure or cancellation is `Unavailable`. Overall collection is `Unavailable` only when every selected module is unavailable, `Partial` when any result is partial or unavailable alongside another result, and otherwise `Complete`. Standard-user execution is not itself a problem. Completeness does not infer individual data-source availability from finding names.
 
 ## Validation
 

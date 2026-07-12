@@ -40,7 +40,14 @@ function Get-WdtTuiSelectedModule {
 }
 
 function ConvertTo-WdtReportParameters {
-    param([Parameter(Mandatory = $true)]$State)
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [int]$ModuleTimeoutSeconds = 180,
+        [bool]$NoExternalNetworkTests = $false,
+        [string]$NetworkDnsTestName = 'www.microsoft.com',
+        [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
+        [string]$NetworkIcmpTarget = '1.1.1.1'
+    )
 
     return @{
         SelectedModules = @(Get-WdtTuiSelectedModule -State $State)
@@ -48,6 +55,11 @@ function ConvertTo-WdtReportParameters {
         PrivacyMode = [bool]$State.PrivacyMode
         ExportMarkdown = [bool]$State.ExportMarkdown
         SuppressConsoleOutput = $true
+        ModuleTimeoutSeconds = $ModuleTimeoutSeconds
+        NoExternalNetworkTests = $NoExternalNetworkTests
+        NetworkDnsTestName = $NetworkDnsTestName
+        NetworkHttpsEndpoint = $NetworkHttpsEndpoint
+        NetworkIcmpTarget = $NetworkIcmpTarget
     }
 }
 
@@ -982,7 +994,12 @@ function Show-WdtTuiRunResult {
 function Invoke-WdtInteractiveSession {
     param(
         [string[]]$InitialSelection,
-        [Parameter(Mandatory = $true)][string]$OutputDirectory
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [int]$ModuleTimeoutSeconds = 180,
+        [bool]$NoExternalNetworkTests = $false,
+        [string]$NetworkDnsTestName = 'www.microsoft.com',
+        [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
+        [string]$NetworkIcmpTarget = '1.1.1.1'
     )
 
     if ([System.Console]::IsInputRedirected) {
@@ -1095,7 +1112,13 @@ function Invoke-WdtInteractiveSession {
                 continue
             }
 
-            $reportParameters = ConvertTo-WdtReportParameters -State $state
+            $reportParameters = ConvertTo-WdtReportParameters `
+                -State $state `
+                -ModuleTimeoutSeconds $ModuleTimeoutSeconds `
+                -NoExternalNetworkTests $NoExternalNetworkTests `
+                -NetworkDnsTestName $NetworkDnsTestName `
+                -NetworkHttpsEndpoint $NetworkHttpsEndpoint `
+                -NetworkIcmpTarget $NetworkIcmpTarget
             if (@($reportParameters.SelectedModules).Count -eq 0) {
                 $state.ErrorMessage = 'Select at least one diagnostic module.'
                 continue

@@ -124,7 +124,7 @@ Use `-All` or one or more module selectors to skip the TUI:
 .\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
 ```
 
-Module execution is bounded independently. The default is `-ModuleTimeoutSeconds 180`. A timeout terminates only the WDT-started child process tree, keeps results from other modules, and is reported as `MODULE_EXECUTION_TIMEOUT` with duration and `Partial` completeness.
+Module execution is bounded independently. The default is `-ModuleTimeoutSeconds 180`. After timeout WDT performs a bounded best-effort cleanup of the observed child tree and revalidates PID, ancestry, and creation time immediately before termination. Snapshot races and descendants created after the snapshot cannot be ruled out without stronger OS primitives, so cleanup failure is reported rather than hidden. Results from other modules are kept, and timeout is reported as `MODULE_EXECUTION_TIMEOUT` with duration and `Partial` completeness.
 
 Windows PowerShell 5.1:
 
@@ -180,8 +180,10 @@ Findings and collection metadata use these meanings:
 - `OK`: module completed and emitted no warning or error findings;
 - `WARN`: state should be reviewed, but collection completed;
 - `ERROR`: diagnostic state is considered serious.
-- `Partial`: the module ran but one or more data sources or execution stages were unavailable;
+- `Partial`: the module started but timed out or returned a non-zero exit code;
 - `Indeterminate`: available signals do not justify a positive or negative diagnosis.
+
+Module completeness in this release is execution-only: `Success` maps to `Complete`; non-zero exit and timeout map to `Partial`; launch error and cancellation map to `Unavailable`. It does not infer source availability from finding-code names. Overall collection is `Unavailable` only when every module is unavailable, `Complete` only when every module succeeds, and `Partial` otherwise.
 
 Overall severity follows `ERROR` > `WARN` > `OK`.
 

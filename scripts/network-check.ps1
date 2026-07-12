@@ -447,10 +447,17 @@ function Test-HttpsTcpConnection {
 }
 
 function Get-NetworkReachabilityClassification {
-    param([bool]$HasAdapter, [bool]$HasDefaultRoute, [string]$DnsStatus, [string]$TcpStatus, [string]$IcmpStatus, [bool]$ExternalTestsEnabled)
-    if (-not $HasAdapter -or -not $HasDefaultRoute) { return 'Unreachable' }
+    param(
+        [bool]$HasAdapter,
+        [ValidateSet('Present', 'Absent', 'Unavailable')][string]$DefaultRouteState,
+        [string]$DnsStatus,
+        [string]$TcpStatus,
+        [string]$IcmpStatus,
+        [bool]$ExternalTestsEnabled
+    )
     if (-not $ExternalTestsEnabled) { return 'NotTested' }
     if ($TcpStatus -eq 'Reachable' -and $DnsStatus -match '^Resolved') { return 'Reachable' }
+    if (-not $HasAdapter -or $DefaultRouteState -eq 'Absent') { return 'Unreachable' }
     if ($TcpStatus -eq 'Reachable') { return 'BlockedOrFiltered' }
     if ($DnsStatus -match '^Resolved' -and $TcpStatus -match '^(Unreachable|BlockedOrFiltered)') { return 'BlockedOrFiltered' }
     if ($DnsStatus -match '^Failed' -and $TcpStatus -match '^Unreachable') { return 'Unreachable' }
@@ -566,9 +573,18 @@ else {
     Write-Host ('TCP HTTPS / {0}: {1}' -f $HttpsEndpoint, $tcpResult)
     Write-Host ('Optional ICMP / {0}: {1}' -f $IcmpTarget, $icmpResult)
 }
-$hasDefaultRoute = @($routeResult.Routes | Where-Object { $_.IsDefaultRoute }).Count -gt 0
-$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -HasDefaultRoute $hasDefaultRoute -DnsStatus $dnsResult -TcpStatus $tcpResult -IcmpStatus $icmpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests)
+$defaultRouteState = if ($null -ne $routeResult.Error) {
+    'Unavailable'
+}
+elseif (@($routeResult.Routes | Where-Object { $_.IsDefaultRoute }).Count -gt 0) {
+    'Present'
+}
+else {
+    'Absent'
+}
+Write-Host ('Default route state: {0}' -f $defaultRouteState)
+$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -DefaultRouteState $defaultRouteState -DnsStatus $dnsResult -TcpStatus $tcpResult -IcmpStatus $icmpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests)
 Write-Host ('Overall reachability: {0}' -f $classification)
 if ($classification -eq 'Unreachable') {
-    Write-WdtFinding -Severity WARN -Code 'NETWORK_CONNECTIVITY_UNREACHABLE' -Message 'Multiple independent network signals indicate connectivity is unavailable.' -Evidence ("Adapter={0}; DefaultRoute={1}; DNS={2}; TCP={3}; ICMP={4}" -f ($adapterConfigurations.Count -gt 0), $hasDefaultRoute, $dnsResult, $tcpResult, $icmpResult)
+    Write-WdtFinding -Severity WARN -Code 'NETWORK_CONNECTIVITY_UNREACHABLE' -Message 'Multiple independent network signals indicate connectivity is unavailable.' -Evidence ("Adapter={0}; DefaultRoute={1}; DNS={2}; TCP={3}; ICMP={4}" -f ($adapterConfigurations.Count -gt 0), $defaultRouteState, $dnsResult, $tcpResult, $icmpResult)
 }

@@ -227,6 +227,11 @@ function Test-WdtAllowedNewObjectCommand {
     )
     if ($typeName -in $safeTypes) { return $true }
 
+    if ($typeName -eq 'char[]' -and
+        (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+        (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'New-WdtStreamCaptureState' -and
+        $CommandAst.Extent.Text -ceq 'New-Object char[] 4096') { return $true }
+
     if ($typeName -eq 'System.Net.Sockets.TcpClient' -and
         (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\network-check.ps1') -and
         (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Test-HttpsTcpConnection' -and
@@ -429,7 +434,7 @@ function Get-WdtMemberSafetyIssue {
         }
         if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
             (($typeName -eq 'System.Diagnostics.Process' -and $member -eq 'GetProcessById' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -or
-             ($typeName -eq 'System.Diagnostics.Stopwatch' -and $member -eq 'StartNew' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript') -or
+             ($typeName -eq 'System.Diagnostics.Stopwatch' -and $member -eq 'StartNew' -and (Get-WdtEnclosingFunctionName $MemberAst) -in @('Invoke-DiagnosticScript', 'Stop-WdtProcessTree')) -or
              ($typeName -eq 'Security.Principal.WindowsIdentity' -and $member -eq 'GetCurrent' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport'))) { return }
 
         $safeStaticMethods = @(
@@ -462,9 +467,13 @@ function Get-WdtMemberSafetyIssue {
     if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return }
     if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and (
             (((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -and $member -in @('Kill', 'WaitForExit', 'Dispose')) -or
-            ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and $member -in @('ReadToEndAsync', 'Stop', 'Dispose')) -or
+            ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree' -and $member -eq 'Stop') -or
+            ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and $member -in @('Stop', 'Dispose')) -or
             ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport' -and $member -eq 'IsInRole')
         )) { return }
+    if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -in @('New-WdtStreamCaptureState', 'Read-WdtCompletedStreamChunks') -and
+        $member -eq 'ReadAsync' -and $argumentCount -eq 3) { return }
     if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\network-check.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Test-HttpsTcpConnection' -and
         $member -in @('ConnectAsync', 'Wait', 'Dispose')) { return }
@@ -484,6 +493,8 @@ function Get-WdtMemberSafetyIssue {
         'Add',
         'AddDays',
         'AddHours',
+        'AddMilliseconds',
+        'AddSeconds',
         'Append',
         'Contains',
         'ContainsKey',

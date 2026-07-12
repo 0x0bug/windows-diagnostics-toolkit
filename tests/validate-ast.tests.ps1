@@ -255,6 +255,8 @@ Assert-Denied '$ExecutionContext.InvokeCommand.InvokeScript(''Get-Date'')' '*Ins
 Assert-Denied '$target.Kill()' '*Instance method is not in the reviewed safe allowlist*'
 Assert-Denied '$client.ConnectAsync(''example.com'', 443)' '*Instance method is not in the reviewed safe allowlist*'
 Assert-Denied '[System.Diagnostics.Process]::GetProcessById(1)' '*Static method is not in the reviewed safe allowlist*'
+Assert-Denied '$reader.ReadAsync($buffer, 0, 4096)' '*Instance method is not in the reviewed safe allowlist*'
+Assert-Denied 'New-Object char[] 4096' '*New-Object type is not in the reviewed safe-type allowlist*'
 
 foreach ($source in @(
         'New-Item -ItemType Directory -Path $otherPath -Force',

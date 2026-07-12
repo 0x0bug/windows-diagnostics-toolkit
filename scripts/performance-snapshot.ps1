@@ -172,6 +172,7 @@ function Get-ProcessSnapshot {
         foreach ($process in @(Get-Process -ErrorAction Stop)) {
             $workingSet = $null
             $cpuTime = $null
+            $startTime = $null
 
             try {
                 $workingSet = [int64]$process.WorkingSet64
@@ -187,11 +188,19 @@ function Get-ProcessSnapshot {
                 # Keep the process name while omitting an inaccessible CPU value.
             }
 
+            try {
+                $startTime = $process.StartTime
+            }
+            catch {
+                # PID and process name remain available when start time is protected.
+            }
+
             $processes.Add([pscustomobject]@{
                     Id         = $process.Id
                     Name       = $process.ProcessName
                     WorkingSet = $workingSet
                     CpuTime    = $cpuTime
+                    StartTime  = $startTime
                 })
         }
 
@@ -217,6 +226,10 @@ function Get-ProcessCpuActivity {
     foreach ($current in @($SecondSample)) {
         if (-not $firstById.ContainsKey([int]$current.Id)) { continue }
         $previous = $firstById[[int]$current.Id]
+        if ([string]::IsNullOrWhiteSpace([string]$previous.Name) -or
+            [string]::IsNullOrWhiteSpace([string]$current.Name) -or
+            -not [string]::Equals([string]$previous.Name, [string]$current.Name, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        if ($null -ne $previous.StartTime -and $null -ne $current.StartTime -and [datetime]$previous.StartTime -ne [datetime]$current.StartTime) { continue }
         if ($null -eq $previous.CpuTime -or $null -eq $current.CpuTime) { continue }
         $delta = [double]$current.CpuTime - [double]$previous.CpuTime
         if ($delta -lt 0) { continue }

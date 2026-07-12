@@ -94,29 +94,310 @@ function ConvertTo-CommandArgument {
     return '"' + $Value.Replace('"', '\"') + '"'
 }
 
-function Stop-WdtProcessTree {
+function Get-WdtExecutionCompleteness {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('Success', 'NonZeroExit', 'Timeout', 'LaunchError', 'Cancelled')]
+        [string]$Status
+    )
+
+    switch ($Status) {
+        'Success' { return 'Complete' }
+        { $_ -in @('NonZeroExit', 'Timeout') } { return 'Partial' }
+        default { return 'Unavailable' }
+    }
+}
+
+function Get-WdtCollectionCompleteness {
+    param([Parameter(Mandatory = $true)][object[]]$Results)
+
+    if (@($Results).Count -eq 0) { throw 'At least one module result is required.' }
+    $values = @($Results | ForEach-Object { Get-WdtExecutionCompleteness -Status ([string]$_.Status) })
+    if (@($values | Where-Object { $_ -eq 'Unavailable' }).Count -eq $values.Count) { return 'Unavailable' }
+    if (@($values | Where-Object { $_ -eq 'Complete' }).Count -eq $values.Count) { return 'Complete' }
+    return 'Partial'
+}
+
+function New-WdtStreamCaptureState {
+    param([Parameter(Mandatory = $true)][System.IO.StreamReader]$Reader)
+
+    $buffer = New-Object char[] 4096
+    return [pscustomobject]@{
+        Reader   = $Reader
+        Buffer   = $buffer
+        Task     = $Reader.ReadAsync($buffer, 0, $buffer.Length)
+        Text     = New-Object System.Text.StringBuilder
+        Complete = $false
+        Error    = $null
+    }
+}
+
+function Read-WdtCompletedStreamChunks {
+    param([Parameter(Mandatory = $true)]$State)
+
+    $madeProgress = $false
+    while (-not $State.Complete -and $null -ne $State.Task -and $State.Task.IsCompleted) {
+        $madeProgress = $true
+        if ($State.Task.IsCanceled) {
+            $State.Error = 'Stream read was cancelled.'
+            $State.Complete = $true
+            break
+        }
+        if ($State.Task.IsFaulted) {
+            $State.Error = 'Stream read failed: {0}' -f $State.Task.Exception
+            $State.Complete = $true
+            break
+        }
+
+        try {
+            $characterCount = [int]$State.Task.Result
+        }
+        catch {
+            $State.Error = 'Stream read failed: {0}' -f $_.Exception.Message
+            $State.Complete = $true
+            break
+        }
+
+        if ($characterCount -eq 0) {
+            $State.Complete = $true
+            break
+        }
+
+        [void]$State.Text.Append($State.Buffer, 0, $characterCount)
+        try {
+            $State.Task = $State.Reader.ReadAsync($State.Buffer, 0, $State.Buffer.Length)
+        }
+        catch {
+            $State.Error = 'Stream read failed: {0}' -f $_.Exception.Message
+            $State.Complete = $true
+        }
+    }
+
+    return $madeProgress
+}
+
+function Get-WdtProcessCreationKey {
+    param($CreationDate)
+    if ($null -eq $CreationDate) { return '' }
+    try { return ([datetime]$CreationDate).ToString('o') }
+    catch { return [string]$CreationDate }
+}
+
+function Test-WdtProcessIdentity {
+    param(
+        [Parameter(Mandatory = $true)]$Expected,
+        $Current
+    )
+
+    if ($null -eq $Current) { return 'NotFound' }
+    if ([int]$Current.ProcessId -ne [int]$Expected.ProcessId) { return 'PidMismatch' }
+    if (-not $Expected.IsRoot -and [int]$Current.ParentProcessId -ne [int]$Expected.ParentProcessId) { return 'ParentMismatch' }
+    if ((Get-WdtProcessCreationKey -CreationDate $Current.CreationDate) -ne [string]$Expected.CreationKey) { return 'CreationTimeMismatch' }
+    return 'Match'
+}
+
+function Get-WdtProcessTreeSnapshot {
     param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$RootProcess)
 
-    $processIds = New-Object System.Collections.Generic.List[int]
-    $processIds.Add($RootProcess.Id)
-    for ($index = 0; $index -lt $processIds.Count; $index++) {
-        try {
-            foreach ($child in @(Get-CimInstance -ClassName Win32_Process -Filter ("ParentProcessId={0}" -f $processIds[$index]) -ErrorAction Stop)) {
-                if ($child.ProcessId -notin $processIds) { $processIds.Add([int]$child.ProcessId) }
-            }
-        }
-        catch { }
+    $items = New-Object System.Collections.Generic.List[object]
+    $errors = New-Object System.Collections.Generic.List[string]
+    try {
+        $rootId = $RootProcess.Id
+        $rootStartTime = $RootProcess.StartTime
+    }
+    catch {
+        $errors.Add(('Root process identity is unavailable: {0}' -f $_.Exception.Message))
+        return [pscustomobject]@{ Items = @(); Errors = @($errors.ToArray()); RootExited = $false }
     }
 
-    foreach ($processId in @($processIds.ToArray() | Sort-Object -Descending)) {
-        try {
-            $target = [System.Diagnostics.Process]::GetProcessById($processId)
-            $target.Kill()
-            $target.WaitForExit(5000) | Out-Null
-            $target.Dispose()
-        }
-        catch { }
+    try {
+        $inventory = @(Get-CimInstance -ClassName Win32_Process -OperationTimeoutSec 1 -ErrorAction Stop)
     }
+    catch {
+        $errors.Add(('Process inventory failed: {0}' -f $_.Exception.Message))
+        return [pscustomobject]@{ Items = @(); Errors = @($errors.ToArray()); RootExited = $false }
+    }
+
+    $rootRecord = @($inventory | Where-Object { [int]$_.ProcessId -eq $rootId } | Select-Object -First 1)
+    if ($rootRecord.Count -eq 0) {
+        return [pscustomobject]@{ Items = @(); Errors = @(); RootExited = $true }
+    }
+
+    $rootCreationTime = [datetime]$rootRecord[0].CreationDate
+    $rootDifferenceSeconds = ($rootCreationTime - $rootStartTime).TotalSeconds
+    if ($rootDifferenceSeconds -lt 0) { $rootDifferenceSeconds = -$rootDifferenceSeconds }
+    if ($rootDifferenceSeconds -gt 0.01) {
+        $errors.Add('Root process creation time changed before cleanup inventory was captured.')
+        return [pscustomobject]@{ Items = @(); Errors = @($errors.ToArray()); RootExited = $false }
+    }
+
+    $rootEntry = [pscustomobject]@{
+        ProcessId = $rootId; ParentProcessId = [int]$rootRecord[0].ParentProcessId; Depth = 0; IsRoot = $true
+        CreationKey = Get-WdtProcessCreationKey -CreationDate $rootRecord[0].CreationDate; StartTime = $rootStartTime
+    }
+    $items.Add($rootEntry)
+    $byId = @{ $rootId = $rootEntry }
+
+    $added = $true
+    while ($added) {
+        $added = $false
+        foreach ($record in $inventory) {
+            $processId = [int]$record.ProcessId
+            $parentId = [int]$record.ParentProcessId
+            if ($byId.ContainsKey($processId) -or -not $byId.ContainsKey($parentId)) { continue }
+            $entry = [pscustomobject]@{
+                ProcessId = $processId; ParentProcessId = $parentId; Depth = ([int]$byId[$parentId].Depth + 1); IsRoot = $false
+                CreationKey = Get-WdtProcessCreationKey -CreationDate $record.CreationDate; StartTime = [datetime]$record.CreationDate
+            }
+            $byId[$processId] = $entry
+            $items.Add($entry)
+            $added = $true
+        }
+    }
+
+    return [pscustomobject]@{ Items = @($items.ToArray()); Errors = @($errors.ToArray()); RootExited = $false }
+}
+
+function Test-WdtSnapshotMembership {
+    param(
+        [Parameter(Mandatory = $true)]$Entry,
+        [Parameter(Mandatory = $true)]$SnapshotById,
+        [Parameter(Mandatory = $true)][System.Diagnostics.Stopwatch]$CleanupStopwatch,
+        [Parameter(Mandatory = $true)][int]$CleanupTimeoutMilliseconds
+    )
+
+    $cursor = $Entry
+    $isTarget = $true
+    while ($null -ne $cursor) {
+        if ($CleanupStopwatch.ElapsedMilliseconds -ge $CleanupTimeoutMilliseconds) { return 'TimedOut' }
+        try {
+            $current = @(Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId={0}" -f $cursor.ProcessId) -OperationTimeoutSec 1 -ErrorAction Stop | Select-Object -First 1)
+        }
+        catch { return 'QueryFailed: {0}' -f $_.Exception.Message }
+        $currentRecord = if ($current.Count -eq 0) { $null } else { $current[0] }
+        $identity = Test-WdtProcessIdentity -Expected $cursor -Current $currentRecord
+        if ($identity -eq 'NotFound') { return $(if ($isTarget) { 'TargetNotFound' } else { 'AncestorNotFound' }) }
+        if ($identity -ne 'Match') { return $identity }
+        if ($cursor.IsRoot) { return 'Match' }
+        if (-not $SnapshotById.ContainsKey([int]$cursor.ParentProcessId)) { return 'SnapshotParentMissing' }
+        $cursor = $SnapshotById[[int]$cursor.ParentProcessId]
+        $isTarget = $false
+    }
+    return 'SnapshotParentMissing'
+}
+
+function Get-WdtProcessCleanupSummary {
+    param([object[]]$Items, [string[]]$Errors, [bool]$TimedOut)
+    $failureStatuses = @('IdentityMismatch', 'QueryFailed', 'TerminationFailed', 'StillRunning', 'SnapshotError')
+    $failedItems = @($Items | Where-Object { $_.Status -in $failureStatuses })
+    return [pscustomobject]@{
+        Success = (-not $TimedOut -and @($Errors).Count -eq 0 -and $failedItems.Count -eq 0)
+        TimedOut = $TimedOut
+        AttemptedCount = @($Items | Where-Object { $_.Status -notin @('AlreadyExited', 'SkippedDeadline') }).Count
+        TerminatedCount = @($Items | Where-Object { $_.Status -eq 'Terminated' }).Count
+        AlreadyExitedCount = @($Items | Where-Object { $_.Status -eq 'AlreadyExited' }).Count
+        Items = @($Items)
+        Errors = @($Errors)
+    }
+}
+
+function Stop-WdtProcessTree {
+    param(
+        [Parameter(Mandatory = $true)][System.Diagnostics.Process]$RootProcess,
+        [ValidateRange(100, 30000)][int]$CleanupTimeoutMilliseconds = 5000
+    )
+
+    $cleanupStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $itemResults = New-Object System.Collections.Generic.List[object]
+    $errors = New-Object System.Collections.Generic.List[string]
+    $timedOut = $false
+    $snapshot = Get-WdtProcessTreeSnapshot -RootProcess $RootProcess
+    foreach ($snapshotError in @($snapshot.Errors)) { $errors.Add([string]$snapshotError) }
+    if ($snapshot.RootExited) {
+        $message = 'Root process exited before its descendants could be revalidated.'
+        $errors.Add($message)
+        $itemResults.Add([pscustomobject]@{ ProcessId = $RootProcess.Id; Depth = 0; Status = 'SnapshotError'; Message = $message })
+    }
+    elseif (@($snapshot.Items).Count -eq 0) {
+        $itemResults.Add([pscustomobject]@{ ProcessId = $null; Depth = 0; Status = 'SnapshotError'; Message = 'No verified process-tree snapshot is available.' })
+    }
+    else {
+        $snapshotById = @{}
+        foreach ($entry in @($snapshot.Items)) { $snapshotById[[int]$entry.ProcessId] = $entry }
+        foreach ($entry in @($snapshot.Items | Sort-Object -Property Depth -Descending)) {
+            if ($cleanupStopwatch.ElapsedMilliseconds -ge $CleanupTimeoutMilliseconds) {
+                $timedOut = $true
+                $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = 'SkippedDeadline'; Message = 'Cleanup deadline reached.' })
+                continue
+            }
+
+            $membership = Test-WdtSnapshotMembership -Entry $entry -SnapshotById $snapshotById -CleanupStopwatch $cleanupStopwatch -CleanupTimeoutMilliseconds $CleanupTimeoutMilliseconds
+            if ($membership -eq 'TargetNotFound') {
+                $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = 'AlreadyExited'; Message = 'Process exited before termination.' })
+                continue
+            }
+            if ($membership -ne 'Match') {
+                if ($membership -eq 'TimedOut') { $timedOut = $true }
+                $status = if ($membership -like 'QueryFailed:*') { 'QueryFailed' } else { 'IdentityMismatch' }
+                $message = 'Process ownership could not be revalidated: {0}' -f $membership
+                $errors.Add(('PID {0}: {1}' -f $entry.ProcessId, $message))
+                $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = $status; Message = $message })
+                continue
+            }
+
+            $target = $null
+            try {
+                $target = [System.Diagnostics.Process]::GetProcessById([int]$entry.ProcessId)
+                $actualStartTime = $target.StartTime
+                $differenceSeconds = ($actualStartTime - [datetime]$entry.StartTime).TotalSeconds
+                if ($differenceSeconds -lt 0) { $differenceSeconds = -$differenceSeconds }
+                if ($differenceSeconds -gt 0.01) {
+                    $message = 'Process creation time changed immediately before termination.'
+                    $errors.Add(('PID {0}: {1}' -f $entry.ProcessId, $message))
+                    $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = 'IdentityMismatch'; Message = $message })
+                    continue
+                }
+
+                if ($cleanupStopwatch.ElapsedMilliseconds -ge $CleanupTimeoutMilliseconds) {
+                    $timedOut = $true
+                    $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = 'SkippedDeadline'; Message = 'Cleanup deadline reached immediately before termination.' })
+                    continue
+                }
+
+                $target.Kill()
+                $remainingMilliseconds = $CleanupTimeoutMilliseconds - [int]$cleanupStopwatch.ElapsedMilliseconds
+                if ($remainingMilliseconds -lt 0) { $remainingMilliseconds = 0 }
+                if ($remainingMilliseconds -gt 500) { $remainingMilliseconds = 500 }
+                if ($remainingMilliseconds -gt 0 -and $target.WaitForExit($remainingMilliseconds)) {
+                    $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = 'Terminated'; Message = 'Process terminated.' })
+                }
+                else {
+                    $message = 'Process did not confirm exit before the cleanup deadline.'
+                    $errors.Add(('PID {0}: {1}' -f $entry.ProcessId, $message))
+                    $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = 'StillRunning'; Message = $message })
+                }
+            }
+            catch [System.ArgumentException] {
+                $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = 'AlreadyExited'; Message = 'Process exited before termination.' })
+            }
+            catch {
+                $message = 'Termination failed: {0}' -f $_.Exception.Message
+                $errors.Add(('PID {0}: {1}' -f $entry.ProcessId, $message))
+                $itemResults.Add([pscustomobject]@{ ProcessId = $entry.ProcessId; Depth = $entry.Depth; Status = 'TerminationFailed'; Message = $message })
+            }
+            finally {
+                if ($null -ne $target) {
+                    try { $target.Dispose() }
+                    catch { $errors.Add(('PID {0}: process handle disposal failed: {1}' -f $entry.ProcessId, $_.Exception.Message)) }
+                }
+            }
+        }
+    }
+
+    $summary = Get-WdtProcessCleanupSummary -Items @($itemResults.ToArray()) -Errors @($errors.ToArray()) -TimedOut $timedOut
+    $cleanupStopwatch.Stop()
+    $summary | Add-Member -MemberType NoteProperty -Name Duration -Value $cleanupStopwatch.Elapsed
+    return $summary
 }
 
 function Invoke-DiagnosticScript {
@@ -138,6 +419,8 @@ function Invoke-DiagnosticScript {
         Status      = 'LaunchError'
         Duration    = [timespan]::Zero
         Completeness = 'Unavailable'
+        Cleanup     = $null
+        OutputComplete = $true
     }
 
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
@@ -147,6 +430,9 @@ function Invoke-DiagnosticScript {
     }
 
     $process = $null
+    $processStarted = $false
+    $stdoutState = $null
+    $stderrState = $null
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
@@ -174,47 +460,104 @@ function Invoke-DiagnosticScript {
         $process.StartInfo = $startInfo
 
         [void]$process.Start()
-        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
-        $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            Stop-WdtProcessTree -RootProcess $process
+        $processStarted = $true
+        $stdoutState = New-WdtStreamCaptureState -Reader $process.StandardOutput
+        $stderrState = New-WdtStreamCaptureState -Reader $process.StandardError
+        $processExited = $false
+        while (-not $processExited -and $stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+            [void](Read-WdtCompletedStreamChunks -State $stdoutState)
+            [void](Read-WdtCompletedStreamChunks -State $stderrState)
+            $processExited = $process.WaitForExit(25)
+        }
+
+        if (-not $processExited) {
             $result.ExitCode = 124
             $result.Status = 'Timeout'
             $result.ErrorLines = @("Module exceeded timeout of $TimeoutSeconds second(s).")
+            try {
+                $cleanup = Stop-WdtProcessTree -RootProcess $process
+                $result.Cleanup = $cleanup
+                if (-not $cleanup.Success) {
+                    $cleanupMessage = 'Process-tree cleanup was incomplete: {0}' -f (($cleanup.Errors | Select-Object -First 5) -join '; ')
+                    $result.ErrorLines += $cleanupMessage
+                }
+            }
+            catch {
+                $result.ErrorLines += ('Process-tree cleanup failed: {0}' -f $_.Exception.Message)
+            }
         }
         else {
-            $process.WaitForExit()
             $result.ExitCode = $process.ExitCode
             $result.Status = if ($process.ExitCode -eq 0) { 'Success' } else { 'NonZeroExit' }
         }
 
-        $result.OutputLines = @(Convert-TextToLines -Text $stdoutTask.Result)
-        $capturedErrors = @(Convert-TextToLines -Text $stderrTask.Result)
-        $result.ErrorLines = @($result.ErrorLines) + $capturedErrors
-        $result.Completeness = if ($result.Status -eq 'Success') { 'Complete' } else { 'Partial' }
+        $drainStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        while ((-not $stdoutState.Complete -or -not $stderrState.Complete) -and $drainStopwatch.ElapsedMilliseconds -lt 2000) {
+            $stdoutProgress = Read-WdtCompletedStreamChunks -State $stdoutState
+            $stderrProgress = Read-WdtCompletedStreamChunks -State $stderrState
+            if (-not $stdoutProgress -and -not $stderrProgress) { Start-Sleep -Milliseconds 10 }
+        }
+        $drainStopwatch.Stop()
+        [void](Read-WdtCompletedStreamChunks -State $stdoutState)
+        [void](Read-WdtCompletedStreamChunks -State $stderrState)
+
+        $result.OutputLines = @(Convert-TextToLines -Text $stdoutState.Text.ToString())
+        $result.ErrorLines = @($result.ErrorLines) + @(Convert-TextToLines -Text $stderrState.Text.ToString())
+        foreach ($streamState in @($stdoutState, $stderrState)) {
+            if (-not [string]::IsNullOrWhiteSpace([string]$streamState.Error)) { $result.ErrorLines += [string]$streamState.Error }
+        }
+        if (-not $stdoutState.Complete -or -not $stderrState.Complete) {
+            $result.OutputComplete = $false
+            $incompleteStreams = @()
+            if (-not $stdoutState.Complete) { $incompleteStreams += 'stdout' }
+            if (-not $stderrState.Complete) { $incompleteStreams += 'stderr' }
+            $result.ErrorLines += ('Captured output is incomplete because stream drain did not finish within 2 seconds: {0}.' -f ($incompleteStreams -join ', '))
+        }
     }
     catch {
-        if ($null -ne $process -and -not $process.HasExited) { Stop-WdtProcessTree -RootProcess $process }
-        $result.ExitCode = 1
-        $result.Status = if ($_.Exception -is [System.Management.Automation.PipelineStoppedException]) { 'Cancelled' } else { 'LaunchError' }
-        $result.ErrorLines = @("Failed to run script: $($_.Exception.Message)")
+        $primaryError = $_
+        $secondaryErrors = @()
+        if ($processStarted) {
+            try {
+                $cleanup = Stop-WdtProcessTree -RootProcess $process
+                $result.Cleanup = $cleanup
+                if (-not $cleanup.Success) { $secondaryErrors += ('Process-tree cleanup was incomplete: {0}' -f (($cleanup.Errors | Select-Object -First 5) -join '; ')) }
+            }
+            catch {
+                $secondaryErrors += ('Process-tree cleanup failed: {0}' -f $_.Exception.Message)
+            }
+        }
+        if ($result.Status -ne 'Timeout') {
+            $result.ExitCode = 1
+            $result.Status = if ($primaryError.Exception -is [System.Management.Automation.PipelineStoppedException]) { 'Cancelled' } else { 'LaunchError' }
+        }
+        $result.ErrorLines = @($result.ErrorLines) + @("Failed to run script: $($primaryError.Exception.Message)") + $secondaryErrors
     }
     finally {
         $stopwatch.Stop()
         $result.Duration = $stopwatch.Elapsed
-        if ($null -ne $process) { $process.Dispose() }
+        foreach ($streamState in @($stdoutState, $stderrState)) {
+            if ($null -ne $streamState -and -not $streamState.Complete) {
+                try { $streamState.Reader.Dispose() }
+                catch { $result.ErrorLines += ('Failed to close an incomplete stream reader: {0}' -f $_.Exception.Message) }
+            }
+        }
+        if ($null -ne $process) {
+            try { $process.Dispose() }
+            catch { $result.ErrorLines += ('Failed to dispose the child process handle: {0}' -f $_.Exception.Message) }
+        }
     }
 
     $resolved = Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
-    if ($resolved.Status -eq 'LaunchError' -or $resolved.Status -eq 'Cancelled') {
-        $resolved.Completeness = 'Unavailable'
-    }
-    elseif (@($resolved.Findings | Where-Object { $_.Code -match '(_UNAVAILABLE|_INCOMPLETE)$' }).Count -gt 0) {
-        $resolved.Completeness = 'Partial'
-    }
+    $resolved.Completeness = Get-WdtExecutionCompleteness -Status $resolved.Status
     if ($resolved.Status -eq 'Timeout') {
         $resolved.Findings = @($resolved.Findings | Where-Object { $_.Code -ne 'MODULE_EXECUTION_FAILED' }) + @(
             New-WdtFindingObject -Module $resolved.Title -Severity ERROR -Code 'MODULE_EXECUTION_TIMEOUT' -Message 'The diagnostic module exceeded its execution timeout.' -Evidence ("TimeoutSeconds={0}; Duration={1:N1}s" -f $TimeoutSeconds, $resolved.Duration.TotalSeconds)
+        )
+    }
+    if ($null -ne $resolved.Cleanup -and -not $resolved.Cleanup.Success) {
+        $resolved.Findings = @($resolved.Findings) + @(
+            New-WdtFindingObject -Module $resolved.Title -Severity ERROR -Code 'MODULE_PROCESS_CLEANUP_INCOMPLETE' -Message 'The diagnostic process tree could not be fully cleaned up within the bounded cleanup attempt.' -Evidence (($resolved.Cleanup.Errors | Select-Object -First 5) -join '; ')
         )
     }
     return $resolved
@@ -468,8 +811,7 @@ function Invoke-WdtReport {
     $privacyModeLabel = if ($PrivacyMode) { 'enabled' } else { 'disabled' }
     $isElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     $elevationLabel = if ($isElevated) { 'Elevated' } else { 'Standard user' }
-    $limitedModules = @($results | Where-Object { $_.Completeness -ne 'Complete' } | ForEach-Object { $_.Title })
-    $collectionCompleteness = if (($results | Where-Object { $_.Completeness -eq 'Unavailable' }).Count -gt 0) { 'Unavailable' } elseif ($limitedModules.Count -gt 0) { 'Partial' } else { 'Complete' }
+    $collectionCompleteness = Get-WdtCollectionCompleteness -Results @($results.ToArray())
     $displayComputerName = [string]$env:COMPUTERNAME
     $displayTextReportPath = $textReportPath
     $displayMarkdownReportPath = $markdownReportPath
@@ -495,8 +837,6 @@ function Invoke-WdtReport {
     $textLines.Add(('Privacy mode  : {0}' -f $privacyModeLabel))
     $textLines.Add(('Elevation     : {0}' -f $elevationLabel))
     $textLines.Add(('Collection completeness: {0}' -f $collectionCompleteness))
-    $textLines.Add(('Limited modules: {0}' -f $(if ($limitedModules.Count) { $limitedModules -join ', ' } else { 'None' })))
-    $textLines.Add(('Unavailable data sources: {0}' -f $(if ($limitedModules.Count) { 'See limited module sections' } else { 'None reported' })))
     $textLines.Add(('Output        : {0}' -f $displayTextReportPath))
     $textLines.Add(('Selected      : {0}' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
     Add-TextFindingsSummary -Lines $textLines -Summary $findingsSummary
@@ -520,8 +860,6 @@ function Invoke-WdtReport {
         $markdownLines.Add(('- Privacy mode: `{0}`' -f $privacyModeLabel))
         $markdownLines.Add(('- Elevation: `{0}`' -f $elevationLabel))
         $markdownLines.Add(('- Collection completeness: `{0}`' -f $collectionCompleteness))
-        $markdownLines.Add(('- Limited modules: `{0}`' -f $(if ($limitedModules.Count) { $limitedModules -join ', ' } else { 'None' })))
-        $markdownLines.Add(('- Unavailable data sources: `{0}`' -f $(if ($limitedModules.Count) { 'See limited module sections' } else { 'None reported' })))
         $markdownLines.Add(('- TXT report: `{0}`' -f $displayTextReportPath))
         $markdownLines.Add(('- Selected: `{0}`' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
         Add-MarkdownFindingsSummary -Lines $markdownLines -Summary $findingsSummary
@@ -604,7 +942,14 @@ if ($launchMode -eq 'Interactive') {
         Join-Path -Path (Get-Location).Path -ChildPath 'WindowsDiagnosticsReports'
     }
     $initialSelection = if ($All -or $hasExplicitSelection) { @($selectedModules.ToArray()) } else { $null }
-    $interactiveExitCode = Invoke-WdtInteractiveSession -InitialSelection $initialSelection -OutputDirectory $interactiveOutputDirectory
+    $interactiveExitCode = Invoke-WdtInteractiveSession `
+        -InitialSelection $initialSelection `
+        -OutputDirectory $interactiveOutputDirectory `
+        -ModuleTimeoutSeconds $ModuleTimeoutSeconds `
+        -NoExternalNetworkTests ([bool]$NoExternalNetworkTests) `
+        -NetworkDnsTestName $NetworkDnsTestName `
+        -NetworkHttpsEndpoint $NetworkHttpsEndpoint `
+        -NetworkIcmpTarget $NetworkIcmpTarget
     if ($interactiveExitCode -ne 0) {
         exit $interactiveExitCode
     }
