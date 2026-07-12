@@ -36,7 +36,7 @@ Assert-True ($readme.Contains('With `-All` or one or more module switches it run
 Assert-True ($readme.Contains('script execution is disabled')) 'README is missing Execution Policy troubleshooting.'
 Assert-True ($readme.Contains('does not change the machine-wide or current-user execution policy')) 'README does not explain the process-only Execution Policy bypass.'
 Assert-True ($readme.Contains('If PowerShell reports that `pwsh` is not recognized')) 'README is missing pwsh troubleshooting guidance.'
-Assert-True ($readme.Contains('Installing PowerShell 7 is optional')) 'README does not explain that PowerShell 7 is optional.'
+Assert-True ($readme.Contains('installing PowerShell 7 is optional')) 'README does not explain that PowerShell 7 is optional.'
 Assert-True ($readme.Contains('| Wide | `110x28`')) 'README does not document the Wide TUI threshold.'
 Assert-True ($readme.Contains('| WideShort | `110x22`')) 'README does not document the WideShort layout.'
 Assert-True ($readme.Contains('| Compact | `40x18`')) 'README does not document the Compact layout.'
