@@ -1,25 +1,31 @@
 # Windows Diagnostics Toolkit
 
-![Windows Diagnostics Toolkit: local read-only diagnostics](site/assets/social-preview.svg)
+[![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://github.com/0x0bug/windows-diagnostics-toolkit)
+[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE?logo=powershell)](https://github.com/0x0bug/windows-diagnostics-toolkit)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![No telemetry](https://img.shields.io/badge/telemetry-none-2ea44f)](SECURITY.md)
 
-**Generate a local Windows support report with diagnostics that are read-only by design with automated safety checks.**
+<p align="center">
+  <img src="site/assets/tui-wide-unicode.png" alt="Windows Diagnostics Toolkit interactive Wide dashboard" width="100%">
+</p>
 
-Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 and Windows 11. It collects security, performance, network, disk, crash, service, Event Log, time-sync, and Windows Update context into TXT and optional Markdown reports.
+**Generate a local Windows support report with diagnostics that are read-only by design and guarded by automated safety checks.**
+
+Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 and Windows 11. It collects security, performance, network, disk, crash, service, Event Log, time-sync, and Windows Update context into local TXT and optional Markdown reports.
 
 - Read-only by design with automated safety checks
+- Interactive responsive terminal interface
 - No installer or third-party PowerShell modules
 - No telemetry, upload, remote collection, or automatic fixes
 - Local reports with an aggregated `OK` / `WARN` / `ERROR` findings summary
-- Optional `-PrivacyMode` for reports that will be shared
+- Optional Privacy Mode for reports that will be shared
 - Compatible with Windows PowerShell 5.1 and PowerShell 7
 
 [Project website](https://0x0bug.github.io/windows-diagnostics-toolkit/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
 
 ## Quick start
 
-### Interactive mode
-
-Clone the repository and start the toolkit without switches:
+Clone the repository and run the entry point without switches:
 
 ```powershell
 git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
@@ -27,10 +33,7 @@ cd windows-diagnostics-toolkit
 .\Invoke-WindowsDiagnostics.ps1
 ```
 
-Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default; the menu lets you change the selected modules and output directory.
-The TUI uses a two-column Wide dashboard from 110x28, a single-column Normal layout from 60x25, and a viewport-based Compact layout from 40x18. A terminal around 120x30 or larger is recommended for the full dashboard. Below 40x18 it asks you to resize the window before showing the menu.
-
-The interface is ASCII-first: its panels, logo, selection markers, actions, help bar, and fallback do not require Unicode icons or box-drawing characters. Console colors are used when available, while monochrome and unsupported hosts retain the same text and navigation. The layout is adapted for terminal reliability rather than attempting pixel-perfect reproduction of a graphical mockup.
+Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default.
 
 If Windows PowerShell reports that script execution is disabled, use this process-only launch command:
 
@@ -39,11 +42,64 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\Invoke-WindowsDiagnostics.ps1
 ```
 
-This opens the same interactive TUI. The one-run execution-policy bypass applies only to the new PowerShell process; it does not change the machine-wide or current-user execution policy and does not require PowerShell 7.
+The one-run execution-policy bypass applies only to the new PowerShell process. It does not change the machine-wide or current-user execution policy.
 
-If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`; installing PowerShell 7 is optional because the toolkit supports the built-in Windows PowerShell 5.1 command above.
+If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`. Installing PowerShell 7 is optional because the toolkit supports the built-in Windows PowerShell 5.1 command above.
 
-### Command-line mode
+## Interactive TUI
+
+The dashboard lets you select diagnostics, toggle Privacy Mode and Markdown export, choose an output directory, run collection, and return to the menu without restarting the script.
+
+| Key | Action |
+| --- | --- |
+| `Up` / `Down` | Move through menu items |
+| `Space` | Toggle the selected diagnostic or option |
+| `Enter` | Run the highlighted action |
+| `A` | Select all diagnostics |
+| `R` | Restore the recommended selection |
+| `Esc` | Exit |
+
+The layout responds to terminal resizing and preserves the current selection:
+
+| Layout | Minimum terminal size | Behavior |
+| --- | ---: | --- |
+| Wide | `110x28` | Full two-column dashboard and large logo |
+| WideShort | `110x22` | Two columns with a compact header |
+| Normal | `60x25` | Single-column interface |
+| Compact | `40x18` | Scrollable viewport |
+| TooSmall | below `40x18` | Resize prompt |
+
+A terminal around `120x30` or larger is recommended for the full dashboard.
+
+### Unicode and ASCII logo modes
+
+In automatic mode, the Wide dashboard uses the Unicode block logo when output is interactive and UTF-8. PowerShell sessions using an OEM encoding such as `cp866`, redirected output, and unsupported hosts receive the printable ASCII fallback.
+
+Override the logo selection for the current PowerShell process:
+
+```powershell
+$env:WDT_TUI_LOGO = 'auto'
+$env:WDT_TUI_LOGO = 'unicode'
+$env:WDT_TUI_LOGO = 'ascii'
+```
+
+`unicode` is still blocked for redirected output. Remove the override with:
+
+```powershell
+Remove-Item Env:WDT_TUI_LOGO -ErrorAction SilentlyContinue
+```
+
+### Review the result
+
+After collection completes, the TUI shows the elapsed time, report paths, and the number of `WARN` and `ERROR` findings. `Enter` returns to the menu and `Esc` exits.
+
+<p align="center">
+  <img src="site/assets/tui-result.png" alt="Windows Diagnostics Toolkit completed diagnostics screen" width="100%">
+</p>
+
+A `WARN` means the toolkit found a condition worth reviewing. It does not mean the collection failed. A non-zero module exit code is reported separately as an execution failure.
+
+## Command-line mode
 
 Explicit module switches run diagnostics immediately without opening the TUI:
 
@@ -83,17 +139,17 @@ WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
 | Services | Automatic services not running, optional startup and scheduled-task checks |
 | Windows Update | Version, recent updates, reboot indicators, update-related services and optional events |
 
-The report begins with a findings summary so the user does not need to inspect every section before seeing what needs attention.
+The report begins with a findings summary so the user can see what needs attention before reading every section.
 
 ## Share reports safely
 
-Use `-PrivacyMode` when attaching a report to a GitHub issue, forum post, chat, or support request:
+Use Privacy Mode when attaching a report to a GitHub issue, forum post, chat, or support request:
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 ```
 
-Privacy Mode replaces identifying values with stable per-report tokens such as:
+Privacy Mode replaces identifying values with stable per-report tokens:
 
 ```text
 <HOST-1>
@@ -105,7 +161,7 @@ Privacy Mode replaces identifying values with stable per-report tokens such as:
 
 Process, application, and dump-file names remain visible because they are diagnostically useful. Proxy credentials and sensitive URL query values are removed from combined reports even when Privacy Mode is disabled.
 
-Review every report before publishing it. Standalone module output is raw and local; `-PrivacyMode` applies to reports generated by `Invoke-WindowsDiagnostics.ps1`.
+Review every report before publishing it. Standalone module output is raw and local; Privacy Mode applies to reports generated by `Invoke-WindowsDiagnostics.ps1`.
 
 ## Run selected checks
 
@@ -128,7 +184,7 @@ Selectors can be combined:
 .\Invoke-WindowsDiagnostics.ps1 -System -Network -Disk -OutputDirectory .\reports
 ```
 
-See the [usage guide](docs/usage.md) for standalone module parameters and detailed behavior.
+See the [usage guide](docs/usage.md) for standalone module parameters, TUI behavior, output semantics, and troubleshooting.
 
 ## Safety model
 
@@ -138,7 +194,7 @@ Repository validation includes:
 
 - PowerShell parser checks
 - an AST-based guard against dangerous or mutating commands
-- narrow allowlists for the diagnostic-only `w32tm.exe` and `netsh.exe` queries used by the toolkit
+- narrow allowlists for reviewed diagnostic-only native process calls
 - detection of generated reports, logs, temporary files, and backup files left in the repository
 - tests in both PowerShell 7 and Windows PowerShell 5.1
 
@@ -160,8 +216,6 @@ PowerShell 7:
 ```powershell
 pwsh -NoProfile -File .\scripts\validate.ps1
 ```
-
-The `pwsh` command is available only when PowerShell 7 is installed. Windows PowerShell 5.1 users should use the command below.
 
 Windows PowerShell 5.1:
 
