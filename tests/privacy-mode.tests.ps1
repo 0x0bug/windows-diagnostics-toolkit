@@ -57,10 +57,10 @@ try {
     Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:COMPUTERNAME)) -Message 'Privacy report leaked the computer name.'
     Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERNAME)) -Message 'Privacy report leaked the user name.'
     Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERPROFILE)) -Message 'Privacy report leaked the user-profile path.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value '8.8.8.8')) -Message 'Privacy report leaked the connectivity test IP address.'
+    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value '1.1.1.1')) -Message 'Privacy report leaked the connectivity test IP address.'
     Assert-True -Condition ($combinedContent -match '<HOST-1>') -Message 'Privacy report is missing a host token.'
     Assert-True -Condition ($combinedContent -match '<IP-[0-9]+>') -Message 'Privacy report is missing an IP token.'
-    Assert-True -Condition ($combinedContent -match 'github\.com') -Message 'Privacy Mode unexpectedly removed the DNS test name.'
+    Assert-True -Condition ($combinedContent -match 'www\.microsoft\.com') -Message 'Privacy Mode unexpectedly removed the DNS test name.'
 
     Write-Host 'Privacy mode smoke test passed.'
 }

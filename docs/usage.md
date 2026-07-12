@@ -124,6 +124,8 @@ Use `-All` or one or more module selectors to skip the TUI:
 .\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
 ```
 
+Module execution is bounded independently. The default is `-ModuleTimeoutSeconds 180`. A timeout terminates only the WDT-started child process tree, keeps results from other modules, and is reported as `MODULE_EXECUTION_TIMEOUT` with duration and `Partial` completeness.
+
 Windows PowerShell 5.1:
 
 ```powershell
@@ -173,11 +175,13 @@ Standalone scripts do not accept Privacy Mode. Their output remains raw and loca
 
 Each combined report starts with `Findings Summary`.
 
-Findings use three severities:
+Findings and collection metadata use these meanings:
 
 - `OK`: module completed and emitted no warning or error findings;
 - `WARN`: state should be reviewed, but collection completed;
 - `ERROR`: diagnostic state is considered serious.
+- `Partial`: the module ran but one or more data sources or execution stages were unavailable;
+- `Indeterminate`: available signals do not justify a positive or negative diagnosis.
 
 Overall severity follows `ERROR` > `WARN` > `OK`.
 
@@ -207,7 +211,7 @@ pwsh -NoProfile -File .\scripts\security-posture.ps1
 
 ### Performance Snapshot
 
-Takes a single read-only snapshot of memory, CPU, pagefile use, and top processes. It does not collect process paths, owners, or command lines.
+Takes three short CPU load samples and two process samples. Current process activity is calculated from the `TotalProcessorTime` delta divided by elapsed time and logical processor count. A single high CPU sample is not a confirmed warning. Cumulative CPU time remains a separate metric. Process paths, owners, and command lines are not collected.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Performance
@@ -223,7 +227,7 @@ pwsh -NoProfile -File .\scripts\performance-snapshot.ps1 `
 
 ### Network Diagnostics
 
-Collects adapters, addresses, DHCP, DNS, gateways, routes, WinINET/WinHTTP proxy context, and simple reachability checks.
+Collects adapters, addresses, DHCP, DNS, gateways, routes, WinINET/WinHTTP proxy context, and independent reachability signals.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Network
@@ -234,8 +238,10 @@ Optional standalone parameters:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\network-check.ps1 `
-  -DnsTestName github.com -InternetTestHost 8.8.8.8 -TimeoutSeconds 3
+  -DnsTestName www.microsoft.com -HttpsEndpoint https://www.microsoft.com/ -IcmpTarget 1.1.1.1 -TimeoutSeconds 3
 ```
+
+The wrapper exposes the same probes as `-NetworkDnsTestName`, `-NetworkHttpsEndpoint`, and `-NetworkIcmpTarget`. DNS uses the system resolver; TCP opens a connection to the HTTPS endpoint host/port without sending user data or an HTTP request; ICMP is optional evidence and cannot by itself prove internet failure. Results are `Reachable`, `Unreachable`, `BlockedOrFiltered`, `Indeterminate`, or `NotTested`. Use `-NoExternalNetworkTests` to skip DNS, external TCP, and external ICMP probes. Local adapter, route, gateway, and proxy collection still runs.
 
 The module only uses the read-only `netsh.exe winhttp show proxy` form.
 
@@ -257,9 +263,9 @@ pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 `
 
 The module only queries `w32tm.exe /query /source` and `w32tm.exe /query /status /verbose`. It does not configure or resynchronize time. Native output is decoded with the current Windows OEM code page.
 
-### Disk Health
+### Storage Status
 
-Reads physical disk and volume information. The default low-space warning threshold is 15 percent.
+Reads Windows-reported physical disk state, volume free space, and reliability counters when `Get-StorageReliabilityCounter` supports the device. Missing counters are normal for some USB, RAID, virtual, and controller-backed disks and are not a warning. This is not a complete SMART or NVMe diagnostic. No new serial numbers or device identifiers are collected. The default low-space warning threshold is 15 percent.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Disk
@@ -300,7 +306,7 @@ pwsh -NoProfile -File .\scripts\event-log-check.ps1
 
 ### Services and Startup
 
-Checks automatic services that are not running and non-OK service states. Startup entries and scheduled tasks are optional.
+Checks service states, startup entries, and scheduled tasks. The main wrapper enables both optional inventories so the title matches the work performed. `Auto + Stopped` alone is displayed as `Indeterminate`, because trigger-start, delayed, conditional, and intentionally idle services can be stopped normally. WARN requires a pending state or non-zero service exit code.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Services

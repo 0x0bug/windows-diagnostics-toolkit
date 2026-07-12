@@ -252,6 +252,9 @@ Assert-Denied '[System.IO.StreamWriter]::new(''.\owned.txt'')' '*Static method i
 Assert-Denied '([scriptblock]::Create(''Set-Content .\owned.txt data'')).Invoke()' '*reviewed safe allowlist*'
 Assert-Denied '[System.Management.Automation.PowerShell]::Create().AddScript(''Set-Content .\owned.txt data'').Invoke()' '*reviewed safe allowlist*'
 Assert-Denied '$ExecutionContext.InvokeCommand.InvokeScript(''Get-Date'')' '*Instance method is not in the reviewed safe allowlist*'
+Assert-Denied '$target.Kill()' '*Instance method is not in the reviewed safe allowlist*'
+Assert-Denied '$client.ConnectAsync(''example.com'', 443)' '*Instance method is not in the reviewed safe allowlist*'
+Assert-Denied '[System.Diagnostics.Process]::GetProcessById(1)' '*Static method is not in the reviewed safe allowlist*'
 
 foreach ($source in @(
         'New-Item -ItemType Directory -Path $otherPath -Force',
