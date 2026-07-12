@@ -6,9 +6,10 @@
   <title>Windows Diagnostics Tool for PowerShell | WDT</title>
   <meta name="description" content="Run a responsive read-only Windows diagnostics TUI and generate local support reports for security, performance, network, crashes, disks, services and updates.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
-  <meta name="theme-color" content="#0a0f18">
+  <meta name="theme-color" content="#000000">
   <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/">
   <link rel="stylesheet" href="assets/style.css">
+  <script src="assets/site.js" defer></script>
 
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="Windows Diagnostics Toolkit">
@@ -120,164 +121,235 @@
   }
   </script>
 </head>
-<body>
+<body class="landing">
 <a class="skip-link" href="#main-content">Skip to content</a>
-<header>
-  <nav class="wrap" aria-label="Primary navigation">
-    <a class="brand" href="./">Windows Diagnostics Toolkit</a>
-    <div class="nav-links">
+
+<header class="site-header">
+  <nav class="wrap terminal-nav" aria-label="Primary navigation">
+    <a class="brand" href="./" aria-label="Windows Diagnostics Toolkit home">
+      <span class="brand-mark" aria-hidden="true">WDT</span>
+      <span class="brand-copy">
+        <strong>Windows Diagnostics Toolkit</strong>
+        <small>READ-ONLY / LOCAL / OPEN SOURCE</small>
+      </span>
+    </a>
+    <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="primary-links">
+      <span aria-hidden="true">[≡]</span><span class="sr-only">Toggle navigation</span>
+    </button>
+    <div class="nav-links" id="primary-links">
       <a href="#interface">Interface</a>
       <a href="#checks">Checks</a>
       <a href="#privacy">Privacy</a>
-      <a href="cases/">Troubleshooting guides</a>
-      <a href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub</a>
+      <a href="cases/">Guides</a>
+      <a class="nav-github" href="https://github.com/0x0bug/windows-diagnostics-toolkit">GitHub ↗</a>
     </div>
   </nav>
 </header>
 
 <main id="main-content">
-  <section class="hero wrap">
-    <div>
-      <div class="eyebrow">Open source · PowerShell · Windows 10/11</div>
-      <h1>Read-only Windows diagnostics with an interactive terminal dashboard</h1>
-      <p class="lead">Select the checks you need, generate local TXT and Markdown reports, and review an aggregated findings summary without changing Windows settings or uploading data.</p>
-      <div class="actions">
-        <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start">Run the diagnostics</a>
-        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/usage.md">Read the usage guide</a>
-        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/report-example.md">View an example report</a>
+  <section class="hero wrap" aria-labelledby="hero-title">
+    <div class="hero-copy">
+      <div class="prompt-line"><span class="prompt-user">PS C:\WDT&gt;</span><span class="prompt-command"> .\Invoke-WindowsDiagnostics.ps1</span><span class="terminal-cursor" aria-hidden="true"></span></div>
+      <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> SYSTEM READY</p>
+      <h1 id="hero-title">See what Windows is doing.<br><span>Change nothing.</span></h1>
+      <p class="lead">A read-only PowerShell diagnostics toolkit with a responsive terminal interface, local reports, Privacy Mode and no telemetry.</p>
+      <div class="hero-actions actions">
+        <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start"><span aria-hidden="true">&gt;</span> Run diagnostics</a>
+        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/usage.md">Usage guide</a>
+        <a class="button ghost" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/report-example.md">Example report</a>
       </div>
+      <dl class="hero-status" aria-label="Toolkit status">
+        <div><dt>MODE</dt><dd class="ok">READ-ONLY</dd></div>
+        <div><dt>UPLOAD</dt><dd>NONE</dd></div>
+        <div><dt>RUNTIME</dt><dd>PS 5.1 / 7+</dd></div>
+        <div><dt>PLATFORM</dt><dd>WIN 10 / 11</dd></div>
+      </dl>
     </div>
-    <figure class="product-shot hero-shot">
+
+    <figure class="tui-frame hero-tui">
+      <div class="frame-label"><span>WDT / INTERACTIVE DASHBOARD</span><span class="frame-state">UTF-8</span></div>
       <img src="assets/tui-wide-unicode.svg" alt="Windows Diagnostics Toolkit Wide terminal dashboard with selected diagnostics and Privacy Mode enabled" width="1085" height="494">
-      <figcaption>Responsive Wide dashboard in an interactive UTF-8 terminal.</figcaption>
+      <figcaption><span class="ok">[OK]</span> Responsive layout · keyboard-first controls · current selection preserved on resize</figcaption>
     </figure>
   </section>
 
-  <section id="interface">
+  <div class="signal-strip" aria-label="Toolkit guarantees">
+    <div class="wrap signal-track">
+      <span><strong>[x]</strong> READ-ONLY BY DESIGN</span>
+      <span><strong>[x]</strong> NO INSTALLER</span>
+      <span><strong>[x]</strong> NO TELEMETRY</span>
+      <span><strong>[x]</strong> LOCAL TXT + MARKDOWN</span>
+      <span><strong>[x]</strong> PRIVACY MODE</span>
+    </div>
+  </div>
+
+  <section id="interface" class="section-block">
     <div class="wrap">
-      <div class="eyebrow">TUI-first workflow</div>
-      <h2>Select, run, and review without leaving the terminal</h2>
-      <p class="section-intro">Running the entry point without switches opens the interactive interface. The current selection survives resize events, and the renderer adapts from a full two-column dashboard to compact viewport modes.</p>
-      <div class="showcase-grid">
-        <article class="card">
-          <h3>1. Select checks</h3>
-          <p>Use the keyboard to toggle ten diagnostic areas, Privacy Mode, Markdown export, and the output directory.</p>
-          <p class="key-line"><kbd>↑</kbd><kbd>↓</kbd> navigate <kbd>Space</kbd> toggle <kbd>Enter</kbd> select</p>
+      <div class="section-heading">
+        <div>
+          <p class="section-index">01 / INTERFACE</p>
+          <h2>Built around the terminal,<br>not bolted onto it.</h2>
+        </div>
+        <p class="section-intro">Run the entry point without switches. Select the diagnostic areas, choose report options and review the result without leaving the TUI.</p>
+      </div>
+
+      <div class="workflow-grid">
+        <article class="terminal-panel workflow-step is-active">
+          <div class="panel-top"><span>STEP 01</span><span class="ok">SELECT</span></div>
+          <h3><span aria-hidden="true">&gt;</span> Choose checks</h3>
+          <p>Toggle ten diagnostic areas, Privacy Mode, Markdown export and the output directory.</p>
+          <p class="key-line"><kbd>↑</kbd><kbd>↓</kbd><span>navigate</span><kbd>Space</kbd><span>toggle</span></p>
         </article>
-        <article class="card">
-          <h3>2. Run read-only collection</h3>
-          <p>The toolkit launches only reviewed diagnostic operations and keeps reports on the local machine.</p>
-          <p class="key-line"><kbd>A</kbd> all <kbd>R</kbd> recommended <kbd>Esc</kbd> exit</p>
+        <article class="terminal-panel workflow-step">
+          <div class="panel-top"><span>STEP 02</span><span class="ok">RUN</span></div>
+          <h3><span aria-hidden="true">&gt;</span> Collect locally</h3>
+          <p>Only reviewed diagnostic operations are launched. The toolkit does not apply fixes or reconfigure Windows.</p>
+          <p class="key-line"><kbd>A</kbd><span>all</span><kbd>R</kbd><span>recommended</span><kbd>Enter</kbd><span>run</span></p>
         </article>
-        <article class="card">
-          <h3>3. Review the result</h3>
-          <p>The completion screen shows elapsed time and the number of WARN and ERROR findings before you open the report.</p>
+        <article class="terminal-panel workflow-step">
+          <div class="panel-top"><span>STEP 03</span><span class="warn">REVIEW</span></div>
+          <h3><span aria-hidden="true">&gt;</span> Read findings</h3>
+          <p>See elapsed time, report paths and aggregated WARN and ERROR counts before opening the report.</p>
+          <p class="key-line"><kbd>Enter</kbd><span>menu</span><kbd>Esc</kbd><span>exit</span></p>
         </article>
       </div>
-      <figure class="product-shot result-shot">
-        <img src="assets/tui-result.svg" alt="Windows Diagnostics Toolkit completion screen showing three warnings, zero errors, and elapsed time" width="1085" height="162">
-        <figcaption>A warning describes diagnostic state to review; it does not mean the collection process failed.</figcaption>
+
+      <figure class="tui-frame result-frame">
+        <div class="frame-label"><span>WDT / COLLECTION RESULT</span><span class="frame-state">COMPLETE</span></div>
+        <img src="assets/tui-result.svg" alt="Windows Diagnostics Toolkit completion screen showing warnings, errors and elapsed time" width="1085" height="162" loading="lazy">
+        <figcaption><span class="warn">[WARN]</span> A warning means the observed state deserves review. It does not mean collection failed.</figcaption>
       </figure>
-      <div class="layout-note">
-        <strong>Responsive layouts:</strong> Wide from 110×28, WideShort from 110×22, Normal from 60×25, and Compact from 40×18. Compatible interactive UTF-8 terminals receive the Unicode logo; other hosts receive the ASCII fallback.
-      </div>
     </div>
   </section>
 
-  <section class="quick-start">
-    <div class="wrap split">
+  <section class="quick-start section-block" id="quick-start">
+    <div class="wrap command-layout">
       <div>
-        <div class="eyebrow">No installer required</div>
-        <h2>Start with one command</h2>
-        <p class="section-intro">Clone the repository and run the entry point without switches. Windows PowerShell 5.1 and PowerShell 7 are both supported.</p>
+        <p class="section-index">02 / QUICK START</p>
+        <h2>Clone. Run. Diagnose.</h2>
+        <p class="section-intro">No installer and no third-party PowerShell modules. The built-in Windows PowerShell 5.1 is enough.</p>
+        <ul class="plain-status-list">
+          <li><span class="ok">[OK]</span> Interactive TUI opens by default</li>
+          <li><span class="ok">[OK]</span> Recommended checks preselected</li>
+          <li><span class="ok">[OK]</span> Privacy Mode enabled by default</li>
+        </ul>
       </div>
-      <div class="terminal" aria-label="PowerShell interactive quick start">
-        <div class="terminal-bar">PowerShell</div>
-        <pre><code>git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
-cd windows-diagnostics-toolkit
-.\Invoke-WindowsDiagnostics.ps1</code></pre>
-      </div>
-    </div>
-  </section>
-
-  <section id="checks">
-    <div class="wrap">
-      <div class="eyebrow">One report, ten diagnostic areas</div>
-      <h2>Windows troubleshooting context before guesswork</h2>
-      <p class="section-intro">The report starts with an aggregated findings summary and keeps detailed diagnostic context below it. Run every module or select only the area relevant to the problem.</p>
-      <div class="grid">
-        <article class="card"><h3>System and performance</h3><p>Windows build, CPU, memory, GPU, uptime, pagefile, CPU snapshot and top processes.</p><a href="cases/windows-high-memory-usage.html">Diagnose high memory usage</a></article>
-        <article class="card"><h3>Security posture</h3><p>Microsoft Defender, Windows Firewall, Secure Boot, TPM and BitLocker status.</p><a href="cases/windows-firewall-disabled.html">Check disabled firewall profiles</a></article>
-        <article class="card"><h3>Network context</h3><p>Adapters, DHCP, DNS, gateways, routes, proxy settings and basic reachability checks.</p><a href="cases/windows-network-routes.html">Inspect routes and proxy settings</a></article>
-        <article class="card"><h3>Crashes and Event Logs</h3><p>Application failures, hangs, BugCheck events, dump metadata and recent critical errors.</p><a href="cases/windows-application-crashes.html">Find repeated application crashes</a></article>
-        <article class="card"><h3>Disk and free space</h3><p>Physical disk health, volume size and configurable low-free-space warnings.</p><a href="cases/windows-disk-health-low-space.html">Check disk health and space</a></article>
-        <article class="card"><h3>Time and Windows Update</h3><p>W32Time status, configured source, reboot indicators, recent updates and update services.</p><a href="cases/windows-update-pending-reboot.html">Check pending reboot indicators</a></article>
+      <div class="terminal command-terminal" aria-label="PowerShell quick start command">
+        <div class="terminal-bar"><span>PowerShell</span><button class="copy-button" type="button" data-copy-target="quick-command">COPY</button></div>
+        <pre id="quick-command"><code><span class="ps-prompt">PS&gt;</span> git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
+<span class="ps-prompt">PS&gt;</span> cd windows-diagnostics-toolkit
+<span class="ps-prompt">PS&gt;</span> .\Invoke-WindowsDiagnostics.ps1</code></pre>
+        <div class="terminal-footer"><span class="ok">READY</span><span>Execution policy unchanged</span></div>
       </div>
     </div>
   </section>
 
-  <section id="privacy">
+  <section id="checks" class="section-block">
     <div class="wrap">
-      <div class="eyebrow">Designed for support reports</div>
-      <h2>Local first. Share only what you choose.</h2>
-      <ul class="status-list">
-        <li><strong>Read-only:</strong><span>The production scripts collect diagnostic state and do not apply fixes or configuration changes.</span></li>
-        <li><strong>No telemetry:</strong><span>Reports stay in the output directory selected by the user. Nothing is uploaded.</span></li>
-        <li><strong>Privacy Mode:</strong><span>Common identifying values are replaced with stable typed tokens in combined reports.</span></li>
-        <li><strong>Auditable:</strong><span>The source, validation policy and dependency-free tests are public on GitHub.</span></li>
-      </ul>
-      <div class="callout"><strong>Before posting a report publicly:</strong> enable Privacy Mode and still review the final file manually.</div>
+      <div class="section-heading">
+        <div>
+          <p class="section-index">03 / DIAGNOSTICS</p>
+          <h2>One report.<br>Ten diagnostic areas.</h2>
+        </div>
+        <p class="section-intro">Collect broad troubleshooting context or run only the module related to the problem. The findings summary appears before the detailed sections.</p>
+      </div>
+
+      <div class="diagnostic-console">
+        <div class="console-head"><span>DIAGNOSTICS</span><span>SELECTED: 10 / 10</span></div>
+        <div class="diagnostic-grid">
+          <a class="diagnostic-row" href="cases/windows-high-memory-usage.html"><span class="check">[x]</span><span><strong>System + performance</strong><small>OS, CPU, memory, GPU, uptime, pagefile, top processes</small></span><span class="row-arrow">↗</span></a>
+          <a class="diagnostic-row" href="cases/windows-firewall-disabled.html"><span class="check">[x]</span><span><strong>Security posture</strong><small>Defender, Firewall, Secure Boot, TPM, BitLocker</small></span><span class="row-arrow">↗</span></a>
+          <a class="diagnostic-row" href="cases/windows-network-routes.html"><span class="check">[x]</span><span><strong>Network context</strong><small>Adapters, DNS, DHCP, routes, gateways, proxy, reachability</small></span><span class="row-arrow">↗</span></a>
+          <a class="diagnostic-row" href="cases/windows-application-crashes.html"><span class="check">[x]</span><span><strong>Crashes + Event Logs</strong><small>Application errors, hangs, BugCheck events, dump metadata</small></span><span class="row-arrow">↗</span></a>
+          <a class="diagnostic-row" href="cases/windows-disk-health-low-space.html"><span class="check">[x]</span><span><strong>Disk health</strong><small>Physical disk state, volumes and free-space warnings</small></span><span class="row-arrow">↗</span></a>
+          <a class="diagnostic-row" href="cases/windows-update-pending-reboot.html"><span class="check">[x]</span><span><strong>Time + Windows Update</strong><small>W32Time, update services, recent updates, reboot indicators</small></span><span class="row-arrow">↗</span></a>
+        </div>
+        <div class="console-foot"><span>UP/DOWN NAVIGATE</span><span>SPACE TOGGLE</span><span>ENTER SELECT</span><span>ESC EXIT</span></div>
+      </div>
     </div>
   </section>
 
-  <section>
+  <section id="privacy" class="section-block privacy-section">
+    <div class="wrap privacy-layout">
+      <div>
+        <p class="section-index">04 / PRIVACY</p>
+        <h2>Local first.<br>Share only what you choose.</h2>
+        <p class="section-intro">Reports stay in the selected output directory. Privacy Mode replaces common identifying values with stable per-report tokens.</p>
+        <ul class="plain-status-list privacy-list">
+          <li><span class="ok">[x]</span><span><strong>Read-only</strong><small>No registry, service, firewall, DNS or system configuration changes.</small></span></li>
+          <li><span class="ok">[x]</span><span><strong>No telemetry</strong><small>No upload, remote collection or tracking endpoint.</small></span></li>
+          <li><span class="ok">[x]</span><span><strong>Auditable</strong><small>Source code, validation policy and tests are public.</small></span></li>
+        </ul>
+      </div>
+      <div class="redaction-panel" aria-label="Privacy Mode token example">
+        <div class="panel-top"><span>PRIVACY MODE</span><span class="ok">ENABLED</span></div>
+        <pre><code>ComputerName : <span>&lt;HOST-1&gt;</span>
+UserName     : <span>&lt;USER-1&gt;</span>
+IPv4Address  : <span>&lt;IP-1&gt;</span>
+MacAddress   : <span>&lt;MAC-1&gt;</span>
+DeviceId     : <span>&lt;ID-1&gt;</span></code></pre>
+        <p><span class="warn">[!]</span> Process, application and dump-file names remain visible because they are diagnostically useful.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section-block guides-section">
     <div class="wrap">
-      <div class="eyebrow">Search by symptom</div>
-      <h2>Practical Windows troubleshooting guides</h2>
-      <p class="section-intro">Each guide explains which read-only module to run, what evidence it collects, how to interpret the report and what the toolkit intentionally does not change.</p>
-      <div class="grid">
-        <article class="card"><h3>Collect a Windows diagnostic report</h3><p>Create one redacted TXT and Markdown report for a support request.</p><a href="cases/windows-diagnostic-report-for-tech-support.html">Open the support report guide</a></article>
-        <article class="card"><h3>Windows application keeps crashing</h3><p>Locate recent Application Error, WER, hang, BugCheck and dump metadata.</p><a href="cases/windows-application-crashes.html">Open the crash guide</a></article>
-        <article class="card"><h3>Windows is using too much memory</h3><p>Compare available memory, pagefile use and top processes without continuous monitoring.</p><a href="cases/windows-high-memory-usage.html">Open the memory guide</a></article>
-        <article class="card"><h3>Windows Update may need a restart</h3><p>Inspect recent updates, reboot indicators and update-service state.</p><a href="cases/windows-update-pending-reboot.html">Open the update guide</a></article>
-        <article class="card"><h3>Windows Time service is stopped</h3><p>Inspect W32Time state, timezone, source, verbose status and optional events.</p><a href="cases/windows-time-service-stopped.html">Open the time guide</a></article>
-        <article class="card"><h3>Unexpected route or proxy</h3><p>Compare route metrics, adapters, gateways, DNS, DHCP and proxy context.</p><a href="cases/windows-network-routes.html">Open the network guide</a></article>
+      <div class="section-heading">
+        <div>
+          <p class="section-index">05 / GUIDES</p>
+          <h2>Start from the symptom.</h2>
+        </div>
+        <p class="section-intro">Each guide explains which module to run, what evidence it collects, how to interpret the output and what the toolkit intentionally leaves untouched.</p>
+      </div>
+      <div class="guide-list">
+        <a href="cases/windows-diagnostic-report-for-tech-support.html"><span>01</span><strong>Collect a support report</strong><small>Redacted TXT and Markdown output</small><b>OPEN ↗</b></a>
+        <a href="cases/windows-application-crashes.html"><span>02</span><strong>Application keeps crashing</strong><small>Errors, hangs, BugCheck and dumps</small><b>OPEN ↗</b></a>
+        <a href="cases/windows-high-memory-usage.html"><span>03</span><strong>Windows uses too much memory</strong><small>RAM, pagefile and top processes</small><b>OPEN ↗</b></a>
+        <a href="cases/windows-update-pending-reboot.html"><span>04</span><strong>Update may need a restart</strong><small>Updates, services and reboot indicators</small><b>OPEN ↗</b></a>
+        <a href="cases/windows-network-routes.html"><span>05</span><strong>Unexpected route or proxy</strong><small>Routes, gateways, DNS and proxy context</small><b>OPEN ↗</b></a>
       </div>
       <div class="actions"><a class="button" href="cases/">Browse all troubleshooting guides</a></div>
     </div>
   </section>
 
-  <section>
-    <div class="wrap">
-      <div class="eyebrow">Common questions</div>
-      <h2>Windows Diagnostics Toolkit FAQ</h2>
+  <section class="section-block faq-section">
+    <div class="wrap faq-layout">
+      <div>
+        <p class="section-index">06 / FAQ</p>
+        <h2>Expected behavior,<br>without guesswork.</h2>
+      </div>
       <div class="faq">
-        <details><summary>Does the toolkit change Windows settings?</summary><p>No. The production scripts collect and report state without applying automatic fixes, changing services, editing the registry or reconfiguring the network.</p></details>
-        <details><summary>Why do I see the ASCII logo?</summary><p>Automatic mode uses Unicode only for interactive UTF-8 output. OEM encodings such as cp866, redirected output and unsupported hosts receive the printable ASCII fallback.</p></details>
-        <details><summary>Does resizing restart diagnostics?</summary><p>No. Resize events redraw the current interface and preserve the current selection. A running diagnostic operation is not restarted by the layout renderer.</p></details>
-        <details><summary>Where are reports stored?</summary><p>Reports are written to the selected output directory. Nothing is uploaded automatically.</p></details>
-        <details><summary>Does a WARN mean the tool failed?</summary><p>No. WARN describes observed state that deserves review. A module execution failure is reported separately with a non-zero exit code.</p></details>
-        <details><summary>What should I run before sharing a report?</summary><p>Enable Privacy Mode and Markdown export in the TUI, or use <code>-All -PrivacyMode -ExportMarkdown</code>, then inspect the final file.</p></details>
+        <details><summary><span>Does the toolkit change Windows settings?</span><b aria-hidden="true">+</b></summary><p>No. Production diagnostics collect and report state without applying automatic fixes, changing services, editing the registry or reconfiguring the network.</p></details>
+        <details><summary><span>Why do I see the ASCII logo?</span><b aria-hidden="true">+</b></summary><p>Automatic mode uses Unicode only for compatible interactive UTF-8 output. OEM encodings such as cp866, redirected output and unsupported hosts receive the printable ASCII fallback.</p></details>
+        <details><summary><span>Does resizing restart diagnostics?</span><b aria-hidden="true">+</b></summary><p>No. Resize events redraw the current interface and preserve the current selection. A running diagnostic operation is not restarted.</p></details>
+        <details><summary><span>Where are reports stored?</span><b aria-hidden="true">+</b></summary><p>Reports are written to the selected output directory. Nothing is uploaded automatically.</p></details>
+        <details><summary><span>Does WARN mean the tool failed?</span><b aria-hidden="true">+</b></summary><p>No. WARN describes observed state that deserves review. A module execution failure is reported separately with a non-zero exit code.</p></details>
       </div>
     </div>
   </section>
 
-  <section>
-    <div class="wrap">
-      <div class="eyebrow">Open source and auditable</div>
-      <h2>Run it, read the findings, keep the report.</h2>
-      <p class="section-intro">Use the complete toolkit, select only the modules relevant to a support case, or run individual scripts.</p>
+  <section class="final-cta">
+    <div class="wrap final-console">
+      <div>
+        <p class="section-index">READY / RUN</p>
+        <h2>Diagnose Windows before changing Windows.</h2>
+        <p>Open source, dependency-free and designed to produce evidence you can actually share.</p>
+      </div>
       <div class="actions">
-        <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start">Quick start</a>
-        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/usage.md">Detailed usage</a>
-        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose">Report a problem</a>
+        <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start"><span aria-hidden="true">&gt;</span> Quick start</a>
+        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit">View source</a>
+        <a class="button ghost" href="https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose">Report a problem</a>
       </div>
     </div>
   </section>
 </main>
 
 <footer>
-  <div class="wrap">Windows Diagnostics Toolkit is open-source software released under the MIT License. It is not affiliated with Microsoft.</div>
+  <div class="wrap footer-grid">
+    <div><strong>Windows Diagnostics Toolkit</strong><span>MIT License · not affiliated with Microsoft</span></div>
+    <div><span class="ok">[OK]</span> SAFE. LOCAL. TRANSPARENT.</div>
+  </div>
 </footer>
 </body>
 </html>
