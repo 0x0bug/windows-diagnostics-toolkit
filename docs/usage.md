@@ -1,56 +1,161 @@
 # Usage Guide
 
-This guide covers basic usage for Windows Diagnostics Toolkit. All scripts are
-read-only and safe to run from a normal PowerShell session.
+This guide covers the interactive TUI, command-line mode, standalone modules, report behavior, Privacy Mode, and common troubleshooting cases for Windows Diagnostics Toolkit.
 
-## Prerequisites
+All production diagnostics are read-only by design.
+
+## Requirements
 
 - Windows 10 or Windows 11
 - Windows PowerShell 5.1 or PowerShell 7+
-- No third-party dependencies
+- No third-party PowerShell modules
+- A terminal of at least `40x18` for the interactive interface
 
-Open PowerShell in the repository root before running examples.
+Administrator rights are optional. Some Windows data sources expose less detail without elevation; the toolkit reports unavailable data and continues where possible.
 
-## Run All Checks
+## Installation
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\system-info.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\network-check.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\disk-health.ps1
-```
-
-PowerShell 7 examples:
+Clone the repository:
 
 ```powershell
-pwsh -NoProfile -File .\scripts\system-info.ps1
-pwsh -NoProfile -File .\scripts\network-check.ps1
-pwsh -NoProfile -File .\scripts\disk-health.ps1
+git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
+cd windows-diagnostics-toolkit
 ```
 
-## Combined Support Reports
+No installation step is required.
 
-Run the wrapper to collect all checks in one TXT report:
+## Interactive TUI
+
+Run the entry point without module switches:
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All
+.\Invoke-WindowsDiagnostics.ps1
 ```
 
-Add `-ExportMarkdown` to create a Markdown report alongside the TXT report:
+<p align="center">
+  <img src="../site/assets/tui-wide-unicode.svg" alt="Windows Diagnostics Toolkit interactive Wide dashboard" width="100%">
+</p>
+
+The initial state enables the recommended diagnostics, Privacy Mode, and Markdown export. The interface lets you:
+
+- select or clear individual diagnostic modules;
+- select all modules or restore the recommended set;
+- toggle Privacy Mode;
+- toggle Markdown report generation;
+- change the output directory;
+- run diagnostics;
+- return to the menu after collection.
+
+### Keyboard controls
+
+| Key | Action |
+| --- | --- |
+| `Up` / `Down` | Move through menu items |
+| `Space` | Toggle the highlighted module or option |
+| `Enter` | Activate `RUN DIAGNOSTICS`, output directory, or exit |
+| `A` | Select all diagnostic modules |
+| `R` | Restore the recommended module selection |
+| `Esc` | Exit the TUI |
+
+The current selection and cursor position are preserved when the terminal is resized.
+
+### Responsive layouts
+
+| Layout | Minimum size | Description |
+| --- | ---: | --- |
+| Wide | `110x28` | Full two-column dashboard with the large logo |
+| WideShort | `110x22` | Two-column dashboard with a compact header |
+| Normal | `60x25` | Single-column layout capped for readability |
+| Compact | `40x18` | Viewport showing the menu items that fit |
+| TooSmall | below `40x18` | Resize instructions instead of a clipped menu |
+
+A terminal around `120x30` or larger is recommended for the full dashboard.
+
+### Unicode and ASCII logo selection
+
+The logo mode is selected conservatively:
+
+- interactive UTF-8 output can use the Unicode block logo;
+- OEM encodings such as `cp866` use the ASCII fallback;
+- redirected output always uses ASCII;
+- an exception or unknown encoding falls back to ASCII.
+
+Override the mode for the current process:
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -ExportMarkdown
+$env:WDT_TUI_LOGO = 'auto'
+$env:WDT_TUI_LOGO = 'unicode'
+$env:WDT_TUI_LOGO = 'ascii'
 ```
 
-Add the opt-in `-PrivacyMode` modifier when the combined report will be shared:
+`unicode` can be forced in an interactive host, but the host and font must support the glyphs. Redirected output remains ASCII even with the override.
+
+Clear the override:
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+Remove-Item Env:WDT_TUI_LOGO -ErrorAction SilentlyContinue
 ```
 
-Privacy Mode does not change which diagnostics run. It centrally redacts the
-captured module output, findings, headers, and output paths before the wrapper
-writes TXT or Markdown. Identical values receive the same typed token within a
-report:
+### Running and result screens
+
+While diagnostics run, the TUI replaces the menu with a progress screen. Report-writing messages are suppressed so they do not corrupt the frame renderer.
+
+After collection completes, the result screen displays:
+
+- whether collection completed;
+- TXT and optional Markdown report paths;
+- `WARN` and `ERROR` finding counts;
+- elapsed time;
+- controls for returning to the menu or exiting.
+
+<p align="center">
+  <img src="../site/assets/tui-result.svg" alt="Windows Diagnostics Toolkit result screen after collection" width="100%">
+</p>
+
+`WARN` represents diagnostic state that deserves review. It does not change the process exit code. A non-zero exit code means a module failed to execute.
+
+## Command-line mode
+
+Use `-All` or one or more module selectors to skip the TUI:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -All
+.\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
+```
+
+Windows PowerShell 5.1:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+```
+
+### Output directory
+
+Reports are written to the current directory unless an explicit directory is provided:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -System -Network `
+  -OutputDirectory .\reports
+```
+
+Generated filenames:
+
+```text
+WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.txt
+WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
+```
+
+## Privacy Mode
+
+Enable Privacy Mode when the combined report may be shared:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+```
+
+Privacy Mode centrally redacts captured module output, findings, headers, and report paths before the wrapper writes TXT or Markdown. Identical values receive the same typed token within one report:
 
 - `<HOST-1>` for a computer name
 - `<USER-1>` for a user name
@@ -58,231 +163,231 @@ report:
 - `<MAC-1>` for a MAC address
 - `<ID-1>` for a SID, GUID, or device identifier
 
-The numbering is independent for each token type, and the map is reset for each
-new report. Process names, application names, and dump-file names remain visible
-for diagnostic context. Standalone scripts do not accept `-PrivacyMode`; their
-output remains raw and local. The toolkit does not explicitly query process command
-lines or BitLocker recovery keys.
+The token map resets for each report. Process names, application names, and dump-file names remain visible for diagnostic context.
 
-Combined reports always replace proxy URL credentials and sensitive query values
-with `<REDACTED>`, including when `-PrivacyMode` is not enabled.
+Combined reports always replace proxy URL credentials and sensitive query values with `<REDACTED>`, including when Privacy Mode is disabled.
 
-Each report starts its diagnostic content with `Findings Summary`. The summary
-uses only `OK`, `WARN`, and `ERROR`, groups findings by severity, and lists a
-successfully completed module with no findings as `OK`. Overall status uses the
-priority `ERROR` > `WARN` > `OK`.
+Standalone scripts do not accept Privacy Mode. Their output remains raw and local.
 
-Findings describe diagnostic state and do not change the wrapper exit code. A
-non-zero exit code still means that a module failed to execute. Modules emit
-internal finding markers for the wrapper to aggregate; those markers are removed
-before TXT and Markdown reports are written.
+## Findings and exit codes
 
-## System Information
+Each combined report starts with `Findings Summary`.
 
-`scripts/system-info.ps1` prints operating system, CPU, memory, GPU, uptime, and
-system drive information.
+Findings use three severities:
+
+- `OK`: module completed and emitted no warning or error findings;
+- `WARN`: state should be reviewed, but collection completed;
+- `ERROR`: diagnostic state is considered serious.
+
+Overall severity follows `ERROR` > `WARN` > `OK`.
+
+Finding severity does not determine the wrapper exit code. The wrapper returns a non-zero exit code when one or more diagnostic modules fail to execute.
+
+Internal finding protocol markers are removed before TXT and Markdown reports are written.
+
+## Module reference
+
+### System Information
+
+Collects operating system, CPU, memory, GPU, uptime, and system-drive information.
 
 ```powershell
+.\Invoke-WindowsDiagnostics.ps1 -System
 pwsh -NoProfile -File .\scripts\system-info.ps1
 ```
 
-Use this script first when you need a quick summary of the local machine.
+### Security Posture
 
-## Security Posture
-
-`scripts/security-posture.ps1` reads Defender, Windows Firewall, Secure Boot,
-TPM, and BitLocker status. It uses read-only cmdlets with CIM fallback where
-available. Missing components or access create `WARN` findings without changing
-the standalone exit code. Recovery keys, key protectors, and hardening policies
-are never displayed.
+Reads Defender, Windows Firewall, Secure Boot, TPM, and BitLocker status. Recovery keys, key protectors, and hardening changes are not requested.
 
 ```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Security
 pwsh -NoProfile -File .\scripts\security-posture.ps1
 ```
 
-Run only this module through the combined-report runner:
+### Performance Snapshot
+
+Takes a single read-only snapshot of memory, CPU, pagefile use, and top processes. It does not collect process paths, owners, or command lines.
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Security -ExportMarkdown
-```
-
-## Performance Snapshot
-
-`scripts/performance-snapshot.ps1` takes a single read-only snapshot of memory,
-CPU, pagefile, and the top processes by working set and cumulative CPU time. It
-does not collect process paths, owners, or command lines.
-
-```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Performance
 pwsh -NoProfile -File .\scripts\performance-snapshot.ps1
 ```
 
-Default thresholds are 15% available memory, 95% CPU, and 80% pagefile usage.
-Use standalone parameters to adjust the memory and CPU warning thresholds or the
-number of processes shown:
+Standalone thresholds can be adjusted:
 
 ```powershell
-pwsh -NoProfile -File .\scripts\performance-snapshot.ps1 -TopProcessCount 20 -LowMemoryPercent 20 -HighCpuPercent 90
+pwsh -NoProfile -File .\scripts\performance-snapshot.ps1 `
+  -TopProcessCount 20 -LowMemoryPercent 20 -HighCpuPercent 90
 ```
 
-Run only this module through the combined-report runner:
+### Network Diagnostics
+
+Collects adapters, addresses, DHCP, DNS, gateways, routes, WinINET/WinHTTP proxy context, and simple reachability checks.
 
 ```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Performance -ExportMarkdown
-```
-
-## Crash and Hang Diagnostics
-
-`scripts/crash-hang-diagnostics.ps1` reads metadata for Application Error 1000,
-Windows Error Reporting 1001, Application Hang 1002, and system BugCheck events.
-It lists only dump-file name, timestamp, size, and source; it never reads dump
-contents.
-
-```powershell
-pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1
-```
-
-Defaults are seven days, 50 events, and 20 dump files. Use standalone parameters
-to change these bounds:
-
-```powershell
-pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1 -SinceDays 14 -MaxEvents 100 -MaxDumpFiles 10
-```
-
-Run only this module through the combined-report runner:
-
-```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Crashes -ExportMarkdown
-```
-
-## Time Sync Diagnostics
-
-`scripts/time-sync-diagnostics.ps1` reads W32Time service status, domain
-membership, timezone, local/UTC time, the configured time source, and verbose
-status. It invokes only `w32tm.exe /query /source` and
-`w32tm.exe /query /status /verbose`; it never configures or resynchronizes time.
-
-```powershell
-pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1
-```
-
-Use `-IncludeTimeServiceEvents` to show up to 20 Time-Service warnings and errors
-from the previous seven days. The standalone bounds can be changed without adding
-any write operations:
-
-```powershell
-pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 -SinceDays 14 -MaxEvents 20 -IncludeTimeServiceEvents
-```
-
-A stopped W32Time service on a domain-joined computer, a local clock source, or an
-unavailable source creates `WARN` while the script still exits with code 0.
-
-Run only this module through the combined-report runner:
-
-```powershell
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 -Time -ExportMarkdown
-```
-
-## Network Diagnostics
-
-`scripts/network-check.ps1` prints active network adapters, IP addresses, DHCP
-status/server, DNS suffix/search list, gateways, active routes, read-only WinINET
-and WinHTTP proxy context, and simple connectivity checks. Default routes appear
-first; the overall route output is capped at 30 records. The module never calls
-VPN APIs or classifies adapters as tunnels.
-
-```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Network
 pwsh -NoProfile -File .\scripts\network-check.ps1
 ```
 
-Optional parameters:
+Optional standalone parameters:
 
 ```powershell
-pwsh -NoProfile -File .\scripts\network-check.ps1 -DnsTestName github.com -InternetTestHost 8.8.8.8 -TimeoutSeconds 3
+pwsh -NoProfile -File .\scripts\network-check.ps1 `
+  -DnsTestName github.com -InternetTestHost 8.8.8.8 -TimeoutSeconds 3
 ```
 
-- `DnsTestName` controls the hostname used for DNS resolution.
-- `InternetTestHost` controls the host used for the internet reachability check.
-- `TimeoutSeconds` controls the timeout for PowerShell 7 `Test-Connection`.
+The module only uses the read-only `netsh.exe winhttp show proxy` form.
 
-WinINET is read from the current user's registry settings. WinHTTP is queried only
-with `netsh.exe winhttp show proxy`. Proxy credentials and sensitive query values
-are replaced with `<REDACTED>` even when Privacy Mode is disabled. Missing adapter,
-route, or proxy sources create `WARN` findings without changing the exit code.
+### Time Sync Diagnostics
 
-## Disk Health
-
-`scripts/disk-health.ps1` prints physical disk and volume information. It warns
-when a volume has less than 15% free space by default.
+Reads W32Time service state, domain membership, timezone, local and UTC time, configured source, verbose status, and optional Time-Service events.
 
 ```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Time
+pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1
+```
+
+Optional standalone events:
+
+```powershell
+pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 `
+  -SinceDays 14 -MaxEvents 20 -IncludeTimeServiceEvents
+```
+
+The module only queries `w32tm.exe /query /source` and `w32tm.exe /query /status /verbose`. It does not configure or resynchronize time. Native output is decoded with the current Windows OEM code page.
+
+### Disk Health
+
+Reads physical disk and volume information. The default low-space warning threshold is 15 percent.
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Disk
 pwsh -NoProfile -File .\scripts\disk-health.ps1
 ```
 
-Use a custom warning threshold:
+Custom threshold:
 
 ```powershell
-pwsh -NoProfile -File .\scripts\disk-health.ps1 -LowFreeSpacePercent 20
+pwsh -NoProfile -File .\scripts\disk-health.ps1 `
+  -LowFreeSpacePercent 20
 ```
 
-## Syntax Verification
+### Crash and Hang Diagnostics
 
-Check all scripts with the PowerShell parser:
+Reads Application Error, Windows Error Reporting, Application Hang, BugCheck events, and dump-file metadata. Dump contents are never read.
 
 ```powershell
-$scripts = Get-ChildItem -Path .\scripts -Filter *.ps1
-foreach ($script in $scripts) {
-    $errors = $null
-    [System.Management.Automation.Language.Parser]::ParseFile(
-        $script.FullName,
-        [ref]$null,
-        [ref]$errors
-    ) | Out-Null
-
-    if ($errors.Count -gt 0) {
-        Write-Error "$($script.Name) has parser errors"
-        $errors | ForEach-Object { $_.Message }
-    }
-    else {
-        Write-Host "$($script.Name): syntax ok"
-    }
-}
+.\Invoke-WindowsDiagnostics.ps1 -Crashes
+pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1
 ```
 
-## Real Co-Authored Commit
-
-Do not add a fake co-author. A `Co-authored-by` trailer should only be used when
-another person made a real contribution to the commit.
-
-A good small collaboration task for this repository is improving
-`docs/usage.md`, for example:
-
-- clarify a troubleshooting step
-- add an example from another Windows version
-- improve wording around elevated permissions
-
-Ask the collaborator for their GitHub noreply email, or tell them how to find it:
-
-1. Open GitHub settings.
-2. Go to **Emails**.
-3. Copy the noreply address shown by GitHub.
-
-For many accounts it looks like this:
-
-```text
-12345678+username@users.noreply.github.com
-```
-
-After the collaborator provides a real change, include a trailer in the commit
-message:
-
-```text
-Co-authored-by: Name <12345678+username@users.noreply.github.com>
-```
-
-Example commit command after staging the real shared change:
+Custom bounds:
 
 ```powershell
-git commit -m "docs: improve usage troubleshooting" -m "Co-authored-by: Name <12345678+username@users.noreply.github.com>"
+pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1 `
+  -SinceDays 14 -MaxEvents 100 -MaxDumpFiles 10
 ```
 
-Only use the collaborator's real name and GitHub email with their consent.
+### Event Log Check
+
+Reads recent Critical and Error events from the System and Application logs.
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Events
+pwsh -NoProfile -File .\scripts\event-log-check.ps1
+```
+
+### Services and Startup
+
+Checks automatic services that are not running and non-OK service states. Startup entries and scheduled tasks are optional.
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Services
+pwsh -NoProfile -File .\scripts\services-check.ps1
+```
+
+Optional standalone checks:
+
+```powershell
+pwsh -NoProfile -File .\scripts\services-check.ps1 `
+  -IncludeStartup -IncludeScheduledTasks
+```
+
+### Windows Update
+
+Reads Windows version, recent installed updates, reboot indicators, update-related services, and optional update events.
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Updates
+pwsh -NoProfile -File .\scripts\windows-update-check.ps1
+```
+
+## Troubleshooting
+
+### Script execution is disabled
+
+Use a process-only bypass:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\Invoke-WindowsDiagnostics.ps1
+```
+
+This does not modify persistent execution-policy settings.
+
+### `pwsh` is not recognized
+
+PowerShell 7 is optional. Use the built-in Windows PowerShell command:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\Invoke-WindowsDiagnostics.ps1
+```
+
+### ASCII appears instead of the Unicode logo
+
+Check the active output encoding:
+
+```powershell
+[Console]::OutputEncoding.WebName
+```
+
+An OEM value such as `cp866` intentionally selects the ASCII fallback. A compatible interactive host can be tested with:
+
+```powershell
+$env:WDT_TUI_LOGO = 'unicode'
+.\Invoke-WindowsDiagnostics.ps1
+Remove-Item Env:WDT_TUI_LOGO -ErrorAction SilentlyContinue
+```
+
+### The interface asks for a larger terminal
+
+Resize the terminal to at least `40x18`. Use `110x28` or larger for the full Wide dashboard.
+
+### Some values are unavailable
+
+Run from an elevated terminal only when the missing source is important and you understand the additional access. The toolkit continues when individual read-only sources are unavailable.
+
+### The report contains warnings
+
+A warning describes observed state. Read the evidence in `Findings Summary` and the corresponding module section. The toolkit does not apply a fix automatically.
+
+### Russian `w32tm` text is unreadable
+
+Use the current version of the toolkit. It launches `w32tm.exe` with redirected streams and decodes output using the Windows OEM code page instead of PowerShell's native pipeline.
+
+## Validate the repository
+
+PowerShell 7:
+
+```powershell
+pwsh -NoProfile -File .\scripts\validate.ps1
+```
+
+Windows PowerShell 5.1:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\validate.ps1
+```

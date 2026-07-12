@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Windows Diagnostics Tool for PowerShell | WDT</title>
-  <meta name="description" content="Generate a local Windows 10/11 diagnostic report for security, crashes, performance, network, disks, services and updates without changing the system.">
+  <meta name="description" content="Run a responsive read-only Windows diagnostics TUI and generate local support reports for security, performance, network, crashes, disks, services and updates.">
   <meta name="robots" content="index,follow,max-image-preview:large,max-snippet:-1,max-video-preview:-1">
   <meta name="theme-color" content="#0a0f18">
   <link rel="canonical" href="https://0x0bug.github.io/windows-diagnostics-toolkit/">
@@ -14,14 +14,14 @@
   <meta property="og:site_name" content="Windows Diagnostics Toolkit">
   <meta property="og:locale" content="en_US">
   <meta property="og:title" content="Windows Diagnostics Tool for PowerShell">
-  <meta property="og:description" content="Read-only Windows 10/11 diagnostics with local reports, no telemetry and optional Privacy Mode.">
+  <meta property="og:description" content="Responsive read-only Windows diagnostics with local reports, no telemetry and optional Privacy Mode.">
   <meta property="og:url" content="https://0x0bug.github.io/windows-diagnostics-toolkit/">
   <meta property="og:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg">
   <meta property="og:image:alt" content="Windows Diagnostics Toolkit — read-only PowerShell diagnostics">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Windows Diagnostics Tool for PowerShell">
-  <meta name="twitter:description" content="Generate a local Windows support report without changing system settings or uploading data.">
+  <meta name="twitter:description" content="Select read-only checks in a responsive TUI and generate a local Windows support report.">
   <meta name="twitter:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg">
   <meta name="twitter:image:alt" content="Windows Diagnostics Toolkit — read-only PowerShell diagnostics">
 
@@ -62,15 +62,18 @@
         },
         "image": "https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg",
         "featureList": [
+          "Responsive interactive terminal interface",
+          "Automatic Unicode and ASCII terminal compatibility",
           "Read-only Windows diagnostics",
           "Local TXT and Markdown reports",
+          "Aggregated OK, WARN and ERROR findings summary",
           "Security posture checks",
           "Performance and memory snapshot",
           "Network, DNS, route and proxy context",
           "Crash, hang and Event Log diagnostics",
           "Privacy Mode for shared reports"
         ],
-        "description": "A dependency-free PowerShell toolkit that generates local Windows 10 and Windows 11 support reports without changing system settings.",
+        "description": "A dependency-free PowerShell toolkit with a responsive interactive TUI that generates local Windows 10 and Windows 11 support reports without changing system settings.",
         "mainEntityOfPage": {
           "@id": "https://0x0bug.github.io/windows-diagnostics-toolkit/#website"
         }
@@ -84,7 +87,15 @@
             "name": "Does Windows Diagnostics Toolkit change Windows settings?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. The production diagnostics are designed to collect and report state without applying fixes, changing services, editing the registry or reconfiguring the network."
+              "text": "No. The production diagnostics collect and report state without applying fixes, changing services, editing the registry or reconfiguring the network."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Why does the TUI show an ASCII logo?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "The automatic mode uses Unicode only for compatible interactive UTF-8 output. OEM encodings, redirected output and unsupported hosts receive a printable ASCII fallback."
             }
           },
           {
@@ -93,14 +104,6 @@
             "acceptedAnswer": {
               "@type": "Answer",
               "text": "No. Reports are written to a local folder selected by the user. The toolkit has no telemetry or automatic upload feature."
-            }
-          },
-          {
-            "@type": "Question",
-            "name": "Do I need administrator rights?",
-            "acceptedAnswer": {
-              "@type": "Answer",
-              "text": "Most checks can run without elevation, although Windows may expose less detail for some security, storage and event sources."
             }
           },
           {
@@ -123,6 +126,7 @@
   <nav class="wrap" aria-label="Primary navigation">
     <a class="brand" href="./">Windows Diagnostics Toolkit</a>
     <div class="nav-links">
+      <a href="#interface">Interface</a>
       <a href="#checks">Checks</a>
       <a href="#privacy">Privacy</a>
       <a href="cases/">Troubleshooting guides</a>
@@ -135,20 +139,64 @@
   <section class="hero wrap">
     <div>
       <div class="eyebrow">Open source · PowerShell · Windows 10/11</div>
-      <h1>A read-only Windows diagnostics tool for PowerShell</h1>
-      <p class="lead">Generate a local support report covering security, performance, networking, crashes, disks, services, Event Logs, time synchronization and Windows Update. A typical full run completes in about 30 seconds.</p>
+      <h1>Read-only Windows diagnostics with an interactive terminal dashboard</h1>
+      <p class="lead">Select the checks you need, generate local TXT and Markdown reports, and review an aggregated findings summary without changing Windows settings or uploading data.</p>
       <div class="actions">
         <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start">Run the diagnostics</a>
+        <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/usage.md">Read the usage guide</a>
         <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/report-example.md">View an example report</a>
-        <a class="button" href="cases/windows-diagnostic-report-for-tech-support.html">Support report guide</a>
       </div>
     </div>
-    <div class="terminal" aria-label="PowerShell quick start">
-      <div class="terminal-bar">PowerShell</div>
-      <pre><code>git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
+    <figure class="product-shot hero-shot">
+      <img src="assets/tui-wide-unicode.svg" alt="Windows Diagnostics Toolkit Wide terminal dashboard with selected diagnostics and Privacy Mode enabled" width="1085" height="494">
+      <figcaption>Responsive Wide dashboard in an interactive UTF-8 terminal.</figcaption>
+    </figure>
+  </section>
+
+  <section id="interface">
+    <div class="wrap">
+      <div class="eyebrow">TUI-first workflow</div>
+      <h2>Select, run, and review without leaving the terminal</h2>
+      <p class="section-intro">Running the entry point without switches opens the interactive interface. The current selection survives resize events, and the renderer adapts from a full two-column dashboard to compact viewport modes.</p>
+      <div class="showcase-grid">
+        <article class="card">
+          <h3>1. Select checks</h3>
+          <p>Use the keyboard to toggle ten diagnostic areas, Privacy Mode, Markdown export, and the output directory.</p>
+          <p class="key-line"><kbd>↑</kbd><kbd>↓</kbd> navigate <kbd>Space</kbd> toggle <kbd>Enter</kbd> select</p>
+        </article>
+        <article class="card">
+          <h3>2. Run read-only collection</h3>
+          <p>The toolkit launches only reviewed diagnostic operations and keeps reports on the local machine.</p>
+          <p class="key-line"><kbd>A</kbd> all <kbd>R</kbd> recommended <kbd>Esc</kbd> exit</p>
+        </article>
+        <article class="card">
+          <h3>3. Review the result</h3>
+          <p>The completion screen shows elapsed time and the number of WARN and ERROR findings before you open the report.</p>
+        </article>
+      </div>
+      <figure class="product-shot result-shot">
+        <img src="assets/tui-result.svg" alt="Windows Diagnostics Toolkit completion screen showing three warnings, zero errors, and elapsed time" width="1085" height="162">
+        <figcaption>A warning describes diagnostic state to review; it does not mean the collection process failed.</figcaption>
+      </figure>
+      <div class="layout-note">
+        <strong>Responsive layouts:</strong> Wide from 110×28, WideShort from 110×22, Normal from 60×25, and Compact from 40×18. Compatible interactive UTF-8 terminals receive the Unicode logo; other hosts receive the ASCII fallback.
+      </div>
+    </div>
+  </section>
+
+  <section class="quick-start">
+    <div class="wrap split">
+      <div>
+        <div class="eyebrow">No installer required</div>
+        <h2>Start with one command</h2>
+        <p class="section-intro">Clone the repository and run the entry point without switches. Windows PowerShell 5.1 and PowerShell 7 are both supported.</p>
+      </div>
+      <div class="terminal" aria-label="PowerShell interactive quick start">
+        <div class="terminal-bar">PowerShell</div>
+        <pre><code>git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
 cd windows-diagnostics-toolkit
-pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
-  -All -PrivacyMode -ExportMarkdown</code></pre>
+.\Invoke-WindowsDiagnostics.ps1</code></pre>
+      </div>
     </div>
   </section>
 
@@ -156,7 +204,7 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
     <div class="wrap">
       <div class="eyebrow">One report, ten diagnostic areas</div>
       <h2>Windows troubleshooting context before guesswork</h2>
-      <p class="section-intro">The report starts with an aggregated findings summary and keeps the detailed diagnostic context below it. Run every module or select only the area relevant to the problem.</p>
+      <p class="section-intro">The report starts with an aggregated findings summary and keeps detailed diagnostic context below it. Run every module or select only the area relevant to the problem.</p>
       <div class="grid">
         <article class="card"><h3>System and performance</h3><p>Windows build, CPU, memory, GPU, uptime, pagefile, CPU snapshot and top processes.</p><a href="cases/windows-high-memory-usage.html">Diagnose high memory usage</a></article>
         <article class="card"><h3>Security posture</h3><p>Microsoft Defender, Windows Firewall, Secure Boot, TPM and BitLocker status.</p><a href="cases/windows-firewall-disabled.html">Check disabled firewall profiles</a></article>
@@ -178,7 +226,7 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
         <li><strong>Privacy Mode:</strong><span>Common identifying values are replaced with stable typed tokens in combined reports.</span></li>
         <li><strong>Auditable:</strong><span>The source, validation policy and dependency-free tests are public on GitHub.</span></li>
       </ul>
-      <div class="callout"><strong>Before posting a report publicly:</strong> run the combined wrapper with <code>-PrivacyMode</code> and still review the final file manually.</div>
+      <div class="callout"><strong>Before posting a report publicly:</strong> enable Privacy Mode and still review the final file manually.</div>
     </div>
   </section>
 
@@ -204,19 +252,21 @@ pwsh -NoProfile -File .\Invoke-WindowsDiagnostics.ps1 `
       <div class="eyebrow">Common questions</div>
       <h2>Windows Diagnostics Toolkit FAQ</h2>
       <div class="faq">
-        <details><summary>Does the toolkit change Windows settings?</summary><p>No. The production scripts are designed to collect and report state without applying automatic fixes, changing services, editing the registry or reconfiguring the network.</p></details>
-        <details><summary>Does it upload diagnostic data?</summary><p>No. Reports remain local. The project has no telemetry, remote collection or automatic upload feature.</p></details>
-        <details><summary>Does it require administrator rights?</summary><p>Most checks work without elevation. Some Windows sources may return less detail when the current user does not have permission to read them.</p></details>
-        <details><summary>What should I run before sharing a report?</summary><p>Use <code>-All -PrivacyMode -ExportMarkdown</code>, then inspect the final file and remove any remaining information you do not want to publish.</p></details>
+        <details><summary>Does the toolkit change Windows settings?</summary><p>No. The production scripts collect and report state without applying automatic fixes, changing services, editing the registry or reconfiguring the network.</p></details>
+        <details><summary>Why do I see the ASCII logo?</summary><p>Automatic mode uses Unicode only for interactive UTF-8 output. OEM encodings such as cp866, redirected output and unsupported hosts receive the printable ASCII fallback.</p></details>
+        <details><summary>Does resizing restart diagnostics?</summary><p>No. Resize events redraw the current interface and preserve the current selection. A running diagnostic operation is not restarted by the layout renderer.</p></details>
+        <details><summary>Where are reports stored?</summary><p>Reports are written to the selected output directory. Nothing is uploaded automatically.</p></details>
+        <details><summary>Does a WARN mean the tool failed?</summary><p>No. WARN describes observed state that deserves review. A module execution failure is reported separately with a non-zero exit code.</p></details>
+        <details><summary>What should I run before sharing a report?</summary><p>Enable Privacy Mode and Markdown export in the TUI, or use <code>-All -PrivacyMode -ExportMarkdown</code>, then inspect the final file.</p></details>
       </div>
     </div>
   </section>
 
   <section>
     <div class="wrap">
-      <div class="eyebrow">No installer required</div>
+      <div class="eyebrow">Open source and auditable</div>
       <h2>Run it, read the findings, keep the report.</h2>
-      <p class="section-intro">Use the complete toolkit, select only the modules relevant to a support case or run individual scripts. Windows PowerShell 5.1 and PowerShell 7 are both supported.</p>
+      <p class="section-intro">Use the complete toolkit, select only the modules relevant to a support case, or run individual scripts.</p>
       <div class="actions">
         <a class="button primary" href="https://github.com/0x0bug/windows-diagnostics-toolkit#quick-start">Quick start</a>
         <a class="button" href="https://github.com/0x0bug/windows-diagnostics-toolkit/blob/main/docs/usage.md">Detailed usage</a>
