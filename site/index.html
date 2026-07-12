@@ -17,13 +17,15 @@
   <meta property="og:title" content="Windows Diagnostics Tool for PowerShell">
   <meta property="og:description" content="Responsive read-only Windows diagnostics with local reports, no telemetry and optional Privacy Mode.">
   <meta property="og:url" content="https://0x0bug.github.io/windows-diagnostics-toolkit/">
-  <meta property="og:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg">
+  <meta property="og:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.png">
+  <meta property="og:image:width" content="1280">
+  <meta property="og:image:height" content="640">
   <meta property="og:image:alt" content="Windows Diagnostics Toolkit — read-only PowerShell diagnostics">
 
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="Windows Diagnostics Tool for PowerShell">
   <meta name="twitter:description" content="Select read-only checks in a responsive TUI and generate a local Windows support report.">
-  <meta name="twitter:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg">
+  <meta name="twitter:image" content="https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.png">
   <meta name="twitter:image:alt" content="Windows Diagnostics Toolkit — read-only PowerShell diagnostics">
 
   <script type="application/ld+json">
@@ -61,7 +63,7 @@
           "name": "0x0bug",
           "url": "https://github.com/0x0bug"
         },
-        "image": "https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.svg",
+        "image": "https://0x0bug.github.io/windows-diagnostics-toolkit/assets/social-preview.png",
         "featureList": [
           "Responsive interactive terminal interface",
           "Automatic Unicode and ASCII terminal compatibility",
@@ -85,34 +87,42 @@
         "mainEntity": [
           {
             "@type": "Question",
-            "name": "Does Windows Diagnostics Toolkit change Windows settings?",
+            "name": "Does the toolkit change Windows settings?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. The production diagnostics collect and report state without applying fixes, changing services, editing the registry or reconfiguring the network."
+              "text": "No. Production diagnostics collect and report state without applying automatic fixes, changing services, editing the registry or reconfiguring the network."
             }
           },
           {
             "@type": "Question",
-            "name": "Why does the TUI show an ASCII logo?",
+            "name": "Why do I see the ASCII logo?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "The automatic mode uses Unicode only for compatible interactive UTF-8 output. OEM encodings, redirected output and unsupported hosts receive a printable ASCII fallback."
+              "text": "Automatic mode uses Unicode only for compatible interactive UTF-8 output. OEM encodings such as cp866, redirected output and unsupported hosts receive the printable ASCII fallback."
             }
           },
           {
             "@type": "Question",
-            "name": "Does the toolkit upload diagnostic data?",
+            "name": "Does resizing restart diagnostics?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. Reports are written to a local folder selected by the user. The toolkit has no telemetry or automatic upload feature."
+              "text": "No. Resize events redraw the current interface and preserve the current selection. A running diagnostic operation is not restarted."
             }
           },
           {
             "@type": "Question",
-            "name": "Can I share the generated report?",
+            "name": "Where are reports stored?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Use the combined runner with Privacy Mode, then review the report manually before posting it publicly."
+              "text": "Reports are written to the selected output directory. Nothing is uploaded automatically."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does WARN mean the tool failed?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. WARN describes observed state that deserves review. A module execution failure is reported separately with a non-zero exit code."
             }
           }
         ]
@@ -168,7 +178,9 @@
 
     <figure class="tui-frame hero-tui">
       <div class="frame-label"><span>WDT / INTERACTIVE DASHBOARD</span><span class="frame-state">UTF-8</span></div>
-      <img src="assets/tui-wide-unicode.svg" alt="Windows Diagnostics Toolkit Wide terminal dashboard with selected diagnostics and Privacy Mode enabled" width="1085" height="494">
+      <a href="assets/tui-wide-real.png" aria-label="Open the full-size Windows Diagnostics Toolkit interactive dashboard screenshot">
+        <img src="assets/tui-wide-real.png" alt="Windows Diagnostics Toolkit Wide terminal dashboard with selected diagnostics and Privacy Mode enabled" width="1085" height="494" fetchpriority="high">
+      </a>
       <figcaption><span class="ok">[OK]</span> Responsive layout · keyboard-first controls · current selection preserved on resize</figcaption>
     </figure>
   </section>
@@ -216,7 +228,9 @@
 
       <figure class="tui-frame result-frame">
         <div class="frame-label"><span>WDT / COLLECTION RESULT</span><span class="frame-state">COMPLETE</span></div>
-        <img src="assets/tui-result.svg" alt="Windows Diagnostics Toolkit completion screen showing warnings, errors and elapsed time" width="1085" height="162" loading="lazy">
+        <a href="assets/tui-result-real.png" aria-label="Open the full-size Windows Diagnostics Toolkit completion screen screenshot">
+          <img src="assets/tui-result-real.png" alt="Windows Diagnostics Toolkit completion screen showing warnings, errors and elapsed time" width="1085" height="162" loading="lazy">
+        </a>
         <figcaption><span class="warn">[WARN]</span> A warning means the observed state deserves review. It does not mean collection failed.</figcaption>
       </figure>
     </div>
@@ -249,13 +263,13 @@
       <div class="section-heading">
         <div>
           <p class="section-index">03 / DIAGNOSTICS</p>
-          <h2>One report.<br>Ten diagnostic areas.</h2>
+          <h2>One report.<br>Ten diagnostic modules.</h2>
         </div>
-        <p class="section-intro">Collect broad troubleshooting context or run only the module related to the problem. The findings summary appears before the detailed sections.</p>
+        <p class="section-intro">Ten diagnostic modules are grouped here into six troubleshooting areas. Collect broad context or run only the module related to the problem; the findings summary appears before the detailed sections.</p>
       </div>
 
       <div class="diagnostic-console">
-        <div class="console-head"><span>DIAGNOSTICS</span><span>SELECTED: 10 / 10</span></div>
+        <div class="console-head"><span>DIAGNOSTICS</span><span>10 MODULES / 6 AREAS</span></div>
         <div class="diagnostic-grid">
           <a class="diagnostic-row" href="cases/windows-high-memory-usage.html"><span class="check">[x]</span><span><strong>System + performance</strong><small>OS, CPU, memory, GPU, uptime, pagefile, top processes</small></span><span class="row-arrow">↗</span></a>
           <a class="diagnostic-row" href="cases/windows-firewall-disabled.html"><span class="check">[x]</span><span><strong>Security posture</strong><small>Defender, Firewall, Secure Boot, TPM, BitLocker</small></span><span class="row-arrow">↗</span></a>
