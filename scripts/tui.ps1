@@ -303,16 +303,45 @@ function Join-WdtTuiColumns {
 }
 
 function Test-WdtTuiUnicodeLogoSupport {
-    param([bool]$IsOutputRedirected, [bool]$IsWindowsTerminal, [string]$OutputEncodingWebName)
+    param(
+        [bool]$IsOutputRedirected,
+        [bool]$HasWtSession,
+        [string]$TermProgram,
+        [string]$OutputEncodingWebName
+    )
 
-    return -not $IsOutputRedirected -and $IsWindowsTerminal -and $OutputEncodingWebName -in @('utf-8', 'utf8')
+    if ($IsOutputRedirected) { return $false }
+    $hasUtf8Output = $OutputEncodingWebName -in @('utf-8', 'utf8')
+    $hasWindowsTerminalSignal = $HasWtSession -or $TermProgram -eq 'Windows_Terminal'
+    return $hasUtf8Output -and ($hasWindowsTerminalSignal -or $hasUtf8Output)
+}
+
+function Get-WdtTuiLogoModeDecision {
+    param(
+        [bool]$IsOutputRedirected,
+        [bool]$HasWtSession,
+        [string]$TermProgram,
+        [string]$OutputEncodingWebName,
+        [string]$Override
+    )
+
+    if ($Override -ieq 'ascii') { return 'Ascii' }
+    if ($Override -ieq 'unicode') { return $(if ($IsOutputRedirected) { 'Ascii' } else { 'Unicode' }) }
+    if (Test-WdtTuiUnicodeLogoSupport -IsOutputRedirected $IsOutputRedirected -HasWtSession $HasWtSession -TermProgram $TermProgram -OutputEncodingWebName $OutputEncodingWebName) {
+        return 'Unicode'
+    }
+    return 'Ascii'
 }
 
 function Get-WdtTuiLogoMode {
     try {
-        if (Test-WdtTuiUnicodeLogoSupport -IsOutputRedirected ([System.Console]::IsOutputRedirected) -IsWindowsTerminal (-not [string]::IsNullOrWhiteSpace($env:WT_SESSION)) -OutputEncodingWebName ([System.Console]::OutputEncoding.WebName)) {
-            return 'Unicode'
+        $isOutputRedirected = [System.Console]::IsOutputRedirected
+        $override = [string]$env:WDT_TUI_LOGO
+        $encodingWebName = ''
+        if ($override -ine 'unicode') {
+            $encodingWebName = [System.Console]::OutputEncoding.WebName
         }
+        return Get-WdtTuiLogoModeDecision -IsOutputRedirected $isOutputRedirected -HasWtSession (-not [string]::IsNullOrWhiteSpace($env:WT_SESSION)) -TermProgram ([string]$env:TERM_PROGRAM) -OutputEncodingWebName $encodingWebName -Override $override
     }
     catch { }
     return 'Ascii'
