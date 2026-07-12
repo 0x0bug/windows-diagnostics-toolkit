@@ -48,18 +48,18 @@ Assert-True (-not $readme.Contains('Set-ExecutionPolicy Unrestricted')) 'README 
 Assert-True (-not $readme.Contains('C:\Users\')) 'README contains an absolute user profile path.'
 
 $requiredAssets = @(
-    'site\assets\tui-wide-unicode.png',
-    'site\assets\tui-result.png'
+    'site\assets\tui-wide-unicode.svg',
+    'site\assets\tui-result.svg'
 )
 foreach ($relativeAsset in $requiredAssets) {
     $assetPath = Join-Path -Path $repositoryRoot -ChildPath $relativeAsset
     Assert-True (Test-Path -LiteralPath $assetPath -PathType Leaf) ("Documentation asset is missing: {0}" -f $relativeAsset)
 }
 
-Assert-True ($readme.Contains('site/assets/tui-wide-unicode.png')) 'README does not reference the Wide TUI screenshot.'
-Assert-True ($readme.Contains('site/assets/tui-result.png')) 'README does not reference the result screenshot.'
-Assert-True ($usage.Contains('../site/assets/tui-wide-unicode.png')) 'Usage guide does not reference the Wide TUI screenshot.'
-Assert-True ($usage.Contains('../site/assets/tui-result.png')) 'Usage guide does not reference the result screenshot.'
+Assert-True ($readme.Contains('site/assets/tui-wide-unicode.svg')) 'README does not reference the Wide TUI visual.'
+Assert-True ($readme.Contains('site/assets/tui-result.svg')) 'README does not reference the result visual.'
+Assert-True ($usage.Contains('../site/assets/tui-wide-unicode.svg')) 'Usage guide does not reference the Wide TUI visual.'
+Assert-True ($usage.Contains('../site/assets/tui-result.svg')) 'Usage guide does not reference the result visual.'
 Assert-True ($usage.Contains('ASCII appears instead of the Unicode logo')) 'Usage guide is missing Unicode fallback troubleshooting.'
 Assert-True (-not $usage.Contains('## Real Co-Authored Commit')) 'Usage guide still contains contributor workflow content.'
 
