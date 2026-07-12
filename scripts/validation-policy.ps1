@@ -220,10 +220,17 @@ function Test-WdtAllowedNewObjectCommand {
         'System.Text.RegularExpressions.Regex',
         'System.Collections.Generic.List[object]',
         'System.Collections.Generic.List[string]',
+        'System.Collections.Generic.List[int]',
+        'System.Collections.Generic.List[double]',
         'System.Collections.Generic.List[System.IO.FileInfo]',
         'System.Collections.Generic.Queue[System.IO.DirectoryInfo]'
     )
     if ($typeName -in $safeTypes) { return $true }
+
+    if ($typeName -eq 'System.Net.Sockets.TcpClient' -and
+        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\network-check.ps1') -and
+        (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Test-HttpsTcpConnection' -and
+        $CommandAst.CommandElements.Count -eq 2) { return $true }
 
     if ($typeName -in @('System.Diagnostics.ProcessStartInfo', 'System.Diagnostics.Process') -and
         (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
@@ -271,6 +278,7 @@ function Test-WdtAllowedPowerShellCommand {
         'Get-Process',
         'Get-ScheduledTask',
         'Get-ScheduledTaskInfo',
+        'Get-StorageReliabilityCounter',
         'Get-TimeZone',
         'Get-Tpm',
         'Get-Volume',
@@ -419,6 +427,10 @@ function Get-WdtMemberSafetyIssue {
                 ($pathVariable -ceq 'markdownReportPath' -and $linesVariable -ceq 'markdownLines')
             if ($isReportPair -and $MemberAst.Arguments[2].Extent.Text -ceq '[System.Text.Encoding]::UTF8') { return }
         }
+        if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+            (($typeName -eq 'System.Diagnostics.Process' -and $member -eq 'GetProcessById' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -or
+             ($typeName -eq 'System.Diagnostics.Stopwatch' -and $member -eq 'StartNew' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript') -or
+             ($typeName -eq 'Security.Principal.WindowsIdentity' -and $member -eq 'GetCurrent' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport'))) { return }
 
         $safeStaticMethods = @(
             'IO.Path::GetExtension',
@@ -448,6 +460,14 @@ function Get-WdtMemberSafetyIssue {
 
     $receiver = if ($MemberAst.Expression -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Expression.VariablePath.UserPath } else { '' }
     if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return }
+    if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and (
+            (((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -and $member -in @('Kill', 'WaitForExit', 'Dispose')) -or
+            ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and $member -in @('ReadToEndAsync', 'Stop', 'Dispose')) -or
+            ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport' -and $member -eq 'IsInRole')
+        )) { return }
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\network-check.ps1') -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Test-HttpsTcpConnection' -and
+        $member -in @('ConnectAsync', 'Wait', 'Dispose')) { return }
     if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-W32tmQuery' -and
         (($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0) -or

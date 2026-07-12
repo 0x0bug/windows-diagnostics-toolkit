@@ -14,7 +14,16 @@ param(
     [string]$OutputDirectory = (Get-Location).Path,
     [switch]$ExportMarkdown,
     [switch]$PrivacyMode,
-    [switch]$Interactive
+    [switch]$Interactive,
+    [ValidateRange(1, 2147483)]
+    [int]$ModuleTimeoutSeconds = 180,
+    [switch]$NoExternalNetworkTests,
+    [ValidateNotNullOrEmpty()]
+    [string]$NetworkDnsTestName = 'www.microsoft.com',
+    [ValidateNotNullOrEmpty()]
+    [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
+    [ValidateNotNullOrEmpty()]
+    [string]$NetworkIcmpTarget = '1.1.1.1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -85,12 +94,39 @@ function ConvertTo-CommandArgument {
     return '"' + $Value.Replace('"', '\"') + '"'
 }
 
+function Stop-WdtProcessTree {
+    param([Parameter(Mandatory = $true)][System.Diagnostics.Process]$RootProcess)
+
+    $processIds = New-Object System.Collections.Generic.List[int]
+    $processIds.Add($RootProcess.Id)
+    for ($index = 0; $index -lt $processIds.Count; $index++) {
+        try {
+            foreach ($child in @(Get-CimInstance -ClassName Win32_Process -Filter ("ParentProcessId={0}" -f $processIds[$index]) -ErrorAction Stop)) {
+                if ($child.ProcessId -notin $processIds) { $processIds.Add([int]$child.ProcessId) }
+            }
+        }
+        catch { }
+    }
+
+    foreach ($processId in @($processIds.ToArray() | Sort-Object -Descending)) {
+        try {
+            $target = [System.Diagnostics.Process]::GetProcessById($processId)
+            $target.Kill()
+            $target.WaitForExit(5000) | Out-Null
+            $target.Dispose()
+        }
+        catch { }
+    }
+}
+
 function Invoke-DiagnosticScript {
     param(
         [Parameter(Mandatory = $true)][string]$Title,
         [Parameter(Mandatory = $true)][string]$ScriptPath,
         [Parameter(Mandatory = $true)][string]$PowerShellPath,
-        [Parameter(Mandatory = $true)][string]$RepositoryRoot
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds,
+        [string[]]$ScriptArguments = @()
     )
 
     $result = [ordered]@{
@@ -99,6 +135,9 @@ function Invoke-DiagnosticScript {
         ExitCode    = $null
         OutputLines = @()
         ErrorLines  = @()
+        Status      = 'LaunchError'
+        Duration    = [timespan]::Zero
+        Completeness = 'Unavailable'
     }
 
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
@@ -107,10 +146,17 @@ function Invoke-DiagnosticScript {
         return Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
     }
 
+    $process = $null
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
         $escapedScriptPath = $ScriptPath.Replace("'", "''")
-        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath'"
+        $escapedArguments = @($ScriptArguments | ForEach-Object {
+                $argument = [string]$_
+                if ($argument -match '^-[A-Za-z][A-Za-z0-9]*$') { $argument }
+                else { "'" + $argument.Replace("'", "''") + "'" }
+            })
+        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath' $($escapedArguments -join ' ')"
 
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
         $startInfo.FileName = $PowerShellPath
@@ -128,20 +174,50 @@ function Invoke-DiagnosticScript {
         $process.StartInfo = $startInfo
 
         [void]$process.Start()
-        $standardOutput = $process.StandardOutput.ReadToEnd()
-        $standardError = $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            Stop-WdtProcessTree -RootProcess $process
+            $result.ExitCode = 124
+            $result.Status = 'Timeout'
+            $result.ErrorLines = @("Module exceeded timeout of $TimeoutSeconds second(s).")
+        }
+        else {
+            $process.WaitForExit()
+            $result.ExitCode = $process.ExitCode
+            $result.Status = if ($process.ExitCode -eq 0) { 'Success' } else { 'NonZeroExit' }
+        }
 
-        $result.ExitCode = $process.ExitCode
-        $result.OutputLines = @(Convert-TextToLines -Text $standardOutput)
-        $result.ErrorLines = @(Convert-TextToLines -Text $standardError)
+        $result.OutputLines = @(Convert-TextToLines -Text $stdoutTask.Result)
+        $capturedErrors = @(Convert-TextToLines -Text $stderrTask.Result)
+        $result.ErrorLines = @($result.ErrorLines) + $capturedErrors
+        $result.Completeness = if ($result.Status -eq 'Success') { 'Complete' } else { 'Partial' }
     }
     catch {
+        if ($null -ne $process -and -not $process.HasExited) { Stop-WdtProcessTree -RootProcess $process }
         $result.ExitCode = 1
+        $result.Status = if ($_.Exception -is [System.Management.Automation.PipelineStoppedException]) { 'Cancelled' } else { 'LaunchError' }
         $result.ErrorLines = @("Failed to run script: $($_.Exception.Message)")
     }
+    finally {
+        $stopwatch.Stop()
+        $result.Duration = $stopwatch.Elapsed
+        if ($null -ne $process) { $process.Dispose() }
+    }
 
-    return Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
+    $resolved = Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
+    if ($resolved.Status -eq 'LaunchError' -or $resolved.Status -eq 'Cancelled') {
+        $resolved.Completeness = 'Unavailable'
+    }
+    elseif (@($resolved.Findings | Where-Object { $_.Code -match '(_UNAVAILABLE|_INCOMPLETE)$' }).Count -gt 0) {
+        $resolved.Completeness = 'Partial'
+    }
+    if ($resolved.Status -eq 'Timeout') {
+        $resolved.Findings = @($resolved.Findings | Where-Object { $_.Code -ne 'MODULE_EXECUTION_FAILED' }) + @(
+            New-WdtFindingObject -Module $resolved.Title -Severity ERROR -Code 'MODULE_EXECUTION_TIMEOUT' -Message 'The diagnostic module exceeded its execution timeout.' -Evidence ("TimeoutSeconds={0}; Duration={1:N1}s" -f $TimeoutSeconds, $resolved.Duration.TotalSeconds)
+        )
+    }
+    return $resolved
 }
 
 function Add-TextSection {
@@ -154,6 +230,9 @@ function Add-TextSection {
     $Lines.Add(('== {0} ==' -f $Result.Title))
     $Lines.Add(('Command: {0}' -f $Result.Command))
     $Lines.Add(('Exit code: {0}' -f $Result.ExitCode))
+    $Lines.Add(('Execution: {0}' -f $Result.Status))
+    $Lines.Add(('Duration: {0:N2} s' -f $Result.Duration.TotalSeconds))
+    $Lines.Add(('Completeness: {0}' -f $Result.Completeness))
     $Lines.Add('')
 
     if ($Result.OutputLines.Count -gt 0) {
@@ -185,6 +264,9 @@ function Add-MarkdownSection {
     $Lines.Add('')
     $Lines.Add(('- Command: `{0}`' -f $Result.Command))
     $Lines.Add(('- Exit code: `{0}`' -f $Result.ExitCode))
+    $Lines.Add(('- Execution: `{0}`' -f $Result.Status))
+    $Lines.Add(('- Duration: `{0:N2} s`' -f $Result.Duration.TotalSeconds))
+    $Lines.Add(('- Completeness: `{0}`' -f $Result.Completeness))
     $Lines.Add('')
     $Lines.Add('```text')
 
@@ -323,7 +405,12 @@ function Invoke-WdtReport {
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
         [bool]$ExportMarkdown,
         [bool]$PrivacyMode,
-        [bool]$SuppressConsoleOutput
+        [bool]$SuppressConsoleOutput,
+        [int]$ModuleTimeoutSeconds = 180,
+        [bool]$NoExternalNetworkTests,
+        [string]$NetworkDnsTestName = 'www.microsoft.com',
+        [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
+        [string]$NetworkIcmpTarget = '1.1.1.1'
     )
 
     $startedAt = Get-Date
@@ -340,6 +427,7 @@ function Invoke-WdtReport {
             $selectedChecks.Add([pscustomobject]@{
                     Title = $definition.Title
                     Path  = Join-Path -Path $repositoryRoot -ChildPath ("scripts\{0}" -f $definition.Script)
+                    Name  = $definition.Name
                 })
         }
     }
@@ -368,10 +456,20 @@ function Invoke-WdtReport {
     $createdAt = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($check in $selectedChecks) {
-        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot))
+        $scriptArguments = @()
+        if ($check.Name -eq 'Network') {
+            if ($NoExternalNetworkTests) { $scriptArguments += '-NoExternalNetworkTests' }
+            $scriptArguments += @('-DnsTestName', $NetworkDnsTestName, '-HttpsEndpoint', $NetworkHttpsEndpoint, '-IcmpTarget', $NetworkIcmpTarget)
+        }
+        if ($check.Name -eq 'Services') { $scriptArguments += @('-IncludeStartup', '-IncludeScheduledTasks') }
+        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot -TimeoutSeconds $ModuleTimeoutSeconds -ScriptArguments $scriptArguments))
     }
 
     $privacyModeLabel = if ($PrivacyMode) { 'enabled' } else { 'disabled' }
+    $isElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $elevationLabel = if ($isElevated) { 'Elevated' } else { 'Standard user' }
+    $limitedModules = @($results | Where-Object { $_.Completeness -ne 'Complete' } | ForEach-Object { $_.Title })
+    $collectionCompleteness = if (($results | Where-Object { $_.Completeness -eq 'Unavailable' }).Count -gt 0) { 'Unavailable' } elseif ($limitedModules.Count -gt 0) { 'Partial' } else { 'Complete' }
     $displayComputerName = [string]$env:COMPUTERNAME
     $displayTextReportPath = $textReportPath
     $displayMarkdownReportPath = $markdownReportPath
@@ -395,6 +493,10 @@ function Invoke-WdtReport {
     $textLines.Add(('Computer name : {0}' -f $displayComputerName))
     $textLines.Add(('Mode          : read-only'))
     $textLines.Add(('Privacy mode  : {0}' -f $privacyModeLabel))
+    $textLines.Add(('Elevation     : {0}' -f $elevationLabel))
+    $textLines.Add(('Collection completeness: {0}' -f $collectionCompleteness))
+    $textLines.Add(('Limited modules: {0}' -f $(if ($limitedModules.Count) { $limitedModules -join ', ' } else { 'None' })))
+    $textLines.Add(('Unavailable data sources: {0}' -f $(if ($limitedModules.Count) { 'See limited module sections' } else { 'None reported' })))
     $textLines.Add(('Output        : {0}' -f $displayTextReportPath))
     $textLines.Add(('Selected      : {0}' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
     Add-TextFindingsSummary -Lines $textLines -Summary $findingsSummary
@@ -416,6 +518,10 @@ function Invoke-WdtReport {
         $markdownLines.Add(('- Computer name: `{0}`' -f $displayComputerName))
         $markdownLines.Add(('- Mode: `read-only`'))
         $markdownLines.Add(('- Privacy mode: `{0}`' -f $privacyModeLabel))
+        $markdownLines.Add(('- Elevation: `{0}`' -f $elevationLabel))
+        $markdownLines.Add(('- Collection completeness: `{0}`' -f $collectionCompleteness))
+        $markdownLines.Add(('- Limited modules: `{0}`' -f $(if ($limitedModules.Count) { $limitedModules -join ', ' } else { 'None' })))
+        $markdownLines.Add(('- Unavailable data sources: `{0}`' -f $(if ($limitedModules.Count) { 'See limited module sections' } else { 'None reported' })))
         $markdownLines.Add(('- TXT report: `{0}`' -f $displayTextReportPath))
         $markdownLines.Add(('- Selected: `{0}`' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
         Add-MarkdownFindingsSummary -Lines $markdownLines -Summary $findingsSummary
@@ -505,7 +611,7 @@ if ($launchMode -eq 'Interactive') {
     return
 }
 
-$reportResult = Invoke-WdtReport -SelectedModules @($selectedModules.ToArray()) -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode
+$reportResult = Invoke-WdtReport -SelectedModules @($selectedModules.ToArray()) -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode -ModuleTimeoutSeconds $ModuleTimeoutSeconds -NoExternalNetworkTests:$NoExternalNetworkTests -NetworkDnsTestName $NetworkDnsTestName -NetworkHttpsEndpoint $NetworkHttpsEndpoint -NetworkIcmpTarget $NetworkIcmpTarget
 if ($reportResult.ExitCode -ne 0) {
     exit $reportResult.ExitCode
 }
