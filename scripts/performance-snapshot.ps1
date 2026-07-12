@@ -76,7 +76,7 @@ function Write-PerformanceFindings {
     }
 
     if ($null -ne $CpuPercent -and $CpuPercent -ge $CpuWarningPercent) {
-        Write-WdtFinding -Severity WARN -Code 'PERFORMANCE_CPU_HIGH' -Message 'CPU snapshot is at or above the warning threshold.' -Evidence ('CPU={0:N1}%; Threshold={1}%' -f $CpuPercent, $CpuWarningPercent)
+        Write-WdtFinding -Severity WARN -Code 'PERFORMANCE_CPU_HIGH' -Message 'CPU load was at or above the warning threshold in multiple short samples.' -Evidence ('AverageCPU={0:N1}%; Threshold={1}%' -f $CpuPercent, $CpuWarningPercent)
     }
 
     if ($null -ne $PagefilePercent -and $PagefilePercent -ge 80) {
@@ -112,15 +112,19 @@ function Get-MemorySnapshot {
 
 function Get-CpuSnapshot {
     try {
-        $samples = @(Get-CimInstance -ClassName 'Win32_Processor' -ErrorAction Stop |
-                ForEach-Object { $_.LoadPercentage } |
-                Where-Object { $null -ne $_ })
+        $samples = New-Object System.Collections.Generic.List[double]
+        for ($index = 0; $index -lt 3; $index++) {
+            $values = @(Get-CimInstance -ClassName 'Win32_Processor' -ErrorAction Stop | ForEach-Object { $_.LoadPercentage } | Where-Object { $null -ne $_ })
+            if ($values.Count -gt 0) { $samples.Add([double](($values | Measure-Object -Average).Average)) }
+            if ($index -lt 2) { Start-Sleep -Milliseconds 300 }
+        }
         if ($samples.Count -eq 0) {
             throw 'Win32_Processor returned no CPU load samples.'
         }
 
         return [pscustomobject]@{
             Percent = ($samples | Measure-Object -Average).Average
+            Samples = @($samples.ToArray())
             Error   = $null
         }
     }
@@ -177,15 +181,14 @@ function Get-ProcessSnapshot {
             }
 
             try {
-                if ($null -ne $process.CPU) {
-                    $cpuTime = [double]$process.CPU
-                }
+                $cpuTime = [double]$process.TotalProcessorTime.TotalSeconds
             }
             catch {
                 # Keep the process name while omitting an inaccessible CPU value.
             }
 
             $processes.Add([pscustomobject]@{
+                    Id         = $process.Id
                     Name       = $process.ProcessName
                     WorkingSet = $workingSet
                     CpuTime    = $cpuTime
@@ -203,6 +206,26 @@ function Get-ProcessSnapshot {
             Error     = $_.Exception.Message
         }
     }
+}
+
+function Get-ProcessCpuActivity {
+    param([object[]]$FirstSample, [object[]]$SecondSample, [double]$IntervalSeconds, [int]$LogicalProcessorCount)
+    if ($IntervalSeconds -le 0 -or $LogicalProcessorCount -le 0) { return @() }
+    $firstById = @{}
+    foreach ($item in @($FirstSample)) { $firstById[[int]$item.Id] = $item }
+    $activity = New-Object System.Collections.Generic.List[object]
+    foreach ($current in @($SecondSample)) {
+        if (-not $firstById.ContainsKey([int]$current.Id)) { continue }
+        $previous = $firstById[[int]$current.Id]
+        if ($null -eq $previous.CpuTime -or $null -eq $current.CpuTime) { continue }
+        $delta = [double]$current.CpuTime - [double]$previous.CpuTime
+        if ($delta -lt 0) { continue }
+        $activity.Add([pscustomobject]@{
+                Id = $current.Id; Name = $current.Name; WorkingSet = $current.WorkingSet; CpuTime = $current.CpuTime
+                CpuActivityPercent = [Math]::Min(100, ($delta / ($IntervalSeconds * $LogicalProcessorCount)) * 100)
+            })
+    }
+    return @($activity.ToArray())
 }
 
 function Write-ProcessList {
@@ -226,6 +249,9 @@ function Write-ProcessList {
         if ($Metric -eq 'WorkingSet') {
             Write-Host ('{0,-32} {1,14}' -f $process.Name, (Format-Bytes -Bytes $process.WorkingSet))
         }
+        elseif ($Metric -eq 'CpuActivityPercent') {
+            Write-Host ('{0,-32} {1,13:N1} %' -f $process.Name, $process.CpuActivityPercent)
+        }
         else {
             Write-Host ('{0,-32} {1,14:N2} s' -f $process.Name, $process.CpuTime)
         }
@@ -245,7 +271,13 @@ function Invoke-PerformanceSnapshot {
     $memory = Get-MemorySnapshot
     $cpu = Get-CpuSnapshot
     $pagefile = Get-PagefileSnapshot
+    $processesBefore = Get-ProcessSnapshot
+    $processSampleStarted = Get-Date
+    Start-Sleep -Milliseconds 500
     $processes = Get-ProcessSnapshot
+    $processInterval = ((Get-Date) - $processSampleStarted).TotalSeconds
+    $logicalProcessorCount = [Environment]::ProcessorCount
+    $processActivity = @(Get-ProcessCpuActivity -FirstSample $processesBefore.Processes -SecondSample $processes.Processes -IntervalSeconds $processInterval -LogicalProcessorCount $logicalProcessorCount)
 
     Write-Section 'Memory'
     if ($null -ne $memory.Error) {
@@ -262,7 +294,9 @@ function Invoke-PerformanceSnapshot {
         Write-Host ('Unavailable: {0}' -f $cpu.Error)
     }
     else {
+        Write-Host 'Method         : average of 3 short samples'
         Write-Host ('Total CPU load : {0:N1}%' -f $cpu.Percent)
+        Write-Host ('Samples         : {0}' -f (($cpu.Samples | ForEach-Object { '{0:N1}%' -f $_ }) -join ', '))
     }
 
     Write-Section 'Pagefile Usage'
@@ -278,7 +312,11 @@ function Invoke-PerformanceSnapshot {
     Write-Section 'Top Processes by Working Set'
     Write-ProcessList -Processes $processes.Processes -Metric 'WorkingSet' -Limit $ProcessLimit
 
+    Write-Section 'Currently Most Active Processes'
+    Write-ProcessList -Processes $processActivity -Metric 'CpuActivityPercent' -Limit $ProcessLimit
+
     Write-Section 'Top Processes by CPU Time'
+    Write-Host 'Metric: cumulative CPU time (not current activity)'
     Write-ProcessList -Processes $processes.Processes -Metric 'CpuTime' -Limit $ProcessLimit
 
     $unavailableSources = New-Object System.Collections.Generic.List[string]
@@ -295,9 +333,10 @@ function Invoke-PerformanceSnapshot {
         $unavailableSources.Add('Processes')
     }
 
+    $confirmedCpuPercent = if (@($cpu.Samples | Where-Object { $_ -ge $CpuWarningPercent }).Count -ge 2) { $cpu.Percent } else { $null }
     Write-PerformanceFindings `
         -MemoryAvailablePercent $memory.AvailablePercent `
-        -CpuPercent $cpu.Percent `
+        -CpuPercent $confirmedCpuPercent `
         -PagefilePercent $pagefile.UsedPercent `
         -MemoryWarningPercent $MemoryWarningPercent `
         -CpuWarningPercent $CpuWarningPercent `

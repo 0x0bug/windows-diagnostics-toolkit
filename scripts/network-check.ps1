@@ -1,7 +1,10 @@
 [CmdletBinding()]
 param(
-    [string]$DnsTestName = 'github.com',
-    [string]$InternetTestHost = '8.8.8.8',
+    [string]$DnsTestName = 'www.microsoft.com',
+    [string]$HttpsEndpoint = 'https://www.microsoft.com/',
+    [Alias('InternetTestHost')]
+    [string]$IcmpTarget = '1.1.1.1',
+    [switch]$NoExternalNetworkTests,
     [int]$TimeoutSeconds = 3
 )
 
@@ -425,6 +428,35 @@ function Test-DnsResolution {
     }
 }
 
+function Test-HttpsTcpConnection {
+    param([Parameter(Mandatory = $true)][string]$Endpoint, [int]$Timeout = 3)
+
+    try {
+        $uri = New-Object System.Uri -ArgumentList $Endpoint
+        if ($uri.Scheme -ne 'https') { return 'Indeterminate: endpoint must use HTTPS' }
+        $client = New-Object System.Net.Sockets.TcpClient
+        try {
+            $task = $client.ConnectAsync($uri.Host, $(if ($uri.IsDefaultPort) { 443 } else { $uri.Port }))
+            if (-not $task.Wait($Timeout * 1000)) { return 'Unreachable: TCP timeout' }
+            if ($client.Connected) { return 'Reachable' }
+            return 'Unreachable'
+        }
+        finally { $client.Dispose() }
+    }
+    catch { return "BlockedOrFiltered: $($_.Exception.Message)" }
+}
+
+function Get-NetworkReachabilityClassification {
+    param([bool]$HasAdapter, [bool]$HasDefaultRoute, [string]$DnsStatus, [string]$TcpStatus, [string]$IcmpStatus, [bool]$ExternalTestsEnabled)
+    if (-not $HasAdapter -or -not $HasDefaultRoute) { return 'Unreachable' }
+    if (-not $ExternalTestsEnabled) { return 'NotTested' }
+    if ($TcpStatus -eq 'Reachable' -and $DnsStatus -match '^Resolved') { return 'Reachable' }
+    if ($TcpStatus -eq 'Reachable') { return 'BlockedOrFiltered' }
+    if ($DnsStatus -match '^Resolved' -and $TcpStatus -match '^(Unreachable|BlockedOrFiltered)') { return 'BlockedOrFiltered' }
+    if ($DnsStatus -match '^Failed' -and $TcpStatus -match '^Unreachable') { return 'Unreachable' }
+    return 'Indeterminate'
+}
+
 Write-Host 'Windows Diagnostics Toolkit - Network Check'
 Write-Host 'Mode: read-only'
 
@@ -501,7 +533,7 @@ else {
     }
 }
 
-Write-Section 'Gateway Reachability'
+Write-Section 'Default Gateway and Route'
 $gateways = $adapterConfigurations |
     ForEach-Object { $_.Gateway -split ', ' } |
     Where-Object { $_ -and $_ -ne 'None' } |
@@ -511,9 +543,7 @@ if ($gateways) {
     foreach ($gateway in $gateways) {
         $gatewayResult = Test-HostReachability -Target $gateway -Timeout $TimeoutSeconds
         Write-Host ('{0}: {1}' -f $gateway, $gatewayResult)
-        if ($gatewayResult -ne 'Reachable') {
-            Write-WdtFinding -Severity WARN -Code 'NETWORK_GATEWAY_UNREACHABLE' -Message "The default gateway '$gateway' is not reachable." -Evidence $gatewayResult
-        }
+        if ($gatewayResult -ne 'Reachable') { Write-Host 'ICMP may be blocked; route presence is evaluated independently.' }
     }
 }
 else {
@@ -521,16 +551,24 @@ else {
     Write-WdtFinding -Severity WARN -Code 'NETWORK_NO_GATEWAY' -Message 'No IPv4 default gateway was detected.'
 }
 
-Write-Section 'DNS Resolution'
-$dnsResult = Test-DnsResolution -Name $DnsTestName
-Write-Host ('{0}: {1}' -f $DnsTestName, $dnsResult)
-if ($dnsResult -ne 'Skipped' -and $dnsResult -notmatch '^Resolved:') {
-    Write-WdtFinding -Severity WARN -Code 'NETWORK_DNS_FAILED' -Message "DNS resolution failed for '$DnsTestName'." -Evidence $dnsResult
+Write-Section 'External Network Tests'
+$dnsResult = 'NotTested'
+$tcpResult = 'NotTested'
+$icmpResult = 'NotTested'
+if ($NoExternalNetworkTests) {
+    Write-Host 'External tests: NotTested (-NoExternalNetworkTests)'
 }
-
-Write-Section 'Internet Connectivity'
-$internetResult = Test-HostReachability -Target $InternetTestHost -Timeout $TimeoutSeconds
-Write-Host ('{0}: {1}' -f $InternetTestHost, $internetResult)
-if ($internetResult -ne 'Reachable' -and $internetResult -ne 'Skipped') {
-    Write-WdtFinding -Severity WARN -Code 'NETWORK_INTERNET_UNREACHABLE' -Message "The internet connectivity target '$InternetTestHost' is not reachable." -Evidence $internetResult
+else {
+    $dnsResult = Test-DnsResolution -Name $DnsTestName
+    $tcpResult = Test-HttpsTcpConnection -Endpoint $HttpsEndpoint -Timeout $TimeoutSeconds
+    $icmpResult = Test-HostReachability -Target $IcmpTarget -Timeout $TimeoutSeconds
+    Write-Host ('DNS / {0}: {1}' -f $DnsTestName, $dnsResult)
+    Write-Host ('TCP HTTPS / {0}: {1}' -f $HttpsEndpoint, $tcpResult)
+    Write-Host ('Optional ICMP / {0}: {1}' -f $IcmpTarget, $icmpResult)
+}
+$hasDefaultRoute = @($routeResult.Routes | Where-Object { $_.IsDefaultRoute }).Count -gt 0
+$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -HasDefaultRoute $hasDefaultRoute -DnsStatus $dnsResult -TcpStatus $tcpResult -IcmpStatus $icmpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests)
+Write-Host ('Overall reachability: {0}' -f $classification)
+if ($classification -eq 'Unreachable') {
+    Write-WdtFinding -Severity WARN -Code 'NETWORK_CONNECTIVITY_UNREACHABLE' -Message 'Multiple independent network signals indicate connectivity is unavailable.' -Evidence ("Adapter={0}; DefaultRoute={1}; DNS={2}; TCP={3}; ICMP={4}" -f ($adapterConfigurations.Count -gt 0), $hasDefaultRoute, $dnsResult, $tcpResult, $icmpResult)
 }
