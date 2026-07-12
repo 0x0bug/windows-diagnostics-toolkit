@@ -258,6 +258,12 @@ foreach ($size in @(@(140, 36), @(80, 25), @(40, 18), @(20, 10), @(120, 30))) {
 }
 Assert-Equal $selectionBeforeResize (@(Get-WdtTuiSelectedModule -State $renderState) -join ',') 'Resize layout calculation changed selection.'
 Assert-Equal $cursorBeforeResize $renderState.CursorIndex 'Resize layout calculation changed cursor state.'
+$sameSizeDecision = Get-WdtTuiEventDecision -KeyAvailable $false -InitialWidth 110 -InitialHeight 28 -CurrentWidth 110 -CurrentHeight 28
+Assert-Equal 'Wait' $sameSizeDecision 'An unchanged host size requested a redraw.'
+$resizeDecision = Get-WdtTuiEventDecision -KeyAvailable $false -InitialWidth 110 -InitialHeight 28 -CurrentWidth 80 -CurrentHeight 25
+Assert-Equal 'Resize' $resizeDecision 'A changed host size did not produce a resize event.'
+$keyDuringResizeDecision = Get-WdtTuiEventDecision -KeyAvailable $true -InitialWidth 110 -InitialHeight 28 -CurrentWidth 80 -CurrentHeight 25
+Assert-Equal 'Key' $keyDuringResizeDecision 'An available key was lost when a resize was also detected.'
 if ([System.Console]::IsOutputRedirected) {
     Assert-True (-not (Test-WdtTuiColorOutput)) 'Redirected output did not disable colors.'
 }
@@ -286,7 +292,7 @@ foreach ($reference in $cursorVisibilityReferences) {
 }
 $interactiveFunction = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-WdtInteractiveSession' }, $true))[0]
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{.*CursorVisible\s*=\s*\$originalCursorVisible') 'Cursor visibility is not restored in finally.'
-Assert-True ($interactiveFunction.Extent.Text -match '(?s)do\s*\{\s*\$completionKey\s*=\s*\[System\.Console\]::ReadKey\(\$true\).*?while\s*\(\$completionKey\.Key\s+-notin') 'Result screen does not wait specifically for Enter or Esc.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)\$completionEvent\s*=\s*Wait-WdtTuiEvent.*?if\s*\(\$completionEvent\.KeyInfo\.Key\s+-eq\s*\[System\.ConsoleKey\]::Escape\).*?if\s*\(\$completionEvent\.KeyInfo\.Key\s+-eq\s*\[System\.ConsoleKey\]::Enter\)') 'Result screen does not wait specifically for Enter or Esc.'
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)try\s*\{\s*Reset-WdtTuiFrame.*?while\s*\(') 'Interactive session does not invalidate a previous session frame on entry.'
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{\s*Reset-WdtTuiFrame') 'Interactive session does not invalidate its frame in finally.'
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)catch\s*\{.*?Reset-WdtTuiFrame\s*\r?\n\s*Show-WdtTuiFrame.*?-ForceFull\s+\$true') 'Error screen is not force-rendered from a clean frame.'
@@ -297,6 +303,13 @@ $diffFrameTransition = $sessionText.IndexOf('$isFirstMenuFrame = $false')
 Assert-True ($firstFrameInitialization -ge 0) 'Interactive session does not initialize first-frame full rendering.'
 Assert-True ($firstFrameRender -gt $firstFrameInitialization) 'First menu screen does not use the full-render flag.'
 Assert-True ($diffFrameTransition -gt $firstFrameRender) 'Subsequent menu screens are not switched back to diff rendering.'
+$eventWaitFunction = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Wait-WdtTuiEvent' }, $true))[0]
+Assert-True ($null -ne $eventWaitFunction) 'Resize-aware TUI event wait function is missing.'
+Assert-True ($eventWaitFunction.Extent.Text -match '\[System\.Console\]::KeyAvailable') 'TUI event wait does not poll Console.KeyAvailable.'
+Assert-True ($eventWaitFunction.Extent.Text -match 'Start-Sleep\s+-Milliseconds\s+\$PollMilliseconds') 'TUI event wait does not use the bounded polling interval.'
+Assert-True ($eventWaitFunction.Extent.Text -match '(?s)catch\s*\{.*?\[System\.Console\]::ReadKey\(\$true\).*?UsedBlockingFallback\s*=\s*\$true') 'KeyAvailable failure does not use the blocking ReadKey fallback.'
+Assert-True ($sessionText -match '(?s)\$inputEvent\.Type\s+-eq\s*''Resize''.*?Reset-WdtTuiFrame.*?Show-WdtTuiScreen.*?-ForceFull\s+\$true.*?continue') 'Menu resize does not force one clean redraw.'
+Assert-True ($sessionText -match '(?s)\$completionEvent\.Type\s+-eq\s*''Resize''.*?Reset-WdtTuiFrame.*?-ForceFull\s+\$true.*?continue') 'Result or error resize does not force one clean redraw.'
 Assert-True ($tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrame')) 'Renderer does not keep the previous plain-text frame.'
 Assert-True (-not $tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrameHeight')) 'Renderer still uses the legacy frame-height buffer.'
 $diffWriter = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Write-WdtTuiDiffRow' }, $true))[0]

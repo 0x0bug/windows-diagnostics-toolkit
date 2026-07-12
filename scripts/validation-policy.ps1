@@ -401,7 +401,7 @@ function Get-WdtMemberSafetyIssue {
         $typeName = $MemberAst.Expression.TypeName.FullName
         if ($typeName -eq 'System.Console' -and $member -eq 'ReadKey' -and
             (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
-            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtInteractiveSession' -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Wait-WdtTuiEvent' -and
             $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -ceq '$true') {
             return
         }
@@ -491,12 +491,19 @@ function Get-WdtConsolePropertySafetyIssue {
 
     if ($MemberAst.Expression -isnot [System.Management.Automation.Language.TypeExpressionAst]) { return }
     if ($MemberAst.Expression.TypeName.FullName -ne 'System.Console') { return }
-    if ([string]$MemberAst.Member.Value -ne 'CursorVisible') { return }
-    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
-        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtInteractiveSession') {
-        return
+    $member = [string]$MemberAst.Member.Value
+    $isTuiScript = Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1'
+    $enclosingFunction = Get-WdtEnclosingFunctionName $MemberAst
+
+    if ($member -eq 'CursorVisible') {
+        if ($isTuiScript -and $enclosingFunction -ceq 'Invoke-WdtInteractiveSession') { return }
+        return New-WdtSafetyIssue $MemberAst 'Console cursor visibility is only allowed in Invoke-WdtInteractiveSession.'
     }
-    return New-WdtSafetyIssue $MemberAst 'Console cursor visibility is only allowed in Invoke-WdtInteractiveSession.'
+
+    if ($member -eq 'KeyAvailable') {
+        if ($isTuiScript -and $enclosingFunction -ceq 'Wait-WdtTuiEvent') { return }
+        return New-WdtSafetyIssue $MemberAst 'Console key availability is only allowed in Wait-WdtTuiEvent.'
+    }
 }
 
 function Get-WdtSafetyIssues {

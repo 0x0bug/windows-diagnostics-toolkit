@@ -795,6 +795,79 @@ function Get-WdtTuiHostSize {
     return [pscustomobject]@{ Width = $width; Height = $height }
 }
 
+function Get-WdtTuiEventDecision {
+    param(
+        [bool]$KeyAvailable,
+        [int]$InitialWidth,
+        [int]$InitialHeight,
+        [int]$CurrentWidth,
+        [int]$CurrentHeight
+    )
+
+    if ($KeyAvailable) { return 'Key' }
+    if ($CurrentWidth -ne $InitialWidth -or $CurrentHeight -ne $InitialHeight) { return 'Resize' }
+    return 'Wait'
+}
+
+function Wait-WdtTuiEvent {
+    param(
+        [int]$InitialWidth,
+        [int]$InitialHeight,
+        [int]$PollMilliseconds = 75
+    )
+
+    while ($true) {
+        try {
+            $keyAvailable = [System.Console]::KeyAvailable
+        }
+        catch {
+            $keyInfo = [System.Console]::ReadKey($true)
+            return [pscustomobject]@{
+                Type = 'Key'
+                KeyInfo = $keyInfo
+                Size = Get-WdtTuiHostSize
+                UsedBlockingFallback = $true
+            }
+        }
+
+        $currentSize = Get-WdtTuiHostSize
+        $decision = Get-WdtTuiEventDecision -KeyAvailable $keyAvailable -InitialWidth $InitialWidth -InitialHeight $InitialHeight -CurrentWidth $currentSize.Width -CurrentHeight $currentSize.Height
+        if ($decision -eq 'Key') {
+            $keyInfo = [System.Console]::ReadKey($true)
+            return [pscustomobject]@{
+                Type = 'Key'
+                KeyInfo = $keyInfo
+                Size = $currentSize
+                UsedBlockingFallback = $false
+            }
+        }
+        if ($decision -eq 'Resize') {
+            $candidateSize = $currentSize
+            $stablePolls = 0
+            while ($stablePolls -lt 2) {
+                Start-Sleep -Milliseconds $PollMilliseconds
+                $nextSize = Get-WdtTuiHostSize
+                if ($nextSize.Width -eq $candidateSize.Width -and $nextSize.Height -eq $candidateSize.Height) {
+                    $stablePolls++
+                }
+                else {
+                    $candidateSize = $nextSize
+                    $stablePolls = 0
+                }
+            }
+            if ($candidateSize.Width -ne $InitialWidth -or $candidateSize.Height -ne $InitialHeight) {
+                return [pscustomobject]@{
+                    Type = 'Resize'
+                    KeyInfo = $null
+                    Size = $candidateSize
+                    UsedBlockingFallback = $false
+                }
+            }
+        }
+        Start-Sleep -Milliseconds $PollMilliseconds
+    }
+}
+
 function Show-WdtTuiScreen {
     param(
         [Parameter(Mandatory = $true)]$State,
@@ -850,7 +923,13 @@ function Invoke-WdtInteractiveSession {
 
             if ($useReadKey) {
                 try {
-                    $keyInfo = [System.Console]::ReadKey($true)
+                    $inputEvent = Wait-WdtTuiEvent -InitialWidth $size.Width -InitialHeight $size.Height
+                    if ($inputEvent.Type -eq 'Resize') {
+                        Reset-WdtTuiFrame
+                        $layout = Show-WdtTuiScreen -State $state -Width $inputEvent.Size.Width -Height $inputEvent.Size.Height -ShowItemNumbers $false -ForceFull $true
+                        continue
+                    }
+                    $keyInfo = $inputEvent.KeyInfo
                     if ($layout.Mode -eq 'TooSmall') {
                         if ($keyInfo.Key -eq [System.ConsoleKey]::Escape) { return $lastExitCode }
                         continue
@@ -939,21 +1018,42 @@ function Invoke-WdtInteractiveSession {
             try {
                 $result = Invoke-WdtReport @reportParameters
                 $lastExitCode = $result.ExitCode
+                $completionKind = 'Result'
+                $completionResult = $result
+                $completionError = $null
+                $size = Get-WdtTuiHostSize
                 Show-WdtTuiRunResult -Result $result -Width $size.Width
             }
             catch {
                 $lastExitCode = 1
-                $errorLayout = Get-WdtTuiErrorLayout -Message $_.Exception.Message -Width $size.Width
+                $completionKind = 'Error'
+                $completionResult = $null
+                $completionError = $_.Exception.Message
+                $size = Get-WdtTuiHostSize
+                $errorLayout = Get-WdtTuiErrorLayout -Message $completionError -Width $size.Width
                 Reset-WdtTuiFrame
                 Show-WdtTuiFrame -Layout $errorLayout -Width $size.Width -ForceFull $true
             }
 
             if ($useReadKey) {
                 try {
-                    do {
-                        $completionKey = [System.Console]::ReadKey($true)
-                    } while ($completionKey.Key -notin @([System.ConsoleKey]::Enter, [System.ConsoleKey]::Escape))
-                    if ($completionKey.Key -eq [System.ConsoleKey]::Escape) { return $lastExitCode }
+                    while ($true) {
+                        $completionEvent = Wait-WdtTuiEvent -InitialWidth $size.Width -InitialHeight $size.Height
+                        if ($completionEvent.Type -eq 'Resize') {
+                            $size = $completionEvent.Size
+                            $completionLayout = if ($completionKind -eq 'Result') {
+                                Get-WdtTuiRunResultLayout -Result $completionResult -Width $size.Width
+                            }
+                            else {
+                                Get-WdtTuiErrorLayout -Message $completionError -Width $size.Width
+                            }
+                            Reset-WdtTuiFrame
+                            Show-WdtTuiFrame -Layout $completionLayout -Width $size.Width -ForceFull $true
+                            continue
+                        }
+                        if ($completionEvent.KeyInfo.Key -eq [System.ConsoleKey]::Escape) { return $lastExitCode }
+                        if ($completionEvent.KeyInfo.Key -eq [System.ConsoleKey]::Enter) { break }
+                    }
                 }
                 catch { $useReadKey = $false }
             }
