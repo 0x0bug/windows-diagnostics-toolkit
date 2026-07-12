@@ -429,6 +429,15 @@ function Get-WdtMemberSafetyIssue {
             $MemberAst.Arguments[1].VariablePath.UserPath -ceq 'row') {
             return
         }
+        if ($typeName -eq 'System.Console' -and $member -eq 'SetCursorPosition' -and
+            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Complete-WdtTuiConsoleFrame' -and
+            $argumentCount -eq 2 -and
+            $MemberAst.Arguments[0].Extent.Text -ceq '0' -and
+            $MemberAst.Arguments[1] -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $MemberAst.Arguments[1].VariablePath.UserPath -ceq 'anchorRow') {
+            return
+        }
         if ($typeName -eq 'System.Text.Encoding' -and $member -eq 'GetEncoding' -and
             (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
             (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Get-WdtOemEncoding' -and

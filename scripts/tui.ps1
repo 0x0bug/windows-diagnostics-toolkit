@@ -840,6 +840,35 @@ function Reset-WdtTuiFrame {
     $script:WdtTuiPreviousFrame = @()
 }
 
+function Get-WdtTuiExitAnchorRow {
+    param([int]$FrameHeight, [int]$BufferHeight)
+
+    $lastFrameRow = [Math]::Max(0, $FrameHeight - 1)
+    $lastBufferRow = [Math]::Max(0, $BufferHeight - 1)
+    return [Math]::Min($lastFrameRow, $lastBufferRow)
+}
+
+function Complete-WdtTuiConsoleFrame {
+    $frameHeight = @($script:WdtTuiPreviousFrame).Count
+    $wroteNewline = $false
+    try {
+        if ($frameHeight -gt 0 -and -not [System.Console]::IsOutputRedirected) {
+            $anchorRow = Get-WdtTuiExitAnchorRow -FrameHeight $frameHeight -BufferHeight ([System.Console]::BufferHeight)
+            [System.Console]::SetCursorPosition(0, $anchorRow)
+        }
+        Write-Host ''
+        $wroteNewline = $true
+    }
+    catch {
+        if (-not $wroteNewline) {
+            try { Write-Host '' } catch { }
+        }
+    }
+    finally {
+        Reset-WdtTuiFrame
+    }
+}
+
 function Show-WdtTuiFrame {
     param([Parameter(Mandatory = $true)]$Layout, [int]$Width, [bool]$ForceFull)
 
@@ -1176,11 +1205,10 @@ function Invoke-WdtInteractiveSession {
         }
     }
     finally {
-        Reset-WdtTuiFrame
+        Complete-WdtTuiConsoleFrame
         if ($null -ne $originalCursorVisible) {
             try { [System.Console]::CursorVisible = $originalCursorVisible } catch { }
         }
-        Write-Host ''
     }
     return $lastExitCode
 }
