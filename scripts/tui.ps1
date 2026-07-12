@@ -175,6 +175,7 @@ function Get-WdtTuiLayoutMode {
     param([int]$Width, [int]$Height)
 
     if ($Width -ge 110 -and $Height -ge 28) { return 'Wide' }
+    if ($Width -ge 110 -and $Height -ge 22) { return 'WideShort' }
     if ($Width -ge 60 -and $Height -ge 25) { return 'Normal' }
     if ($Width -ge 40 -and $Height -ge 18) { return 'Compact' }
     return 'TooSmall'
@@ -409,12 +410,12 @@ function ConvertTo-WdtTuiFallbackMenuAction {
 }
 
 function Get-WdtTuiTooSmallLayout {
-    param([int]$Width, [int]$Height)
+    param([int]$Width, [int]$Height, [int]$HostWidth = $Width)
 
     $lines = @(
         'WDT - terminal window is too small.',
         'Minimum size: 40x18.',
-        ('Current size: {0}x{1}.' -f $Width, $Height),
+        ('Current: {0}x{1}.' -f $HostWidth, $Height),
         'Resize the window and press any key.',
         'Esc exits.'
     ) | ForEach-Object {
@@ -426,7 +427,7 @@ function Get-WdtTuiTooSmallLayout {
 function Get-WdtTuiHelpText {
     param([string]$Mode)
 
-    if ($Mode -eq 'Wide') { return 'Up/Down Navigate | Space Toggle | Enter Select | A All | R Recommended | Esc Exit' }
+    if ($Mode -in @('Wide', 'WideShort')) { return 'Up/Down Navigate | Space Toggle | Enter Select | A All | R Recommended | Esc Exit' }
     if ($Mode -eq 'Normal') { return 'Up/Down | Space Toggle | Enter Select | A All | R Recommended | Esc Exit' }
     return 'Up/Down | Space | Enter | A | R | Esc'
 }
@@ -439,6 +440,7 @@ function Get-WdtTuiWideLayout {
     param(
         [Parameter(Mandatory = $true)]$State,
         [int]$Width,
+        [bool]$Short,
         [bool]$ShowItemNumbers
     )
 
@@ -449,14 +451,20 @@ function Get-WdtTuiWideLayout {
     $rightWidth = $contentWidth - $leftWidth
     $headerLeftWidth = [Math]::Min(38, $leftWidth)
     $headerRightWidth = $contentWidth - $headerLeftWidth
-    $logo = @(Get-WdtTuiLogo)
     $lines = @((New-WdtTuiBorderLine -Width $Width))
 
-    for ($index = 0; $index -lt $logo.Count; $index++) {
-        $headerText = if ($index -eq 1) { 'Windows Diagnostics Toolkit' } elseif ($index -eq 2) { 'Read-only | Local reports | No telemetry' } else { '' }
-        $leftLine = New-WdtTuiTextLine -Text ('  ' + $logo[$index]) -Color 'Cyan'
-        $rightLine = New-WdtTuiTextLine -Text ('  ' + $headerText) -Color $(if ($index -eq 1) { 'White' } else { 'DarkGray' })
-        $lines += Join-WdtTuiColumns -LeftLine $leftLine -RightLine $rightLine -LeftWidth $headerLeftWidth -RightWidth $headerRightWidth
+    if ($Short) {
+        $lines += New-WdtTuiFramedLine -Line (New-WdtTuiAlignedLine -LeftText ' WDT' -RightText 'Windows Diagnostics Toolkit ' -Width ($Width - 2) -LeftColor 'Cyan' -RightColor 'White') -Width $Width
+        $lines += New-WdtTuiFramedLine -Line (New-WdtTuiTextLine -Text ' Read-only | Local reports | No telemetry' -Color 'DarkGray') -Width $Width
+    }
+    else {
+        $logo = @(Get-WdtTuiLogo)
+        for ($index = 0; $index -lt $logo.Count; $index++) {
+            $headerText = if ($index -eq 1) { 'Windows Diagnostics Toolkit' } elseif ($index -eq 2) { 'Read-only | Local reports | No telemetry' } else { '' }
+            $leftLine = New-WdtTuiTextLine -Text ('  ' + $logo[$index]) -Color 'Cyan'
+            $rightLine = New-WdtTuiTextLine -Text ('  ' + $headerText) -Color $(if ($index -eq 1) { 'White' } else { 'DarkGray' })
+            $lines += Join-WdtTuiColumns -LeftLine $leftLine -RightLine $rightLine -LeftWidth $headerLeftWidth -RightWidth $headerRightWidth
+        }
     }
     $lines += New-WdtTuiBorderLine -Width $Width
 
@@ -466,14 +474,14 @@ function Get-WdtTuiWideLayout {
     for ($index = 0; $index -lt $State.Diagnostics.Count; $index++) {
         $leftPanel += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $leftWidth -ShowItemNumbers $ShowItemNumbers
     }
-    $leftPanel += New-WdtTuiTextLine -Text ''
+    if (-not $Short) { $leftPanel += New-WdtTuiTextLine -Text '' }
 
     $rightPanel = @()
     $rightPanel += New-WdtTuiTextLine -Text ' OPTIONS' -Color 'Cyan'
     $rightPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $rightWidth - 2))) -Color 'DarkGray'
     $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[10] -Index 10 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
     $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[11] -Index 11 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
-    $rightPanel += New-WdtTuiTextLine -Text ''
+    if (-not $Short) { $rightPanel += New-WdtTuiTextLine -Text '' }
     $rightPanel += New-WdtTuiTextLine -Text ' OUTPUT' -Color 'Cyan'
     $rightPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $rightWidth - 2))) -Color 'DarkGray'
     $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[12] -Index 12 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
@@ -487,7 +495,8 @@ function Get-WdtTuiWideLayout {
         $lines += Join-WdtTuiColumns -LeftLine $leftPanel[$index] -RightLine $rightPanel[$index] -LeftWidth $leftWidth -RightWidth $rightWidth
     }
     $lines += New-WdtTuiBorderLine -Width $Width
-    $help = Format-WdtTuiText -Text (Get-WdtTuiHelpText -Mode 'Wide') -Width ($Width - 2)
+    $helpMode = if ($Short) { 'WideShort' } else { 'Wide' }
+    $help = Format-WdtTuiText -Text (Get-WdtTuiHelpText -Mode $helpMode) -Width ($Width - 2)
     $lines += New-WdtTuiFramedLine -Line (New-WdtTuiTextLine -Text (' ' + $help) -Color 'DarkGray') -Width $Width
     $lines += New-WdtTuiBorderLine -Width $Width
     $footerText = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { Get-WdtTuiFooterText } else { 'Error: ' + $State.ErrorMessage }
@@ -496,7 +505,8 @@ function Get-WdtTuiWideLayout {
     $lines += New-WdtTuiFramedLine -Line (New-WdtTuiTextLine -Text (' ' + $footer) -Color $footerColor) -Width $Width
     $lines += New-WdtTuiBorderLine -Width $Width
 
-    return [pscustomobject]@{ Mode = 'Wide'; Lines = @($lines); Viewport = $null; VisibleIndexes = @(0..14) }
+    $mode = if ($Short) { 'WideShort' } else { 'Wide' }
+    return [pscustomobject]@{ Mode = $mode; Lines = @($lines); Viewport = $null; VisibleIndexes = @(0..14) }
 }
 
 function Get-WdtTuiNormalLayout {
@@ -578,11 +588,18 @@ function Get-WdtTuiLayout {
         [bool]$ShowItemNumbers
     )
 
-    $mode = Get-WdtTuiLayoutMode -Width $Width -Height $Height
-    if ($mode -eq 'Wide') { return Get-WdtTuiWideLayout -State $State -Width $Width -ShowItemNumbers $ShowItemNumbers }
-    if ($mode -eq 'Normal') { return Get-WdtTuiNormalLayout -State $State -Width $Width -ShowItemNumbers $ShowItemNumbers }
-    if ($mode -eq 'Compact') { return Get-WdtTuiCompactLayout -State $State -Width $Width -Height $Height -ShowItemNumbers $ShowItemNumbers }
-    return Get-WdtTuiTooSmallLayout -Width $Width -Height $Height
+    $hostWidth = $Width
+    $hostHeight = $Height
+    $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $hostWidth
+    $mode = Get-WdtTuiLayoutMode -Width $hostWidth -Height $hostHeight
+    if ($mode -eq 'Wide') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Short $false -ShowItemNumbers $ShowItemNumbers }
+    if ($mode -eq 'WideShort') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Short $true -ShowItemNumbers $ShowItemNumbers }
+    if ($mode -eq 'Normal') {
+        $normalWidth = [Math]::Min($renderWidth, 96)
+        return Get-WdtTuiNormalLayout -State $State -Width $normalWidth -ShowItemNumbers $ShowItemNumbers
+    }
+    if ($mode -eq 'Compact') { return Get-WdtTuiCompactLayout -State $State -Width $renderWidth -Height $hostHeight -ShowItemNumbers $ShowItemNumbers }
+    return Get-WdtTuiTooSmallLayout -Width $renderWidth -Height $hostHeight -HostWidth $hostWidth
 }
 
 function Get-WdtTuiLines {
@@ -885,7 +902,8 @@ function Show-WdtTuiScreen {
 function Show-WdtTuiRunResult {
     param([Parameter(Mandatory = $true)]$Result, [int]$Width)
 
-    $layout = Get-WdtTuiRunResultLayout -Result $Result -Width $Width
+    $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $Width
+    $layout = Get-WdtTuiRunResultLayout -Result $Result -Width $renderWidth
     Reset-WdtTuiFrame
     Show-WdtTuiFrame -Layout $layout -Width $Width -ForceFull $true
 }
@@ -1013,7 +1031,8 @@ function Invoke-WdtInteractiveSession {
             }
 
             $size = Get-WdtTuiHostSize
-            $runningLayout = Get-WdtTuiRunningLayout -SelectedCount @($reportParameters.SelectedModules).Count -Width $size.Width
+            $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $size.Width
+            $runningLayout = Get-WdtTuiRunningLayout -SelectedCount @($reportParameters.SelectedModules).Count -Width $renderWidth
             Show-WdtTuiFrame -Layout $runningLayout -Width $size.Width
             try {
                 $result = Invoke-WdtReport @reportParameters
@@ -1030,7 +1049,8 @@ function Invoke-WdtInteractiveSession {
                 $completionResult = $null
                 $completionError = $_.Exception.Message
                 $size = Get-WdtTuiHostSize
-                $errorLayout = Get-WdtTuiErrorLayout -Message $completionError -Width $size.Width
+                $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $size.Width
+                $errorLayout = Get-WdtTuiErrorLayout -Message $completionError -Width $renderWidth
                 Reset-WdtTuiFrame
                 Show-WdtTuiFrame -Layout $errorLayout -Width $size.Width -ForceFull $true
             }
@@ -1041,11 +1061,12 @@ function Invoke-WdtInteractiveSession {
                         $completionEvent = Wait-WdtTuiEvent -InitialWidth $size.Width -InitialHeight $size.Height
                         if ($completionEvent.Type -eq 'Resize') {
                             $size = $completionEvent.Size
+                            $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $size.Width
                             $completionLayout = if ($completionKind -eq 'Result') {
-                                Get-WdtTuiRunResultLayout -Result $completionResult -Width $size.Width
+                                Get-WdtTuiRunResultLayout -Result $completionResult -Width $renderWidth
                             }
                             else {
-                                Get-WdtTuiErrorLayout -Message $completionError -Width $size.Width
+                                Get-WdtTuiErrorLayout -Message $completionError -Width $renderWidth
                             }
                             Reset-WdtTuiFrame
                             Show-WdtTuiFrame -Layout $completionLayout -Width $size.Width -ForceFull $true

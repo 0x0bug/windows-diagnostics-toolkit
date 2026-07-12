@@ -101,8 +101,13 @@ $compactLayout = Get-WdtTuiLayout -State $renderState -Width 40 -Height 18
 Assert-Equal 'Wide' (Get-WdtTuiLayout -State $renderState -Width 140 -Height 36).Mode '140x36 must select wide layout.'
 Assert-Equal 'Wide' $wideLayout.Mode '120x30 must select wide layout.'
 Assert-Equal 'Wide' (Get-WdtTuiLayout -State $renderState -Width 110 -Height 28).Mode '110x28 must select wide layout.'
+Assert-Equal 'WideShort' (Get-WdtTuiLayout -State $renderState -Width 120 -Height 22).Mode '120x22 must select short wide layout.'
+Assert-Equal 'WideShort' (Get-WdtTuiLayout -State $renderState -Width 150 -Height 25).Mode '150x25 must select short wide layout.'
+Assert-Equal 'Wide' (Get-WdtTuiLayout -State $renderState -Width 150 -Height 36).Mode '150x36 must select full wide layout.'
 Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 109 -Height 28).Mode '109x28 must select normal layout.'
 Assert-Equal 'Normal' $normalLayout.Mode '80x25 must select normal layout.'
+Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 68 -Height 25).Mode '68x25 must select normal layout.'
+Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 84 -Height 25).Mode '84x25 must select normal layout.'
 Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 60 -Height 25).Mode '60x25 must select normal layout.'
 Assert-Equal 'Compact' (Get-WdtTuiLayout -State $renderState -Width 59 -Height 25).Mode '59x25 must select compact layout.'
 Assert-Equal 'Compact' $compactLayout.Mode '40x18 must select compact layout.'
@@ -179,19 +184,42 @@ Assert-True ($runningText.Contains('Selected modules: 7')) 'Running screen is mi
 Assert-True ($runningText.Contains('Diagnostics are running. This may take a moment.')) 'Running screen is missing honest status guidance.'
 Assert-True (-not $runningText.Contains('Progress:')) 'Running screen contains misleading progress.'
 foreach ($width in 1..5) { foreach ($line in @((Get-WdtTuiLayout -State $renderState -Width $width -Height 5).Lines)) { Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $width) 'Too-small text exceeded its width.' } }
-foreach ($size in @(@(140, 36), @(120, 30), @(110, 28), @(109, 28), @(80, 25), @(60, 25), @(59, 25), @(40, 18), @(39, 18), @(40, 17), @(20, 10), @(5, 5))) {
+foreach ($size in @(@(140, 36), @(120, 30), @(110, 28), @(120, 22), @(150, 25), @(150, 36), @(109, 28), @(84, 25), @(80, 25), @(68, 25), @(60, 25), @(59, 25), @(40, 18), @(39, 18), @(40, 17), @(20, 10), @(5, 5))) {
     $sizedLayout = Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1]
     Assert-True ($sizedLayout.Lines.Count -le $size[1]) ("Layout exceeded {0} rows." -f $size[1])
-    foreach ($line in @($sizedLayout.Lines)) {
-        Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $size[0]) ("Layout exceeded {0} columns." -f $size[0])
-    }
     $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $size[0]
+    foreach ($line in @($sizedLayout.Lines)) {
+        Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $renderWidth) ("Layout exceeded safe render width {0}." -f $renderWidth)
+    }
     $frame = @(ConvertTo-WdtTuiFrame -Layout $sizedLayout -WindowWidth $size[0])
     foreach ($frameLine in $frame) {
         Assert-Equal $renderWidth $frameLine.Length ("Frame line does not use safe render width for {0}." -f $size[0])
         Assert-True ($frameLine.Length -lt $size[0]) ("Frame writes into the final terminal column for {0}." -f $size[0])
     }
 }
+
+foreach ($size in @(@(120, 22), @(150, 25), @(150, 36))) {
+    $responsiveLayout = Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1]
+    $responsiveLines = @($responsiveLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ })
+    foreach ($line in $responsiveLines) {
+        Assert-True ($line.EndsWith('+') -or $line.EndsWith('|')) ("Wide frame lost its right border at {0}x{1}." -f $size[0], $size[1])
+    }
+    $responsiveText = $responsiveLines -join "`n"
+    Assert-True ($responsiveText.Contains(('Selected: {0} / 10' -f $selectedCount))) ("Selected count was truncated at {0}x{1}." -f $size[0], $size[1])
+    Assert-True ($responsiveText.Contains('RUN DIAGNOSTICS') -and $responsiveText.Contains('Enter')) ("Run shortcut was truncated at {0}x{1}." -f $size[0], $size[1])
+    Assert-True ($responsiveText.Contains('Exit') -and $responsiveText.Contains('Esc')) ("Exit shortcut was truncated at {0}x{1}." -f $size[0], $size[1])
+}
+
+$responsiveModes = @('Normal', 'Normal', 'WideShort', 'WideShort', 'Wide', 'WideShort', 'WideShort', 'Normal', 'Normal')
+$responsiveSizes = @(@(68, 25), @(84, 25), @(120, 22), @(150, 25), @(150, 36), @(150, 25), @(120, 22), @(84, 25), @(68, 25))
+$selectionBeforeResponsiveResize = @(Get-WdtTuiSelectedModule -State $renderState) -join ','
+$cursorBeforeResponsiveResize = $renderState.CursorIndex
+for ($index = 0; $index -lt $responsiveSizes.Count; $index++) {
+    $responsiveSize = $responsiveSizes[$index]
+    Assert-Equal $responsiveModes[$index] (Get-WdtTuiLayout -State $renderState -Width $responsiveSize[0] -Height $responsiveSize[1]).Mode 'Responsive mode transition is incorrect.'
+}
+Assert-Equal $selectionBeforeResponsiveResize (@(Get-WdtTuiSelectedModule -State $renderState) -join ',') 'Responsive resize changed selection.'
+Assert-Equal $cursorBeforeResponsiveResize $renderState.CursorIndex 'Responsive resize changed cursor index.'
 
 Assert-Equal 79 (Get-WdtTuiRenderWidth -WindowWidth 80) 'Render width must reserve the final terminal column.'
 $sameFrame = @('alpha     ', 'beta      ')
