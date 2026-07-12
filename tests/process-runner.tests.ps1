@@ -39,9 +39,12 @@ $failedSummary = Get-WdtProcessCleanupSummary @([pscustomobject]@{Status='Termin
 Assert-Equal $false $failedSummary.Success 'Failed cleanup must be explicit.'
 
 $powerShellPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+$fixtureStarted = Get-Date
 $fixtureRoot = Join-Path $env:TEMP ('wdt-runtime-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
 $heldChildPid = $null
+$timeoutChildPid = $null
+$timeoutRootPid = $null
 try {
     $streamFixture = Join-Path $fixtureRoot 'stream.ps1'
     [IO.File]::WriteAllText($streamFixture, "Write-Output 'out'; [Console]::Error.WriteLine('err')", [Text.Encoding]::UTF8)
@@ -50,6 +53,28 @@ try {
     Assert-Equal 'LaunchError' $launch.Status 'Missing executable must return LaunchError.'
     Assert-True (($launch.ErrorLines -join "`n").Contains('Failed to run script:')) 'Original launch message is missing.'
     Assert-True (-not (($launch.ErrorLines -join "`n").Contains('No process is associated'))) 'Secondary process error masked launch error.'
+
+    $largeStreamFixture = Join-Path $fixtureRoot 'large-streams.ps1'
+    $largeStreamSource = @'
+1..4000 | ForEach-Object {
+    Write-Output ("out-{0}" -f $_)
+    [Console]::Error.WriteLine(("err-{0}" -f $_))
+}
+'@
+    [IO.File]::WriteAllText($largeStreamFixture, $largeStreamSource, [Text.Encoding]::UTF8)
+    $largeStreamStarted = Get-Date
+    $largeStream = Invoke-DiagnosticScript 'LargeStreams' $largeStreamFixture $powerShellPath $repositoryRoot 30
+    $largeStreamDuration = ((Get-Date) - $largeStreamStarted).TotalSeconds
+    Assert-Equal 'Success' $largeStream.Status 'Large concurrent stdout/stderr fixture must succeed.'
+    Assert-Equal $true $largeStream.OutputComplete 'Large concurrent stdout/stderr fixture must drain both streams completely.'
+    Assert-Equal 'Complete' $largeStream.Completeness 'Complete large stream capture must report Complete.'
+    Assert-True ($largeStream.OutputLines.Count -ge 4000) 'Large stdout fixture returned fewer than 4000 lines.'
+    Assert-True ($largeStream.ErrorLines.Count -ge 4000) 'Large stderr fixture returned fewer than 4000 lines.'
+    Assert-True ($largeStream.OutputLines -contains 'out-1') 'Large stdout fixture is missing out-1.'
+    Assert-True ($largeStream.OutputLines -contains 'out-4000') 'Large stdout fixture is missing out-4000.'
+    Assert-True ($largeStream.ErrorLines -contains 'err-1') 'Large stderr fixture is missing err-1.'
+    Assert-True ($largeStream.ErrorLines -contains 'err-4000') 'Large stderr fixture is missing err-4000.'
+    Assert-True ($largeStreamDuration -lt 30) 'Large concurrent stream fixture exceeded its bounded runtime.'
 
     $heldFixture = Join-Path $fixtureRoot 'held.ps1'
     [IO.File]::WriteAllText($heldFixture, "`$child=Start-Process -FilePath '$powerShellPath' -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 15' -NoNewWindow -PassThru; 'HELD_CHILD_PID='+`$child.Id; 'stdout-held'; [Console]::Error.WriteLine('stderr-held')", [Text.Encoding]::UTF8)
@@ -64,11 +89,31 @@ try {
     $pidLine = @($held.OutputLines | Where-Object { $_ -match '^HELD_CHILD_PID=' } | Select-Object -First 1)
     if ($pidLine.Count) { $heldChildPid = [int]($pidLine[0] -replace '^HELD_CHILD_PID=','') }
 
-    $timeoutFixture = Join-Path $fixtureRoot 'timeout.ps1'
-    [IO.File]::WriteAllText($timeoutFixture, 'Start-Sleep -Seconds 60', [Text.Encoding]::UTF8)
+    $timeoutFixture = Join-Path $fixtureRoot 'process-tree-timeout.ps1'
+    $escapedPowerShellPath = $powerShellPath.Replace("'", "''")
+    $timeoutSource = "`$child = Start-Process -FilePath '$escapedPowerShellPath' -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 60' -PassThru; Write-Output ('CHILD_PID=' + `$child.Id); Start-Sleep -Seconds 60"
+    [IO.File]::WriteAllText($timeoutFixture, $timeoutSource, [Text.Encoding]::UTF8)
+    $timeoutStarted = Get-Date
     $timeout = Invoke-DiagnosticScript 'Timeout' $timeoutFixture $powerShellPath $repositoryRoot 1
+    $timeoutDuration = ((Get-Date) - $timeoutStarted).TotalSeconds
     Assert-Equal 'Timeout' $timeout.Status 'Timeout classification failed.'
+    Assert-True (@($timeout.Findings | Where-Object { $_.Code -eq 'MODULE_EXECUTION_TIMEOUT' }).Count -eq 1) 'Timeout finding is missing.'
     Assert-True ($null -ne $timeout.Cleanup) 'Timeout cleanup result is missing.'
+    Assert-Equal $true $timeout.Cleanup.Success 'Real process-tree cleanup must succeed.'
+    Assert-True (@($timeout.Cleanup.Items | Where-Object { [int]$_.Depth -gt 0 }).Count -ge 1) 'Cleanup did not include a descendant process.'
+    $cleanupDepths = @($timeout.Cleanup.Items | ForEach-Object { [int]$_.Depth })
+    for ($index = 1; $index -lt $cleanupDepths.Count; $index++) {
+        Assert-True ($cleanupDepths[$index - 1] -ge $cleanupDepths[$index]) 'Cleanup items are not ordered from greater depth to lesser depth.'
+    }
+    $timeoutChildLine = @($timeout.OutputLines | Where-Object { $_ -match '^CHILD_PID=\d+$' } | Select-Object -First 1)
+    Assert-Equal 1 $timeoutChildLine.Count 'Timeout fixture did not report exactly one child PID.'
+    $timeoutChildPid = [int]($timeoutChildLine[0] -replace '^CHILD_PID=', '')
+    $timeoutRootItem = @($timeout.Cleanup.Items | Where-Object { [int]$_.Depth -eq 0 } | Select-Object -First 1)
+    Assert-Equal 1 $timeoutRootItem.Count 'Cleanup result does not contain the root process.'
+    $timeoutRootPid = [int]$timeoutRootItem[0].ProcessId
+    Assert-True ($null -eq (Get-Process -Id $timeoutChildPid -ErrorAction SilentlyContinue)) 'Child process still exists after cleanup.'
+    Assert-True ($null -eq (Get-Process -Id $timeoutRootPid -ErrorAction SilentlyContinue)) 'Root fixture process still exists after cleanup.'
+    Assert-True ($timeoutDuration -lt 15) 'Real process-tree timeout fixture exceeded its bounded runtime.'
 
     $unstarted = New-Object Diagnostics.Process
     $cleanupStarted = Get-Date
@@ -78,7 +123,15 @@ try {
     $unstarted.Dispose()
 }
 finally {
-    if ($null -ne $heldChildPid) { Stop-Process -Id $heldChildPid -Force -ErrorAction SilentlyContinue }
+    foreach ($fixturePid in @($heldChildPid, $timeoutChildPid, $timeoutRootPid)) {
+        if ($null -eq $fixturePid) { continue }
+        $fixtureProcess = Get-Process -Id $fixturePid -ErrorAction SilentlyContinue
+        if ($null -ne $fixtureProcess -and
+            $fixtureProcess.ProcessName -eq [IO.Path]::GetFileNameWithoutExtension($powerShellPath) -and
+            $fixtureProcess.StartTime -ge $fixtureStarted) {
+            Stop-Process -Id $fixturePid -Force -ErrorAction SilentlyContinue
+        }
+    }
     Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
