@@ -302,12 +302,53 @@ function Join-WdtTuiColumns {
     )
 }
 
+function Test-WdtTuiUnicodeLogoSupport {
+    param([bool]$IsOutputRedirected, [bool]$IsWindowsTerminal, [string]$OutputEncodingWebName)
+
+    return -not $IsOutputRedirected -and $IsWindowsTerminal -and $OutputEncodingWebName -in @('utf-8', 'utf8')
+}
+
+function Get-WdtTuiLogoMode {
+    try {
+        if (Test-WdtTuiUnicodeLogoSupport -IsOutputRedirected ([System.Console]::IsOutputRedirected) -IsWindowsTerminal (-not [string]::IsNullOrWhiteSpace($env:WT_SESSION)) -OutputEncodingWebName ([System.Console]::OutputEncoding.WebName)) {
+            return 'Unicode'
+        }
+    }
+    catch { }
+    return 'Ascii'
+}
+
 function Get-WdtTuiLogo {
+    param([ValidateSet('Ascii', 'Unicode')][string]$Mode = 'Ascii')
+
+    if ($Mode -eq 'Unicode') {
+        $block = [char]0x2588
+        $vertical = [char]0x2551
+        $topLeft = [char]0x2554
+        $topRight = [char]0x2557
+        $horizontal = [char]0x2550
+        $bottomLeft = [char]0x255A
+        $bottomRight = [char]0x255D
+        $templates = @(
+            'BB7    BB7 BBBBBB7 BBBBBBBB7',
+            'BBI    BBI BBF==BB7L==BBF==J',
+            'BBI B7 BBI BBI  BBI   BBI',
+            'BBIBBB7BBI BBI  BBI   BBI',
+            'LBBBFBBBFJ BBBBBBFJ   BBI',
+            ' L==JL==J  L=====J    L=J'
+        )
+        return @($templates | ForEach-Object {
+                $_.Replace([char]'B', $block).Replace([char]'I', $vertical).Replace([char]'F', $topLeft).Replace([char]'7', $topRight).Replace([char]'=', $horizontal).Replace([char]'L', $bottomLeft).Replace([char]'J', $bottomRight)
+            })
+    }
+
     return @(
-        'W   W  DDDD   TTTTT',
-        'W   W  D   D    T',
-        'W W W  D   D    T',
-        ' W W   DDDD     T'
+        '::  ##      ##   ######    ########  ::',
+        '::  ##      ##   ##   ##      ##     ::',
+        '::  ##  ##  ##   ##    ##     ##     ::',
+        '::  ## #### ##   ##    ##     ##     ::',
+        '::   ###  ###    ##   ##      ##     ::',
+        '::    ##  ##     ######       ##     ::'
     )
 }
 
@@ -441,6 +482,7 @@ function Get-WdtTuiWideLayout {
         [Parameter(Mandatory = $true)]$State,
         [int]$Width,
         [bool]$Short,
+        [ValidateSet('Ascii', 'Unicode')][string]$LogoMode = 'Ascii',
         [bool]$ShowItemNumbers
     )
 
@@ -449,8 +491,6 @@ function Get-WdtTuiWideLayout {
     $contentWidth = $Width - 3
     $leftWidth = [Math]::Floor($contentWidth * 0.56)
     $rightWidth = $contentWidth - $leftWidth
-    $headerLeftWidth = [Math]::Min(38, $leftWidth)
-    $headerRightWidth = $contentWidth - $headerLeftWidth
     $lines = @((New-WdtTuiBorderLine -Width $Width))
 
     if ($Short) {
@@ -458,7 +498,10 @@ function Get-WdtTuiWideLayout {
         $lines += New-WdtTuiFramedLine -Line (New-WdtTuiTextLine -Text ' Read-only | Local reports | No telemetry' -Color 'DarkGray') -Width $Width
     }
     else {
-        $logo = @(Get-WdtTuiLogo)
+        $logo = @(Get-WdtTuiLogo -Mode $LogoMode)
+        $logoWidth = @($logo | ForEach-Object { $_.Length } | Measure-Object -Maximum).Maximum
+        $headerLeftWidth = [Math]::Min($logoWidth + 2, [Math]::Max($logoWidth, $contentWidth - 42))
+        $headerRightWidth = $contentWidth - $headerLeftWidth
         for ($index = 0; $index -lt $logo.Count; $index++) {
             $headerText = if ($index -eq 1) { 'Windows Diagnostics Toolkit' } elseif ($index -eq 2) { 'Read-only | Local reports | No telemetry' } else { '' }
             $leftLine = New-WdtTuiTextLine -Text ('  ' + $logo[$index]) -Color 'Cyan'
@@ -519,10 +562,7 @@ function Get-WdtTuiNormalLayout {
     $items = @(Get-WdtTuiMenuItem -State $State)
     $selectedCount = @(Get-WdtTuiSelectedModule -State $State).Count
     $lines = @()
-    foreach ($logoLine in @(Get-WdtTuiLogo)) {
-        $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $logoLine -Width $Width) -Color 'Cyan'
-    }
-    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Windows Diagnostics Toolkit' -Width $Width) -Color 'White'
+    $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'WDT - Windows Diagnostics Toolkit' -Width $Width) -Color 'Cyan'
     $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Read-only | Local reports | No telemetry' -Width $Width) -Color 'DarkGray'
     $lines += New-WdtTuiAlignedLine -LeftText 'DIAGNOSTICS' -RightText ('Selected: {0} / {1}' -f $selectedCount, $State.Diagnostics.Count) -Width $Width -LeftColor 'Cyan' -RightColor 'Cyan'
     for ($index = 0; $index -lt $State.Diagnostics.Count; $index++) {
@@ -585,6 +625,7 @@ function Get-WdtTuiLayout {
         [Parameter(Mandatory = $true)]$State,
         [int]$Width = 80,
         [int]$Height = 25,
+        [ValidateSet('Ascii', 'Unicode')][string]$LogoMode = 'Ascii',
         [bool]$ShowItemNumbers
     )
 
@@ -592,8 +633,8 @@ function Get-WdtTuiLayout {
     $hostHeight = $Height
     $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $hostWidth
     $mode = Get-WdtTuiLayoutMode -Width $hostWidth -Height $hostHeight
-    if ($mode -eq 'Wide') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Short $false -ShowItemNumbers $ShowItemNumbers }
-    if ($mode -eq 'WideShort') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Short $true -ShowItemNumbers $ShowItemNumbers }
+    if ($mode -eq 'Wide') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Short $false -LogoMode $LogoMode -ShowItemNumbers $ShowItemNumbers }
+    if ($mode -eq 'WideShort') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Short $true -LogoMode 'Ascii' -ShowItemNumbers $ShowItemNumbers }
     if ($mode -eq 'Normal') {
         $normalWidth = [Math]::Min($renderWidth, 96)
         return Get-WdtTuiNormalLayout -State $State -Width $normalWidth -ShowItemNumbers $ShowItemNumbers
@@ -894,7 +935,8 @@ function Show-WdtTuiScreen {
         [bool]$ForceFull
     )
 
-    $layout = Get-WdtTuiLayout -State $State -Width $Width -Height $Height -ShowItemNumbers $ShowItemNumbers
+    $logoMode = Get-WdtTuiLogoMode
+    $layout = Get-WdtTuiLayout -State $State -Width $Width -Height $Height -LogoMode $logoMode -ShowItemNumbers $ShowItemNumbers
     Show-WdtTuiFrame -Layout $layout -Width $Width -ForceFull $ForceFull
     return $layout
 }

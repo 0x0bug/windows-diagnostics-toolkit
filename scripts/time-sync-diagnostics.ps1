@@ -87,41 +87,89 @@ function Get-TimezoneInformation {
     }
 }
 
+function Get-WdtOemEncoding {
+    $oemCodePage = [System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage
+    return [System.Text.Encoding]::GetEncoding($oemCodePage)
+}
+
+function ConvertFrom-WdtOemBytes {
+    param(
+        [Parameter(Mandatory = $true)][byte[]]$Bytes,
+        [System.Text.Encoding]$Encoding = $(Get-WdtOemEncoding)
+    )
+
+    return $Encoding.GetString($Bytes)
+}
+
+function New-WdtW32tmResult {
+    param([string]$Stdout, [string]$Stderr, [int]$ExitCode)
+
+    $output = @($Stdout -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($ExitCode -ne 0) {
+        $errorDetail = if ([string]::IsNullOrWhiteSpace($Stderr)) { $Stdout.Trim() } else { $Stderr.Trim() }
+        return [pscustomobject]@{
+            Output   = @($output)
+            Error    = ('w32tm.exe exited with code {0}: {1}' -f $ExitCode, $errorDetail)
+            ExitCode = $ExitCode
+        }
+    }
+
+    return [pscustomobject]@{
+        Output   = @($output)
+        Error    = $(if ([string]::IsNullOrWhiteSpace($Stderr)) { $null } else { $Stderr.Trim() })
+        ExitCode = $ExitCode
+    }
+}
+
 function Invoke-W32tmQuery {
     param([Parameter(Mandatory = $true)][ValidateSet('Source', 'Status')][string]$Query)
 
-    if ($null -eq (Get-Command -Name 'w32tm.exe' -ErrorAction SilentlyContinue)) {
+    $command = Get-Command -Name 'w32tm.exe' -ErrorAction SilentlyContinue
+    if ($null -eq $command) {
         return [pscustomobject]@{
-            Output = @()
-            Error  = 'w32tm.exe is unavailable.'
+            Output   = @()
+            Error    = 'w32tm.exe is unavailable.'
+            ExitCode = $null
         }
     }
 
+    $process = $null
+    $stdoutReader = $null
+    $stderrReader = $null
     try {
-        if ($Query -eq 'Source') {
-            $output = @(& w32tm.exe /query /source 2>&1 | ForEach-Object { [string]$_ })
-        }
-        else {
-            $output = @(& w32tm.exe /query /status /verbose 2>&1 | ForEach-Object { [string]$_ })
-        }
+        $oemEncoding = Get-WdtOemEncoding
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $command.Source
+        $startInfo.Arguments = if ($Query -eq 'Source') { '/query /source' } else { '/query /status /verbose' }
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.StandardOutputEncoding = $oemEncoding
+        $startInfo.StandardErrorEncoding = $oemEncoding
 
-        if ($LASTEXITCODE -ne 0) {
-            return [pscustomobject]@{
-                Output = @($output)
-                Error  = ('w32tm.exe exited with code {0}: {1}' -f $LASTEXITCODE, ($output -join ' '))
-            }
-        }
-
-        return [pscustomobject]@{
-            Output = @($output)
-            Error  = $null
-        }
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $startInfo
+        [void]$process.Start()
+        $stdoutReader = $process.StandardOutput
+        $stderrReader = $process.StandardError
+        $stdout = $stdoutReader.ReadToEnd()
+        $stderr = $stderrReader.ReadToEnd()
+        $process.WaitForExit()
+        $exitCode = $process.ExitCode
+        return New-WdtW32tmResult -Stdout $stdout -Stderr $stderr -ExitCode $exitCode
     }
     catch {
         return [pscustomobject]@{
-            Output = @()
-            Error  = $_.Exception.Message
+            Output   = @()
+            Error    = $_.Exception.Message
+            ExitCode = $null
         }
+    }
+    finally {
+        if ($null -ne $stdoutReader) { $stdoutReader.Dispose() }
+        if ($null -ne $stderrReader) { $stderrReader.Dispose() }
+        if ($null -ne $process) { $process.Dispose() }
     }
 }
 

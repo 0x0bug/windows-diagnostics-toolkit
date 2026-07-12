@@ -45,10 +45,6 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $repositoryRoot 'scripts\validation-policy.ps1')
 
 foreach ($source in @(
-        'w32tm.exe /query /source',
-        'w32tm.exe /query /status /verbose',
-        '& W32TM.EXE /query /source',
-        '& C:\Windows\System32\w32tm.exe /query /source',
         'netsh.exe winhttp show proxy',
         '& NETSH.EXE winhttp show proxy',
         'Get-CimInstance -ClassName Win32_OperatingSystem',
@@ -73,6 +69,9 @@ Assert-Allowed 'function Invoke-WdtInteractiveSession { Read-Host ''Output direc
 Assert-Allowed 'function Show-WdtTuiFrame { Clear-Host; [System.Console]::SetCursorPosition($column, $row) }' 'scripts\tui.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { $old = [System.Console]::CursorVisible; [System.Console]::CursorVisible = $false; [System.Console]::CursorVisible = $old }' 'scripts\tui.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { Invoke-WdtReport @reportParameters }' 'scripts\tui.ps1'
+Assert-Allowed 'function Get-WdtOemEncoding { $oemCodePage = [System.Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage; [System.Text.Encoding]::GetEncoding($oemCodePage) }' 'scripts\time-sync-diagnostics.ps1'
+Assert-Allowed 'function ConvertFrom-WdtOemBytes { param($Bytes, $Encoding); $Encoding.GetString($Bytes) }' 'scripts\time-sync-diagnostics.ps1'
+Assert-Allowed 'function Invoke-W32tmQuery { $startInfo = New-Object System.Diagnostics.ProcessStartInfo; $process = New-Object System.Diagnostics.Process; [void]$process.Start(); $stdoutReader.Dispose(); $stderrReader.Dispose(); $process.Dispose() }' 'scripts\time-sync-diagnostics.ps1'
 
 $allowedCallbacks = @'
 function Protect-WdtRegexMatches {
@@ -109,13 +108,19 @@ $nativeFixtures = @(
 foreach ($source in $nativeFixtures) { Assert-Denied $source '*Native executable is not in the read-only allowlist*' }
 
 foreach ($source in @(
+        'w32tm.exe /query /source',
+        'w32tm.exe /query /status /verbose',
         'w32tm.exe /query /status extra',
         'w32tm.exe /query $mode',
         'w32tm.exe /query $mode /source',
-        'netsh.exe winhttp show proxy extra',
-        'netsh.exe winhttp $action proxy',
         'W32TM.EXE /resync'
-    )) { Assert-Denied $source '*Native executable arguments are not an allowed read-only form*' }
+    )) { Assert-Denied $source '*Native executable is not in the read-only allowlist*' }
+foreach ($source in @('netsh.exe winhttp show proxy extra', 'netsh.exe winhttp $action proxy')) {
+    Assert-Denied $source '*Native executable arguments are not an allowed read-only form*'
+}
+Assert-Denied 'function Other { $oemCodePage = 437; [System.Text.Encoding]::GetEncoding($oemCodePage) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\time-sync-diagnostics.ps1'
+Assert-Denied 'function Other { $process = New-Object System.Diagnostics.Process }' '*New-Object type is not in the reviewed safe-type allowlist*' 'scripts\time-sync-diagnostics.ps1'
+Assert-Denied 'function Other { $process.Dispose() }' '*Instance method is not in the reviewed safe allowlist*' 'scripts\time-sync-diagnostics.ps1'
 
 foreach ($source in @(
         '$command = "cmd.exe"; & $command /c echo test',

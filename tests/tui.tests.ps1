@@ -122,11 +122,31 @@ $compactErrorState.ErrorMessage = 'Sample compact error'
 $compactErrorLayout = Get-WdtTuiLayout -State $compactErrorState -Width 40 -Height 18
 Assert-True ($compactErrorLayout.Lines.Count -le 18) 'Compact TUI with an error exceeds its minimum supported height.'
 Assert-True ((@($compactErrorLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('Error: Sample compact error')) 'Compact TUI hides its error message.'
-Assert-True (@(Get-WdtTuiLogo).Count -ge 3 -and @(Get-WdtTuiLogo).Count -le 5) 'TUI logo must have three to five lines.'
-foreach ($logoText in @(Get-WdtTuiLogo)) {
-    Assert-True ($logoText.Length -le 32) 'TUI logo is wider than 32 characters.'
+Assert-True (Test-WdtTuiUnicodeLogoSupport -IsOutputRedirected $false -IsWindowsTerminal $true -OutputEncodingWebName 'utf-8') 'Windows Terminal with UTF-8 did not enable the Unicode logo.'
+Assert-True (-not (Test-WdtTuiUnicodeLogoSupport -IsOutputRedirected $true -IsWindowsTerminal $true -OutputEncodingWebName 'utf-8')) 'Redirected output enabled the Unicode logo.'
+Assert-True (-not (Test-WdtTuiUnicodeLogoSupport -IsOutputRedirected $false -IsWindowsTerminal $false -OutputEncodingWebName 'utf-8')) 'A non-Windows Terminal host enabled the Unicode logo.'
+Assert-True (-not (Test-WdtTuiUnicodeLogoSupport -IsOutputRedirected $false -IsWindowsTerminal $true -OutputEncodingWebName 'ibm866')) 'A non-UTF-8 output encoding enabled the Unicode logo.'
+$asciiLogo = @(Get-WdtTuiLogo -Mode Ascii)
+$unicodeLogo = @(Get-WdtTuiLogo -Mode Unicode)
+Assert-Equal 6 $asciiLogo.Count 'ASCII logo must have six rows.'
+Assert-Equal 6 $unicodeLogo.Count 'Unicode logo must have six rows.'
+foreach ($logoText in $asciiLogo) {
     Assert-True ($logoText -match '^[ -~]+$') 'TUI logo must be ASCII only.'
 }
+$asciiWide = Get-WdtTuiLayout -State $renderState -Width 110 -Height 28 -LogoMode Ascii
+$unicodeWide = Get-WdtTuiLayout -State $renderState -Width 110 -Height 28 -LogoMode Unicode
+foreach ($logoLayout in @($asciiWide, $unicodeWide)) {
+    Assert-True ($logoLayout.Lines.Count -le 28) 'Wide logo layout exceeds 110x28.'
+    foreach ($line in @($logoLayout.Lines)) {
+        Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le 109) 'Wide logo layout exceeds safe render width.'
+    }
+}
+$asciiWideText = @($asciiWide.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+$unicodeWideText = @($unicodeWide.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True ($asciiWideText.Contains($asciiLogo[0])) 'Forced ASCII logo is missing from Wide.'
+Assert-True ($unicodeWideText.Contains($unicodeLogo[0])) 'Forced Unicode logo is missing from Wide.'
+$shortWideText = @((Get-WdtTuiLayout -State $renderState -Width 120 -Height 22 -LogoMode Unicode).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True (-not $shortWideText.Contains($unicodeLogo[0]) -and -not $shortWideText.Contains($asciiLogo[0])) 'WideShort unexpectedly uses a full logo.'
 $wideScreen = @($wideLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
 $normalScreen = @($normalLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
 $compactScreen = @($compactLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
