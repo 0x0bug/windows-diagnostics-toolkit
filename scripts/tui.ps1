@@ -800,11 +800,12 @@ function Show-WdtTuiScreen {
         [Parameter(Mandatory = $true)]$State,
         [int]$Width,
         [int]$Height,
-        [bool]$ShowItemNumbers
+        [bool]$ShowItemNumbers,
+        [bool]$ForceFull
     )
 
     $layout = Get-WdtTuiLayout -State $State -Width $Width -Height $Height -ShowItemNumbers $ShowItemNumbers
-    Show-WdtTuiFrame -Layout $layout -Width $Width
+    Show-WdtTuiFrame -Layout $layout -Width $Width -ForceFull $ForceFull
     return $layout
 }
 
@@ -832,6 +833,7 @@ function Invoke-WdtInteractiveSession {
     $useReadKey = $true
     $lastExitCode = 0
     $originalCursorVisible = $null
+    $isFirstMenuFrame = $true
     try {
         Reset-WdtTuiFrame
         try {
@@ -842,7 +844,8 @@ function Invoke-WdtInteractiveSession {
 
         while (-not $state.ExitRequested) {
             $size = Get-WdtTuiHostSize
-            $layout = Show-WdtTuiScreen -State $state -Width $size.Width -Height $size.Height -ShowItemNumbers (-not $useReadKey)
+            $layout = Show-WdtTuiScreen -State $state -Width $size.Width -Height $size.Height -ShowItemNumbers (-not $useReadKey) -ForceFull $isFirstMenuFrame
+            $isFirstMenuFrame = $false
             $action = $null
 
             if ($useReadKey) {

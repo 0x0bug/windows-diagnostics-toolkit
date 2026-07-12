@@ -290,6 +290,13 @@ Assert-True ($interactiveFunction.Extent.Text -match '(?s)do\s*\{\s*\$completion
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)try\s*\{\s*Reset-WdtTuiFrame.*?while\s*\(') 'Interactive session does not invalidate a previous session frame on entry.'
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{\s*Reset-WdtTuiFrame') 'Interactive session does not invalidate its frame in finally.'
 Assert-True ($interactiveFunction.Extent.Text -match '(?s)catch\s*\{.*?Reset-WdtTuiFrame\s*\r?\n\s*Show-WdtTuiFrame.*?-ForceFull\s+\$true') 'Error screen is not force-rendered from a clean frame.'
+$sessionText = $interactiveFunction.Extent.Text
+$firstFrameInitialization = $sessionText.IndexOf('$isFirstMenuFrame = $true')
+$firstFrameRender = $sessionText.IndexOf('-ForceFull $isFirstMenuFrame')
+$diffFrameTransition = $sessionText.IndexOf('$isFirstMenuFrame = $false')
+Assert-True ($firstFrameInitialization -ge 0) 'Interactive session does not initialize first-frame full rendering.'
+Assert-True ($firstFrameRender -gt $firstFrameInitialization) 'First menu screen does not use the full-render flag.'
+Assert-True ($diffFrameTransition -gt $firstFrameRender) 'Subsequent menu screens are not switched back to diff rendering.'
 Assert-True ($tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrame')) 'Renderer does not keep the previous plain-text frame.'
 Assert-True (-not $tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrameHeight')) 'Renderer still uses the legacy frame-height buffer.'
 $diffWriter = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Write-WdtTuiDiffRow' }, $true))[0]
