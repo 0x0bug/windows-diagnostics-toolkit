@@ -44,7 +44,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 The one-run execution-policy bypass applies only to the new PowerShell process. It does not change the machine-wide or current-user execution policy.
 
-If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`. Installing PowerShell 7 is optional because the toolkit supports the built-in Windows PowerShell 5.1 command above.
+If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`; installing PowerShell 7 is optional because the toolkit supports the built-in Windows PowerShell 5.1 command above.
 
 ## Interactive TUI
 
