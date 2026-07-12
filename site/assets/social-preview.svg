@@ -1,35 +1,37 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
   <title id="title">Windows Diagnostics Toolkit</title>
-  <desc id="desc">Read-only PowerShell diagnostics and local Windows support reports.</desc>
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#08101d"/>
-      <stop offset="1" stop-color="#142b4d"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
-      <stop offset="0" stop-color="#67b7ff"/>
-      <stop offset="1" stop-color="#8be9c1"/>
-    </linearGradient>
-  </defs>
-  <rect width="1280" height="640" rx="36" fill="url(#bg)"/>
-  <circle cx="1090" cy="95" r="230" fill="#67b7ff" opacity="0.08"/>
-  <circle cx="1180" cy="560" r="290" fill="#8be9c1" opacity="0.06"/>
-  <rect x="76" y="78" width="1128" height="484" rx="24" fill="#0a0f18" opacity="0.74" stroke="#314767" stroke-width="2"/>
-  <g transform="translate(116 122)">
-    <rect width="76" height="76" rx="15" fill="url(#accent)"/>
-    <path d="M18 20h17v17H18zm22 0h18v17H40zM18 42h17v17H18zm22 0h18v17H40z" fill="#06101c"/>
+  <desc id="desc">Read-only PowerShell diagnostics with a terminal-first interface, local reports and no telemetry.</desc>
+  <rect width="1280" height="640" fill="#000000"/>
+  <g stroke="#153333" stroke-width="1" opacity="0.65">
+    <path d="M0 80H1280M0 160H1280M0 240H1280M0 320H1280M0 400H1280M0 480H1280M0 560H1280"/>
+    <path d="M80 0V640M160 0V640M240 0V640M320 0V640M400 0V640M480 0V640M560 0V640M640 0V640M720 0V640M800 0V640M880 0V640M960 0V640M1040 0V640M1120 0V640M1200 0V640"/>
   </g>
-  <text x="220" y="163" fill="#8be9c1" font-family="Segoe UI, Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="3">OPEN SOURCE · POWERSHELL</text>
-  <text x="116" y="270" fill="#edf4ff" font-family="Segoe UI, Arial, sans-serif" font-size="70" font-weight="750">Windows Diagnostics</text>
-  <text x="116" y="350" fill="#edf4ff" font-family="Segoe UI, Arial, sans-serif" font-size="70" font-weight="750">Toolkit</text>
-  <text x="116" y="416" fill="#a9b7ca" font-family="Segoe UI, Arial, sans-serif" font-size="32">Fast local Windows support reports.</text>
-  <g font-family="Segoe UI, Arial, sans-serif" font-size="25" font-weight="650">
-    <rect x="116" y="462" width="175" height="54" rx="12" fill="#142238" stroke="#314767"/>
-    <text x="144" y="497" fill="#edf4ff">Read-only</text>
-    <rect x="310" y="462" width="205" height="54" rx="12" fill="#142238" stroke="#314767"/>
-    <text x="338" y="497" fill="#edf4ff">No telemetry</text>
-    <rect x="534" y="462" width="232" height="54" rx="12" fill="#142238" stroke="#314767"/>
-    <text x="562" y="497" fill="#edf4ff">Privacy Mode</text>
+  <rect x="54" y="48" width="1172" height="544" fill="#030505" stroke="#33e6e6" stroke-width="2"/>
+  <path d="M54 104H1226M54 474H1226M700 104V474" stroke="#33e6e6" stroke-width="2"/>
+  <text x="82" y="84" fill="#33e6e6" font-family="Cascadia Code, Consolas, monospace" font-size="22" font-weight="700">WDT / WINDOWS DIAGNOSTICS TOOLKIT</text>
+  <text x="1100" y="84" fill="#25ff45" font-family="Cascadia Code, Consolas, monospace" font-size="19" font-weight="700">[READY]</text>
+
+  <text x="82" y="151" fill="#5d5d5d" font-family="Cascadia Code, Consolas, monospace" font-size="20">PS C:\WDT&gt; .\Invoke-WindowsDiagnostics.ps1</text>
+  <text x="82" y="230" fill="#f1f1f1" font-family="Cascadia Code, Consolas, monospace" font-size="54" font-weight="800">See what Windows</text>
+  <text x="82" y="292" fill="#f1f1f1" font-family="Cascadia Code, Consolas, monospace" font-size="54" font-weight="800">is doing.</text>
+  <text x="82" y="354" fill="#33e6e6" font-family="Cascadia Code, Consolas, monospace" font-size="54" font-weight="800">Change nothing.</text>
+  <text x="82" y="414" fill="#858d8d" font-family="Cascadia Code, Consolas, monospace" font-size="21">Read-only diagnostics · Local reports · No telemetry</text>
+
+  <text x="732" y="150" fill="#33e6e6" font-family="Cascadia Code, Consolas, monospace" font-size="20" font-weight="700">DIAGNOSTICS</text>
+  <text x="1092" y="150" fill="#33e6e6" font-family="Cascadia Code, Consolas, monospace" font-size="18" font-weight="700">10 / 10</text>
+  <path d="M732 170H1194" stroke="#5d5d5d"/>
+  <g font-family="Cascadia Code, Consolas, monospace" font-size="20" font-weight="700">
+    <text x="732" y="214" fill="#25ff45">[x]</text><text x="782" y="214" fill="#f1f1f1">System information</text>
+    <text x="732" y="254" fill="#25ff45">[x]</text><text x="782" y="254" fill="#f1f1f1">Security posture</text>
+    <text x="732" y="294" fill="#25ff45">[x]</text><text x="782" y="294" fill="#f1f1f1">Performance snapshot</text>
+    <text x="732" y="334" fill="#25ff45">[x]</text><text x="782" y="334" fill="#f1f1f1">Network context</text>
+    <text x="732" y="374" fill="#25ff45">[x]</text><text x="782" y="374" fill="#f1f1f1">Disk health</text>
+    <text x="732" y="414" fill="#25ff45">[x]</text><text x="782" y="414" fill="#ffff24">RUN DIAGNOSTICS</text>
   </g>
-  <text x="930" y="502" fill="#67b7ff" font-family="Cascadia Code, Consolas, monospace" font-size="25">0x0bug / WDT</text>
+
+  <text x="82" y="520" fill="#25ff45" font-family="Cascadia Code, Consolas, monospace" font-size="20" font-weight="700">[x] READ-ONLY</text>
+  <text x="330" y="520" fill="#25ff45" font-family="Cascadia Code, Consolas, monospace" font-size="20" font-weight="700">[x] LOCAL</text>
+  <text x="512" y="520" fill="#25ff45" font-family="Cascadia Code, Consolas, monospace" font-size="20" font-weight="700">[x] PRIVATE</text>
+  <text x="82" y="560" fill="#33e6e6" font-family="Cascadia Code, Consolas, monospace" font-size="20">github.com/0x0bug/windows-diagnostics-toolkit</text>
+  <text x="1085" y="560" fill="#5d5d5d" font-family="Cascadia Code, Consolas, monospace" font-size="20">MIT</text>
 </svg>
