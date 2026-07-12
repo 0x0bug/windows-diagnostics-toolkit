@@ -1,20 +1,6 @@
 [CmdletBinding()]
 param()
 
-function Test-WdtAllowedW32tmCommand {
-    param([Parameter(Mandatory = $true)][System.Management.Automation.Language.CommandAst]$CommandAst)
-
-    if ((Split-Path -Leaf ($CommandAst.GetCommandName() -replace '/', '\\')) -ine 'w32tm.exe') { return $false }
-    $elements = @($CommandAst.CommandElements)
-    if ($elements.Count -notin @(3, 4)) { return $false }
-    foreach ($element in @($elements | Select-Object -Skip 1)) {
-        if ($element -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) { return $false }
-    }
-
-    return ($elements.Count -eq 3 -and $elements[1].Value -eq '/query' -and $elements[2].Value -eq '/source') -or
-        ($elements.Count -eq 4 -and $elements[1].Value -eq '/query' -and $elements[2].Value -eq '/status' -and $elements[3].Value -eq '/verbose')
-}
-
 function Test-WdtAllowedNetshCommand {
     param([Parameter(Mandatory = $true)][System.Management.Automation.Language.CommandAst]$CommandAst)
 
@@ -245,6 +231,12 @@ function Test-WdtAllowedNewObjectCommand {
         $CommandAst.CommandElements.Count -eq 2) {
         return $true
     }
+    if ($typeName -in @('System.Diagnostics.ProcessStartInfo', 'System.Diagnostics.Process') -and
+        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
+        (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-W32tmQuery' -and
+        $CommandAst.CommandElements.Count -eq 2) {
+        return $true
+    }
 
     return $false
 }
@@ -328,7 +320,7 @@ function Get-WdtCommandSafetyIssue {
     }
 
     $leaf = Split-Path -Leaf ($rawName -replace '/', '\\')
-    if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Ampersand -and $leaf -notin @('w32tm.exe', 'netsh.exe')) { return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts.' }
+    if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Ampersand -and $leaf -ne 'netsh.exe') { return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts.' }
 
     if ($leaf -eq 'Invoke-CimMethod') {
         if (Test-WdtAllowedBitLockerCimQuery $CommandAst $ScriptPath $RepositoryRoot) { return }
@@ -350,7 +342,7 @@ function Get-WdtCommandSafetyIssue {
 
     if ($leaf -eq 'Clear-Host') {
         if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
-            (Get-WdtEnclosingFunctionName $CommandAst) -in @('Show-WdtTuiScreen', 'Invoke-WdtInteractiveSession') -and
+            (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Show-WdtTuiFrame' -and
             $CommandAst.Redirections.Count -eq 0) { return }
         return New-WdtSafetyIssue $CommandAst 'Clear-Host is only allowed in approved TUI rendering functions without redirection.'
     }
@@ -367,10 +359,9 @@ function Get-WdtCommandSafetyIssue {
         return New-WdtSafetyIssue $CommandAst 'New-Object type is not in the reviewed safe-type allowlist.'
     }
 
-    if ($leaf -in @('w32tm.exe', 'netsh.exe')) {
+    if ($leaf -eq 'netsh.exe') {
         if (-not (Test-WdtAllowedNativeRedirection $CommandAst)) { return New-WdtSafetyIssue $CommandAst 'PowerShell redirection is not permitted in production scripts.' }
-        if ($leaf -eq 'w32tm.exe' -and (Test-WdtAllowedW32tmCommand $CommandAst)) { return }
-        if ($leaf -eq 'netsh.exe' -and (Test-WdtAllowedNetshCommand $CommandAst)) { return }
+        if (Test-WdtAllowedNetshCommand $CommandAst) { return }
         return New-WdtSafetyIssue $CommandAst 'Native executable arguments are not an allowed read-only form.'
     }
 
@@ -401,8 +392,24 @@ function Get-WdtMemberSafetyIssue {
         $typeName = $MemberAst.Expression.TypeName.FullName
         if ($typeName -eq 'System.Console' -and $member -eq 'ReadKey' -and
             (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
-            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtInteractiveSession' -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Wait-WdtTuiEvent' -and
             $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -ceq '$true') {
+            return
+        }
+        if ($typeName -eq 'System.Console' -and $member -eq 'SetCursorPosition' -and
+            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Show-WdtTuiFrame' -and
+            $argumentCount -eq 2 -and
+            $MemberAst.Arguments[0] -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $MemberAst.Arguments[0].VariablePath.UserPath -ceq 'column' -and
+            $MemberAst.Arguments[1] -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $MemberAst.Arguments[1].VariablePath.UserPath -ceq 'row') {
+            return
+        }
+        if ($typeName -eq 'System.Text.Encoding' -and $member -eq 'GetEncoding' -and
+            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Get-WdtOemEncoding' -and
+            $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -ceq '$oemCodePage') {
             return
         }
         if ($typeName -eq 'System.IO.File' -and $member -eq 'WriteAllLines' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and $argumentCount -eq 3) {
@@ -441,6 +448,17 @@ function Get-WdtMemberSafetyIssue {
 
     $receiver = if ($MemberAst.Expression -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Expression.VariablePath.UserPath } else { '' }
     if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return }
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-W32tmQuery' -and
+        (($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0) -or
+            ($member -eq 'Dispose' -and $receiver -in @('process', 'stdoutReader', 'stderrReader') -and $argumentCount -eq 0))) {
+        return
+    }
+    if ($member -eq 'GetString' -and $receiver -ceq 'Encoding' -and $argumentCount -eq 1 -and
+        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'ConvertFrom-WdtOemBytes') {
+        return
+    }
 
     $safeInstanceMethods = @(
         'Add',
@@ -476,6 +494,26 @@ function Get-WdtMemberSafetyIssue {
     return New-WdtSafetyIssue $MemberAst 'Instance method is not in the reviewed safe allowlist.'
 }
 
+function Get-WdtConsolePropertySafetyIssue {
+    param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot)
+
+    if ($MemberAst.Expression -isnot [System.Management.Automation.Language.TypeExpressionAst]) { return }
+    if ($MemberAst.Expression.TypeName.FullName -ne 'System.Console') { return }
+    $member = [string]$MemberAst.Member.Value
+    $isTuiScript = Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1'
+    $enclosingFunction = Get-WdtEnclosingFunctionName $MemberAst
+
+    if ($member -eq 'CursorVisible') {
+        if ($isTuiScript -and $enclosingFunction -ceq 'Invoke-WdtInteractiveSession') { return }
+        return New-WdtSafetyIssue $MemberAst 'Console cursor visibility is only allowed in Invoke-WdtInteractiveSession.'
+    }
+
+    if ($member -eq 'KeyAvailable') {
+        if ($isTuiScript -and $enclosingFunction -ceq 'Wait-WdtTuiEvent') { return }
+        return New-WdtSafetyIssue $MemberAst 'Console key availability is only allowed in Wait-WdtTuiEvent.'
+    }
+}
+
 function Get-WdtSafetyIssues {
     param([Parameter(Mandatory = $true)]$Ast, [Parameter(Mandatory = $true)][string]$ScriptPath, [Parameter(Mandatory = $true)][string]$RepositoryRoot)
     $localFunctionNames = @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
@@ -502,6 +540,7 @@ function Get-WdtSafetyIssues {
     }
     foreach ($command in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))) { Get-WdtCommandSafetyIssue $command $ScriptPath $RepositoryRoot $localFunctionNames }
     foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtMemberSafetyIssue $member $ScriptPath $RepositoryRoot }
+    foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.MemberExpressionAst] -and $n -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtConsolePropertySafetyIssue $member $ScriptPath $RepositoryRoot }
     foreach ($variable in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -like 'function:*' }, $true))) {
         New-WdtSafetyIssue $variable 'Dynamic function provider access is not allowed in production scripts.'
     }

@@ -28,7 +28,9 @@ cd windows-diagnostics-toolkit
 ```
 
 Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default; the menu lets you change the selected modules and output directory.
-The TUI uses a normal layout from 60x25 and a compact layout from 40x18. It uses console colors when available and keeps the same text markers in monochrome terminals. Below 40x18 it asks you to resize the window before showing the menu.
+The TUI uses a two-column Wide dashboard from 110x28, a single-column Normal layout from 60x25, and a viewport-based Compact layout from 40x18. A terminal around 120x30 or larger is recommended for the full dashboard. Below 40x18 it asks you to resize the window before showing the menu.
+
+The interface is ASCII-first: its panels, logo, selection markers, actions, help bar, and fallback do not require Unicode icons or box-drawing characters. Console colors are used when available, while monochrome and unsupported hosts retain the same text and navigation. The layout is adapted for terminal reliability rather than attempting pixel-perfect reproduction of a graphical mockup.
 
 If Windows PowerShell reports that script execution is disabled, use this process-only launch command:
 

@@ -95,9 +95,19 @@ Assert-True ($state.CursorIndex -ge 0 -and $state.CursorIndex -lt $menuCount) 'C
 
 $renderState = New-WdtTuiState -OutputDirectory ('C:\A\Very\Long\Report\Directory\That\Must\Be\Truncated\For\Narrow\Terminals')
 $renderState.Diagnostics[0].Selected = $false
+$wideLayout = Get-WdtTuiLayout -State $renderState -Width 120 -Height 30
 $normalLayout = Get-WdtTuiLayout -State $renderState -Width 80 -Height 25
 $compactLayout = Get-WdtTuiLayout -State $renderState -Width 40 -Height 18
+Assert-Equal 'Wide' (Get-WdtTuiLayout -State $renderState -Width 140 -Height 36).Mode '140x36 must select wide layout.'
+Assert-Equal 'Wide' $wideLayout.Mode '120x30 must select wide layout.'
+Assert-Equal 'Wide' (Get-WdtTuiLayout -State $renderState -Width 110 -Height 28).Mode '110x28 must select wide layout.'
+Assert-Equal 'WideShort' (Get-WdtTuiLayout -State $renderState -Width 120 -Height 22).Mode '120x22 must select short wide layout.'
+Assert-Equal 'WideShort' (Get-WdtTuiLayout -State $renderState -Width 150 -Height 25).Mode '150x25 must select short wide layout.'
+Assert-Equal 'Wide' (Get-WdtTuiLayout -State $renderState -Width 150 -Height 36).Mode '150x36 must select full wide layout.'
+Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 109 -Height 28).Mode '109x28 must select normal layout.'
 Assert-Equal 'Normal' $normalLayout.Mode '80x25 must select normal layout.'
+Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 68 -Height 25).Mode '68x25 must select normal layout.'
+Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 84 -Height 25).Mode '84x25 must select normal layout.'
 Assert-Equal 'Normal' (Get-WdtTuiLayout -State $renderState -Width 60 -Height 25).Mode '60x25 must select normal layout.'
 Assert-Equal 'Compact' (Get-WdtTuiLayout -State $renderState -Width 59 -Height 25).Mode '59x25 must select compact layout.'
 Assert-Equal 'Compact' $compactLayout.Mode '40x18 must select compact layout.'
@@ -106,21 +116,46 @@ foreach ($size in @(@(39, 18), @(40, 17), @(20, 10), @(5, 5))) {
 }
 Assert-True ($normalLayout.Lines.Count -le 25) 'Normal TUI exceeds a 25-row terminal.'
 Assert-True ($compactLayout.Lines.Count -le 18) 'Compact TUI exceeds its minimum supported height.'
+Assert-True ($wideLayout.Lines.Count -le 30) 'Wide TUI exceeds its terminal height.'
 $compactErrorState = Update-WdtTuiState -State $renderState -Action MoveDown
 $compactErrorState.ErrorMessage = 'Sample compact error'
 $compactErrorLayout = Get-WdtTuiLayout -State $compactErrorState -Width 40 -Height 18
 Assert-True ($compactErrorLayout.Lines.Count -le 18) 'Compact TUI with an error exceeds its minimum supported height.'
 Assert-True ((@($compactErrorLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('Error: Sample compact error')) 'Compact TUI hides its error message.'
-Assert-Equal 3 @($normalLayout.Lines | Select-Object -First 3).Count 'Normal TUI logo must have three lines.'
-foreach ($logoLine in @($normalLayout.Lines | Select-Object -First 3)) {
-    $logoText = ConvertTo-WdtTuiPlainText -Line $logoLine
-    Assert-True ($logoText.Length -le 32) 'TUI logo is wider than 32 characters.'
+Assert-Equal 'Unicode' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -HasWtSession $false -TermProgram '' -OutputEncodingWebName 'utf-8' -Override '') 'Interactive UTF-8 without WT_SESSION did not enable Unicode.'
+Assert-Equal 'Unicode' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -HasWtSession $true -TermProgram '' -OutputEncodingWebName 'utf-8' -Override auto) 'WT_SESSION did not remain a positive Unicode signal.'
+Assert-Equal 'Unicode' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -HasWtSession $false -TermProgram 'Windows_Terminal' -OutputEncodingWebName 'utf8' -Override auto) 'TERM_PROGRAM did not remain a positive Unicode signal.'
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $true -HasWtSession $true -TermProgram 'Windows_Terminal' -OutputEncodingWebName 'utf-8' -Override auto) 'Redirected output enabled Unicode.'
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -HasWtSession $true -TermProgram 'Windows_Terminal' -OutputEncodingWebName 'ibm866' -Override auto) 'Non-UTF-8 output enabled Unicode.'
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -HasWtSession $true -TermProgram 'Windows_Terminal' -OutputEncodingWebName 'utf-8' -Override ascii) 'ASCII override was ignored.'
+Assert-Equal 'Unicode' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -HasWtSession $false -TermProgram '' -OutputEncodingWebName '' -Override unicode) 'Unicode override was ignored for interactive output.'
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $true -HasWtSession $false -TermProgram '' -OutputEncodingWebName 'utf-8' -Override unicode) 'Unicode override bypassed redirected-output safety.'
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -HasWtSession $false -TermProgram '' -OutputEncodingWebName 'unknown' -Override invalid) 'Invalid override did not safely fall back to automatic ASCII detection.'
+$asciiLogo = @(Get-WdtTuiLogo -Mode Ascii)
+$unicodeLogo = @(Get-WdtTuiLogo -Mode Unicode)
+Assert-Equal 6 $asciiLogo.Count 'ASCII logo must have six rows.'
+Assert-Equal 6 $unicodeLogo.Count 'Unicode logo must have six rows.'
+foreach ($logoText in $asciiLogo) {
     Assert-True ($logoText -match '^[ -~]+$') 'TUI logo must be ASCII only.'
-    Assert-Equal 'Cyan' $logoLine.Segments[0].Color 'TUI logo must be cyan.'
 }
+$asciiWide = Get-WdtTuiLayout -State $renderState -Width 110 -Height 28 -LogoMode Ascii
+$unicodeWide = Get-WdtTuiLayout -State $renderState -Width 110 -Height 28 -LogoMode Unicode
+foreach ($logoLayout in @($asciiWide, $unicodeWide)) {
+    Assert-True ($logoLayout.Lines.Count -le 28) 'Wide logo layout exceeds 110x28.'
+    foreach ($line in @($logoLayout.Lines)) {
+        Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le 109) 'Wide logo layout exceeds safe render width.'
+    }
+}
+$asciiWideText = @($asciiWide.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+$unicodeWideText = @($unicodeWide.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True ($asciiWideText.Contains($asciiLogo[0])) 'Forced ASCII logo is missing from Wide.'
+Assert-True ($unicodeWideText.Contains($unicodeLogo[0])) 'Forced Unicode logo is missing from Wide.'
+$shortWideText = @((Get-WdtTuiLayout -State $renderState -Width 120 -Height 22 -LogoMode Unicode).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True (-not $shortWideText.Contains($unicodeLogo[0]) -and -not $shortWideText.Contains($asciiLogo[0])) 'WideShort unexpectedly uses a full logo.'
+$wideScreen = @($wideLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
 $normalScreen = @($normalLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
 $compactScreen = @($compactLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
-foreach ($text in @('Windows Diagnostics Toolkit', 'Read-only | Local reports | No telemetry', '[ ]', '[x]', 'Privacy Mode', 'Markdown report', 'Output:', 'Run diagnostics', 'Exit')) {
+foreach ($text in @('Windows Diagnostics Toolkit', 'Read-only | Local reports | No telemetry', '[ ]', '[x]', 'Privacy Mode', 'Markdown report', 'Output:', 'RUN DIAGNOSTICS', 'Exit')) {
     Assert-True ($normalScreen.Contains($text)) ("Normal TUI rendering is missing: {0}" -f $text)
 }
 Assert-True ($compactScreen.Contains('WDT - Windows Diagnostics Toolkit')) 'Compact TUI header is missing.'
@@ -128,13 +163,25 @@ Assert-True ($compactScreen.Contains('Selected:')) 'Compact TUI status is missin
 Assert-True ($compactScreen.Contains('Items ')) 'Compact TUI viewport indicator is missing.'
 Assert-True ($compactScreen.Contains('...')) 'Narrow TUI did not truncate the output path.'
 Assert-True (-not ($normalScreen -match "`e\[")) 'TUI model must not contain ANSI sequences.'
+foreach ($text in @('DIAGNOSTICS', 'OPTIONS', 'OUTPUT', 'RUN DIAGNOSTICS', 'Exit', 'Up/Down Navigate', 'Safe. Local. Transparent.', 'No changes made to your system.')) {
+    Assert-True ($wideScreen.Contains($text)) ("Wide TUI rendering is missing: {0}" -f $text)
+}
+foreach ($diagnostic in @($renderState.Diagnostics)) {
+    Assert-True ($wideScreen.Contains($diagnostic.Label)) ("Wide TUI is missing diagnostic: {0}" -f $diagnostic.Label)
+}
+$selectedCount = @(Get-WdtTuiSelectedModule -State $renderState).Count
+Assert-True ($wideScreen.Contains(('Selected: {0} / 10' -f $selectedCount))) 'Wide selected count is incorrect.'
+Assert-True ($wideScreen.Contains('Narrow\Terminals')) 'Wide output path did not preserve its useful suffix.'
+Assert-True ($wideScreen.Contains('> [ ] System information')) 'Wide active item is not visibly marked.'
+Assert-True (-not ($wideScreen -match "`e\[")) 'Wide layout contains ANSI sequences.'
 $allSegments = @($normalLayout.Lines | ForEach-Object { $_.Segments })
 Assert-True (@($allSegments | Where-Object { $_.Text -eq '>' -and $_.Color -eq 'Yellow' }).Count -eq 0) 'Pointer unexpectedly lost its trailing space contract.'
 Assert-True (@($allSegments | Where-Object { $_.Text -eq '> ' -and $_.Color -eq 'Yellow' }).Count -gt 0) 'Active pointer must be yellow.'
+Assert-True (@($allSegments | Where-Object { $_.Text -like '*System information*' -and $_.Color -eq 'Yellow' }).Count -gt 0) 'Active label must be visually emphasized.'
 Assert-True (@($allSegments | Where-Object { $_.Text -eq '[x]' -and $_.Color -eq 'Green' }).Count -gt 0) 'Selected checkbox must be green.'
 Assert-True (@($allSegments | Where-Object { $_.Text -eq '[ ]' -and $_.Color -eq 'DarkGray' }).Count -gt 0) 'Unselected checkbox must be dark gray.'
-Assert-True (@($allSegments | Where-Object { $_.Text -like '*System information*' -and $_.Color -eq 'Gray' }).Count -gt 0) 'Unselected module text must be gray.'
-Assert-True (@($allSegments | Where-Object { $_.Text -eq 'Run diagnostics' -and $_.Color -eq 'Green' }).Count -gt 0) 'Run action must be green.'
+Assert-True (@($allSegments | Where-Object { $_.Text -like '*Crashes and hangs*' -and $_.Color -eq 'Gray' }).Count -gt 0) 'Unselected module text must be gray.'
+Assert-True (@($allSegments | Where-Object { $_.Text -eq 'RUN DIAGNOSTICS' -and $_.Color -eq 'Green' }).Count -gt 0) 'Run action must be green.'
 $privacyOffState = $renderState
 for ($move = 0; $move -lt 10; $move++) { $privacyOffState = Update-WdtTuiState -State $privacyOffState -Action MoveDown }
 $privacyOffState = Update-WdtTuiState -State $privacyOffState -Action ToggleCurrent
@@ -142,10 +189,82 @@ Assert-True (@((Get-WdtTuiLayout -State $privacyOffState -Width 80 -Height 25).L
 $errorState = Update-WdtTuiState -State $renderState -Action MoveDown
 $errorState.ErrorMessage = 'Sample error'
 Assert-True (@((Get-WdtTuiLayout -State $errorState -Width 80 -Height 25).Lines | ForEach-Object { $_.Segments } | Where-Object { $_.Color -eq 'Red' }).Count -gt 0) 'Error must have a red segment.'
-$warningResult = [pscustomobject]@{ ExitCode = 1 }
-Assert-Equal 'Yellow' (Get-WdtTuiRunResultLayout -Result $warningResult)[0].Segments[0].Color 'Partial result must be yellow.'
+$warningResult = [pscustomobject]@{ ExitCode = 1; TextReportPath = 'C:\Reports\report.txt'; MarkdownReportPath = 'C:\Reports\report.md'; WarningCount = 2; ErrorCount = 1; ElapsedTime = [timespan]::FromSeconds(5) }
+Assert-Equal 'Yellow' (Get-WdtTuiRunResultLayout -Result $warningResult).Lines[1].Segments[0].Color 'Partial result must be yellow.'
+$successResult = [pscustomobject]@{ ExitCode = 0; TextReportPath = 'C:\Reports\report.txt'; MarkdownReportPath = 'C:\Reports\report.md'; WarningCount = 0; ErrorCount = 0; ElapsedTime = [timespan]::FromSeconds(5) }
+$statusLayouts = @(
+    (Get-WdtTuiRunningLayout -SelectedCount 7 -Width 40),
+    (Get-WdtTuiRunResultLayout -Result $successResult -Width 40),
+    (Get-WdtTuiRunResultLayout -Result $warningResult -Width 40),
+    (Get-WdtTuiErrorLayout -Message ('Failure ' * 20) -Width 40)
+)
+foreach ($statusLayout in $statusLayouts) {
+    Assert-True ($statusLayout.Lines.Count -le 18) ("Status layout is too tall: {0}" -f $statusLayout.Mode)
+    foreach ($line in @($statusLayout.Lines)) {
+        Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le 40) ("Status layout line is too wide: {0}" -f $statusLayout.Mode)
+    }
+}
+$runningText = @((Get-WdtTuiRunningLayout -SelectedCount 7 -Width 80).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
+Assert-True ($runningText.Contains('Selected modules: 7')) 'Running screen is missing selected module count.'
+Assert-True ($runningText.Contains('Diagnostics are running. This may take a moment.')) 'Running screen is missing honest status guidance.'
+Assert-True (-not $runningText.Contains('Progress:')) 'Running screen contains misleading progress.'
 foreach ($width in 1..5) { foreach ($line in @((Get-WdtTuiLayout -State $renderState -Width $width -Height 5).Lines)) { Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $width) 'Too-small text exceeded its width.' } }
-foreach ($size in @(@(80, 25), @(60, 25), @(59, 25), @(40, 18), @(39, 18), @(40, 17), @(20, 10), @(5, 5))) { foreach ($line in @((Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1]).Lines)) { Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $size[0]) ("Layout exceeded {0} columns." -f $size[0]) } }
+foreach ($size in @(@(140, 36), @(120, 30), @(110, 28), @(120, 22), @(150, 25), @(150, 36), @(109, 28), @(84, 25), @(80, 25), @(68, 25), @(60, 25), @(59, 25), @(40, 18), @(39, 18), @(40, 17), @(20, 10), @(5, 5))) {
+    $sizedLayout = Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1]
+    Assert-True ($sizedLayout.Lines.Count -le $size[1]) ("Layout exceeded {0} rows." -f $size[1])
+    $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $size[0]
+    foreach ($line in @($sizedLayout.Lines)) {
+        Assert-True ((ConvertTo-WdtTuiPlainText -Line $line).Length -le $renderWidth) ("Layout exceeded safe render width {0}." -f $renderWidth)
+    }
+    $frame = @(ConvertTo-WdtTuiFrame -Layout $sizedLayout -WindowWidth $size[0])
+    foreach ($frameLine in $frame) {
+        Assert-Equal $renderWidth $frameLine.Length ("Frame line does not use safe render width for {0}." -f $size[0])
+        Assert-True ($frameLine.Length -lt $size[0]) ("Frame writes into the final terminal column for {0}." -f $size[0])
+    }
+}
+
+foreach ($size in @(@(120, 22), @(150, 25), @(150, 36))) {
+    $responsiveLayout = Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1]
+    $responsiveLines = @($responsiveLayout.Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ })
+    foreach ($line in $responsiveLines) {
+        Assert-True ($line.EndsWith('+') -or $line.EndsWith('|')) ("Wide frame lost its right border at {0}x{1}." -f $size[0], $size[1])
+    }
+    $responsiveText = $responsiveLines -join "`n"
+    Assert-True ($responsiveText.Contains(('Selected: {0} / 10' -f $selectedCount))) ("Selected count was truncated at {0}x{1}." -f $size[0], $size[1])
+    Assert-True ($responsiveText.Contains('RUN DIAGNOSTICS') -and $responsiveText.Contains('Enter')) ("Run shortcut was truncated at {0}x{1}." -f $size[0], $size[1])
+    Assert-True ($responsiveText.Contains('Exit') -and $responsiveText.Contains('Esc')) ("Exit shortcut was truncated at {0}x{1}." -f $size[0], $size[1])
+}
+
+$responsiveModes = @('Normal', 'Normal', 'WideShort', 'WideShort', 'Wide', 'WideShort', 'WideShort', 'Normal', 'Normal')
+$responsiveSizes = @(@(68, 25), @(84, 25), @(120, 22), @(150, 25), @(150, 36), @(150, 25), @(120, 22), @(84, 25), @(68, 25))
+$selectionBeforeResponsiveResize = @(Get-WdtTuiSelectedModule -State $renderState) -join ','
+$cursorBeforeResponsiveResize = $renderState.CursorIndex
+for ($index = 0; $index -lt $responsiveSizes.Count; $index++) {
+    $responsiveSize = $responsiveSizes[$index]
+    Assert-Equal $responsiveModes[$index] (Get-WdtTuiLayout -State $renderState -Width $responsiveSize[0] -Height $responsiveSize[1]).Mode 'Responsive mode transition is incorrect.'
+}
+Assert-Equal $selectionBeforeResponsiveResize (@(Get-WdtTuiSelectedModule -State $renderState) -join ',') 'Responsive resize changed selection.'
+Assert-Equal $cursorBeforeResponsiveResize $renderState.CursorIndex 'Responsive resize changed cursor index.'
+
+Assert-Equal 79 (Get-WdtTuiRenderWidth -WindowWidth 80) 'Render width must reserve the final terminal column.'
+$sameFrame = @('alpha     ', 'beta      ')
+Assert-Equal 0 @(Get-WdtTuiFrameOperations -PreviousFrame $sameFrame -CurrentFrame $sameFrame -RenderWidth 10).Count 'Identical frames created update operations.'
+$oneChange = @(Get-WdtTuiFrameOperations -PreviousFrame @('alpha     ', 'beta      ') -CurrentFrame @('alpha     ', 'gamma     ') -RenderWidth 10)
+Assert-Equal 1 $oneChange.Count 'A single changed row did not create exactly one operation.'
+Assert-Equal 1 $oneChange[0].Row 'The changed row index is incorrect.'
+$shortenedLine = @(Get-WdtTuiFrameOperations -PreviousFrame @('abcdefghij') -CurrentFrame @('abc       ') -RenderWidth 10)
+Assert-Equal 1 $shortenedLine.Count 'A shortened row did not create one operation.'
+Assert-Equal 'abc       ' $shortenedLine[0].Text 'A shortened row does not clear its old tail.'
+$shorterFrame = @(Get-WdtTuiFrameOperations -PreviousFrame @('alpha     ', 'obsolete  ') -CurrentFrame @('alpha     ') -RenderWidth 10)
+Assert-Equal 1 $shorterFrame.Count 'A shorter frame did not clear its removed row.'
+Assert-Equal 1 $shorterFrame[0].Row 'Removed frame row index is incorrect.'
+Assert-Equal (' ' * 10) $shorterFrame[0].Text 'Removed frame row is not cleared with spaces.'
+Assert-True ($shorterFrame[0].ClearsRemovedRow) 'Removed frame operation is not marked as a clear.'
+$invalidatedFrame = @(Get-WdtTuiFrameOperations -PreviousFrame @() -CurrentFrame @('alpha     ', 'beta      ') -RenderWidth 10)
+Assert-Equal 2 $invalidatedFrame.Count 'Frame invalidation did not create a full set of row operations.'
+Assert-Equal 'Full' (Get-WdtTuiRenderStrategy -IsOutputRedirected $false -CursorPositioningAvailable $false) 'Unavailable cursor positioning did not select full-render fallback.'
+Assert-Equal 'Full' (Get-WdtTuiRenderStrategy -IsOutputRedirected $true -CursorPositioningAvailable $true) 'Redirected output did not select full-render fallback.'
+Assert-Equal 'Diff' (Get-WdtTuiRenderStrategy -IsOutputRedirected $false -CursorPositioningAvailable $true) 'Interactive cursor support did not select diff rendering.'
 $lastItemState = $renderState
 for ($move = 0; $move -lt 14; $move++) { $lastItemState = Update-WdtTuiState -State $lastItemState -Action MoveDown }
 $lastCompact = Get-WdtTuiLayout -State $lastItemState -Width 40 -Height 18
@@ -159,7 +278,7 @@ $firstCompact = Get-WdtTuiLayout -State $renderState -Width 40 -Height 18
 Assert-True ($renderState.CursorIndex -ge $firstCompact.Viewport.Start -and $renderState.CursorIndex -le $firstCompact.Viewport.End) 'First compact cursor is outside the viewport.'
 $runState = $renderState
 for ($move = 0; $move -lt 13; $move++) { $runState = Update-WdtTuiState -State $runState -Action MoveDown }
-Assert-True ((@((Get-WdtTuiLayout -State $runState -Width 40 -Height 18).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('Run diagnostics')) 'Run is unreachable in compact viewport.'
+Assert-True ((@((Get-WdtTuiLayout -State $runState -Width 40 -Height 18).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n").Contains('RUN DIAGNOSTICS')) 'Run is unreachable in compact viewport.'
 $tooSmallText = @((Get-WdtTuiLayout -State $renderState -Width 20 -Height 10).Lines | ForEach-Object { ConvertTo-WdtTuiPlainText -Line $_ }) -join "`n"
 Assert-True ($tooSmallText.Contains('20x10')) 'TooSmall layout does not report the current size.'
 Assert-Equal 'Exit' (ConvertTo-WdtTuiFallbackAction -Answer 'Exit') 'TooSmall fallback Exit was not recognized.'
@@ -185,13 +304,86 @@ Assert-Equal 'Select' $numberAction.Action 'Visible number did not select an ite
 Assert-Equal 14 $numberAction.Index 'Visible number did not map to the global cursor index.'
 Assert-Equal $null (ConvertTo-WdtTuiFallbackMenuAction -Answer '15' -VisibleIndexes @(0, 1) -RunIndex $runIndex) 'Hidden item number was accepted.'
 
+$selectionBeforeResize = @(Get-WdtTuiSelectedModule -State $renderState) -join ','
+$cursorBeforeResize = $renderState.CursorIndex
+foreach ($size in @(@(140, 36), @(80, 25), @(40, 18), @(20, 10), @(120, 30))) {
+    [void](Get-WdtTuiLayout -State $renderState -Width $size[0] -Height $size[1])
+}
+Assert-Equal $selectionBeforeResize (@(Get-WdtTuiSelectedModule -State $renderState) -join ',') 'Resize layout calculation changed selection.'
+Assert-Equal $cursorBeforeResize $renderState.CursorIndex 'Resize layout calculation changed cursor state.'
+$sameSizeDecision = Get-WdtTuiEventDecision -KeyAvailable $false -InitialWidth 110 -InitialHeight 28 -CurrentWidth 110 -CurrentHeight 28
+Assert-Equal 'Wait' $sameSizeDecision 'An unchanged host size requested a redraw.'
+$resizeDecision = Get-WdtTuiEventDecision -KeyAvailable $false -InitialWidth 110 -InitialHeight 28 -CurrentWidth 80 -CurrentHeight 25
+Assert-Equal 'Resize' $resizeDecision 'A changed host size did not produce a resize event.'
+$keyDuringResizeDecision = Get-WdtTuiEventDecision -KeyAvailable $true -InitialWidth 110 -InitialHeight 28 -CurrentWidth 80 -CurrentHeight 25
+Assert-Equal 'Key' $keyDuringResizeDecision 'An available key was lost when a resize was also detected.'
+if ([System.Console]::IsOutputRedirected) {
+    Assert-True (-not (Test-WdtTuiColorOutput)) 'Redirected output did not disable colors.'
+}
+
 $parameters = ConvertTo-WdtReportParameters -State $renderState
 Assert-Equal @(Get-WdtTuiSelectedModule -State $renderState).Count @($parameters.SelectedModules).Count 'Selected modules were not preserved in report parameters.'
+Assert-True ($parameters.SuppressConsoleOutput) 'TUI report parameters do not suppress runner console output.'
 
 $tokens = $null; $parseErrors = $null
 $entrypointAst = [System.Management.Automation.Language.Parser]::ParseFile($entrypointPath, [ref]$tokens, [ref]$parseErrors)
+$tuiTokens = $null; $tuiParseErrors = $null
+$tuiAst = [System.Management.Automation.Language.Parser]::ParseFile($tuiPath, [ref]$tuiTokens, [ref]$tuiParseErrors)
+$cursorCalls = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] -and $node.Member.Value -eq 'SetCursorPosition' }, $true))
+Assert-Equal 1 $cursorCalls.Count 'TUI must have exactly one SetCursorPosition call.'
+$cursorFunction = $cursorCalls[0].Parent
+while ($null -ne $cursorFunction -and $cursorFunction -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { $cursorFunction = $cursorFunction.Parent }
+Assert-Equal 'Show-WdtTuiFrame' $cursorFunction.Name 'SetCursorPosition is outside the frame renderer.'
+Assert-Equal '$column' $cursorCalls[0].Arguments[0].Extent.Text 'SetCursorPosition column must use the reviewed variable.'
+Assert-Equal '$row' $cursorCalls[0].Arguments[1].Extent.Text 'SetCursorPosition row must use the reviewed variable.'
+$cursorVisibilityReferences = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.MemberExpressionAst] -and $node.Member.Value -eq 'CursorVisible' }, $true))
+Assert-True ($cursorVisibilityReferences.Count -ge 3) 'Cursor visibility is not saved, hidden, and restored.'
+foreach ($reference in $cursorVisibilityReferences) {
+    $owner = $reference.Parent
+    while ($null -ne $owner -and $owner -isnot [System.Management.Automation.Language.FunctionDefinitionAst]) { $owner = $owner.Parent }
+    Assert-Equal 'Invoke-WdtInteractiveSession' $owner.Name 'Cursor visibility is used outside the interactive session.'
+}
+$interactiveFunction = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-WdtInteractiveSession' }, $true))[0]
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{.*CursorVisible\s*=\s*\$originalCursorVisible') 'Cursor visibility is not restored in finally.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)\$completionEvent\s*=\s*Wait-WdtTuiEvent.*?if\s*\(\$completionEvent\.KeyInfo\.Key\s+-eq\s*\[System\.ConsoleKey\]::Escape\).*?if\s*\(\$completionEvent\.KeyInfo\.Key\s+-eq\s*\[System\.ConsoleKey\]::Enter\)') 'Result screen does not wait specifically for Enter or Esc.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)try\s*\{\s*Reset-WdtTuiFrame.*?while\s*\(') 'Interactive session does not invalidate a previous session frame on entry.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)finally\s*\{\s*Reset-WdtTuiFrame') 'Interactive session does not invalidate its frame in finally.'
+Assert-True ($interactiveFunction.Extent.Text -match '(?s)catch\s*\{.*?Reset-WdtTuiFrame\s*\r?\n\s*Show-WdtTuiFrame.*?-ForceFull\s+\$true') 'Error screen is not force-rendered from a clean frame.'
+$sessionText = $interactiveFunction.Extent.Text
+$firstFrameInitialization = $sessionText.IndexOf('$isFirstMenuFrame = $true')
+$firstFrameRender = $sessionText.IndexOf('-ForceFull $isFirstMenuFrame')
+$diffFrameTransition = $sessionText.IndexOf('$isFirstMenuFrame = $false')
+Assert-True ($firstFrameInitialization -ge 0) 'Interactive session does not initialize first-frame full rendering.'
+Assert-True ($firstFrameRender -gt $firstFrameInitialization) 'First menu screen does not use the full-render flag.'
+Assert-True ($diffFrameTransition -gt $firstFrameRender) 'Subsequent menu screens are not switched back to diff rendering.'
+$eventWaitFunction = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Wait-WdtTuiEvent' }, $true))[0]
+Assert-True ($null -ne $eventWaitFunction) 'Resize-aware TUI event wait function is missing.'
+Assert-True ($eventWaitFunction.Extent.Text -match '\[System\.Console\]::KeyAvailable') 'TUI event wait does not poll Console.KeyAvailable.'
+Assert-True ($eventWaitFunction.Extent.Text -match 'Start-Sleep\s+-Milliseconds\s+\$PollMilliseconds') 'TUI event wait does not use the bounded polling interval.'
+Assert-True ($eventWaitFunction.Extent.Text -match '(?s)catch\s*\{.*?\[System\.Console\]::ReadKey\(\$true\).*?UsedBlockingFallback\s*=\s*\$true') 'KeyAvailable failure does not use the blocking ReadKey fallback.'
+Assert-True ($sessionText -match '(?s)\$inputEvent\.Type\s+-eq\s*''Resize''.*?Reset-WdtTuiFrame.*?Show-WdtTuiScreen.*?-ForceFull\s+\$true.*?continue') 'Menu resize does not force one clean redraw.'
+Assert-True ($sessionText -match '(?s)\$completionEvent\.Type\s+-eq\s*''Resize''.*?Reset-WdtTuiFrame.*?-ForceFull\s+\$true.*?continue') 'Result or error resize does not force one clean redraw.'
+Assert-True ($tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrame')) 'Renderer does not keep the previous plain-text frame.'
+Assert-True (-not $tuiAst.Extent.Text.Contains('$script:WdtTuiPreviousFrameHeight')) 'Renderer still uses the legacy frame-height buffer.'
+$diffWriter = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Write-WdtTuiDiffRow' }, $true))[0]
+$diffWriteCommands = @($diffWriter.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -eq 'Write-Host' }, $true))
+Assert-True ($diffWriteCommands.Count -gt 0) 'Diff row writer has no output commands.'
+foreach ($writeCommand in $diffWriteCommands) {
+    Assert-True ($writeCommand.Extent.Text -match '(?i)-NoNewline\b') 'Diff row writer contains a newline-producing Write-Host call.'
+}
+$fullWriter = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Write-WdtTuiFullFrame' }, $true))[0]
+Assert-True ($fullWriter.Extent.Text -match '(?s)\$isLastLine\s*=.*?-NoNewline\s+\$isLastLine') 'Full frame writer does not suppress newline after its last row.'
+$resultRenderer = @($tuiAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Show-WdtTuiRunResult' }, $true))[0]
+Assert-True ($resultRenderer.Extent.Text -match '(?s)Reset-WdtTuiFrame.*?Show-WdtTuiFrame.*?-ForceFull\s+\$true') 'Result screen is not force-rendered from a clean frame.'
 $runnerFunction = @($entrypointAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Invoke-WdtReport' }, $true))
 Assert-Equal 1 $runnerFunction.Count 'Invoke-WdtReport is missing.'
+$runnerConsoleCommands = @($runnerFunction[0].FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] -and $node.GetCommandName() -in @('Write-Host', 'Write-Warning') }, $true))
+Assert-Equal 3 $runnerConsoleCommands.Count 'Unexpected runner console output inventory.'
+foreach ($runnerCommand in $runnerConsoleCommands) {
+    $guard = $runnerCommand.Parent
+    while ($null -ne $guard -and $guard -isnot [System.Management.Automation.Language.IfStatementAst]) { $guard = $guard.Parent }
+    Assert-True ($null -ne $guard -and $guard.Extent.Text -match 'SuppressConsoleOutput') 'Runner console output is not guarded for TUI execution.'
+}
 . ([scriptblock]::Create($runnerFunction[0].Extent.Text))
 Assert-Throws { Invoke-WdtReport -SelectedModules @() -OutputDirectory 'C:\Reports' } '*At least one diagnostic module*' 'Empty runner selection was accepted.'
 Assert-Throws { Invoke-WdtReport -SelectedModules @('Unknown') -OutputDirectory 'C:\Reports' } '*Unknown diagnostic module*' 'Unknown runner module was accepted.'
