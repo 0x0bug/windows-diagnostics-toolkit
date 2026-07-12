@@ -84,14 +84,18 @@ function Get-PhysicalDiskInfo {
 
 function Get-StorageReliabilityData {
     param($StorageObject)
-    if ($null -eq $StorageObject -or $null -eq (Get-Command Get-StorageReliabilityCounter -ErrorAction SilentlyContinue)) {
-        return [pscustomobject]@{ Available = $false; Data = $null; Error = $null }
+    if ($null -eq $StorageObject) {
+        return [pscustomobject]@{ Available = $false; Data = $null; Note = 'Reliability counters are not exposed by this storage source.' }
+    }
+    if ($null -eq (Get-Command Get-StorageReliabilityCounter -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]@{ Available = $false; Data = $null; Note = 'Get-StorageReliabilityCounter is unavailable.' }
     }
     try {
         $data = $StorageObject | Get-StorageReliabilityCounter -ErrorAction Stop
-        return [pscustomobject]@{ Available = ($null -ne $data); Data = $data; Error = $null }
+        if ($null -eq $data) { return [pscustomobject]@{ Available = $false; Data = $null; Note = 'The storage API returned no reliability counters.' } }
+        return [pscustomobject]@{ Available = $true; Data = $data; Note = $null }
     }
-    catch { return [pscustomobject]@{ Available = $false; Data = $null; Error = $_.Exception.Message } }
+    catch { return [pscustomobject]@{ Available = $false; Data = $null; Note = ('Reliability counters could not be read: {0}' -f $_.Exception.Message) } }
 }
 
 function Get-VolumeInfo {
@@ -169,7 +173,7 @@ $volumes = @(Get-VolumeInfo)
 Write-Section 'Physical Disks'
 if ($physicalDisks.Count -eq 0) {
     Write-Host 'No physical disk information available.'
-    Write-Host 'Completeness: Partial - physical disk status is unavailable.'
+    Write-Host 'Data availability: physical disk status is unavailable.'
 }
 else {
     foreach ($disk in $physicalDisks) {
@@ -188,6 +192,7 @@ else {
         }
         else {
             Write-Host 'Reliability : Unavailable (normal for some USB, RAID, virtual, and controller-backed disks)'
+            if (-not [string]::IsNullOrWhiteSpace([string]$reliability.Note)) { Write-Host ('Collection note: {0}' -f $reliability.Note) }
         }
 
         $healthStatus = [string]$disk.HealthStatus
@@ -208,7 +213,7 @@ else {
 Write-Section 'Volumes'
 if ($volumes.Count -eq 0) {
     Write-Host 'No volume information available.'
-    Write-Host 'Completeness: Partial - volume free-space data is unavailable.'
+    Write-Host 'Data availability: volume free-space data is unavailable.'
 }
 else {
     foreach ($volume in $volumes) {

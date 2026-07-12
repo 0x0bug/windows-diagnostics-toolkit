@@ -428,22 +428,25 @@ function Test-DnsResolution {
     }
 }
 
-function Test-HttpsTcpConnection {
+function Test-TcpEndpointConnection {
     param([Parameter(Mandatory = $true)][string]$Endpoint, [int]$Timeout = 3)
 
     try {
         $uri = New-Object System.Uri -ArgumentList $Endpoint
-        if ($uri.Scheme -ne 'https') { return 'Indeterminate: endpoint must use HTTPS' }
-        $client = New-Object System.Net.Sockets.TcpClient
-        try {
-            $task = $client.ConnectAsync($uri.Host, $(if ($uri.IsDefaultPort) { 443 } else { $uri.Port }))
-            if (-not $task.Wait($Timeout * 1000)) { return 'Unreachable: TCP timeout' }
-            if ($client.Connected) { return 'Reachable' }
-            return 'Unreachable'
-        }
-        finally { $client.Dispose() }
     }
-    catch { return "BlockedOrFiltered: $($_.Exception.Message)" }
+    catch { return "Indeterminate: invalid endpoint - $($_.Exception.Message)" }
+    if ($uri.Scheme -ne 'https' -or [string]::IsNullOrWhiteSpace($uri.Host)) { return 'Indeterminate: endpoint must be an absolute HTTPS URI' }
+
+    $client = New-Object System.Net.Sockets.TcpClient
+    try {
+        $task = $client.ConnectAsync($uri.Host, $(if ($uri.IsDefaultPort) { 443 } else { $uri.Port }))
+        if (-not $task.Wait($Timeout * 1000)) { return 'BlockedOrFiltered: TCP connect timed out' }
+        if ($client.Connected) { return 'Reachable' }
+        return 'Unreachable: TCP connect did not establish a connection'
+    }
+    catch [System.AggregateException] { return "Unreachable: TCP connect failed - $($_.Exception.InnerException.Message)" }
+    catch { return "Indeterminate: TCP test failed internally - $($_.Exception.Message)" }
+    finally { $client.Dispose() }
 }
 
 function Get-NetworkReachabilityClassification {
@@ -452,7 +455,6 @@ function Get-NetworkReachabilityClassification {
         [ValidateSet('Present', 'Absent', 'Unavailable')][string]$DefaultRouteState,
         [string]$DnsStatus,
         [string]$TcpStatus,
-        [string]$IcmpStatus,
         [bool]$ExternalTestsEnabled
     )
     if (-not $ExternalTestsEnabled) { return 'NotTested' }
@@ -567,7 +569,7 @@ if ($NoExternalNetworkTests) {
 }
 else {
     $dnsResult = Test-DnsResolution -Name $DnsTestName
-    $tcpResult = Test-HttpsTcpConnection -Endpoint $HttpsEndpoint -Timeout $TimeoutSeconds
+    $tcpResult = Test-TcpEndpointConnection -Endpoint $HttpsEndpoint -Timeout $TimeoutSeconds
     $icmpResult = Test-HostReachability -Target $IcmpTarget -Timeout $TimeoutSeconds
     Write-Host ('DNS / {0}: {1}' -f $DnsTestName, $dnsResult)
     Write-Host ('TCP HTTPS / {0}: {1}' -f $HttpsEndpoint, $tcpResult)
@@ -583,7 +585,7 @@ else {
     'Absent'
 }
 Write-Host ('Default route state: {0}' -f $defaultRouteState)
-$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -DefaultRouteState $defaultRouteState -DnsStatus $dnsResult -TcpStatus $tcpResult -IcmpStatus $icmpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests)
+$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -DefaultRouteState $defaultRouteState -DnsStatus $dnsResult -TcpStatus $tcpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests)
 Write-Host ('Overall reachability: {0}' -f $classification)
 if ($classification -eq 'Unreachable') {
     Write-WdtFinding -Severity WARN -Code 'NETWORK_CONNECTIVITY_UNREACHABLE' -Message 'Multiple independent network signals indicate connectivity is unavailable.' -Evidence ("Adapter={0}; DefaultRoute={1}; DNS={2}; TCP={3}; ICMP={4}" -f ($adapterConfigurations.Count -gt 0), $defaultRouteState, $dnsResult, $tcpResult, $icmpResult)

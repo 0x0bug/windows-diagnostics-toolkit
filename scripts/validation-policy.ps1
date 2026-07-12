@@ -24,11 +24,19 @@ function Test-WdtEntrypointPath {
     return [string]::Equals([IO.Path]::GetFullPath($ScriptPath), [IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'Invoke-WindowsDiagnostics.ps1')), [StringComparison]::OrdinalIgnoreCase)
 }
 
+function Test-WdtProcessRunnerPath {
+    param([string]$ScriptPath, [string]$RepositoryRoot)
+    return Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\process-runner.ps1'
+}
+
 function Test-WdtAllowedDotSource {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
     if ($CommandAst.InvocationOperator -ne [System.Management.Automation.Language.TokenKind]::Dot -or $CommandAst.CommandElements.Count -ne 1) { return $false }
     $text = $CommandAst.CommandElements[0].Extent.Text
     $allowed = @("`$PSScriptRoot\validation-policy.ps1", "`$PSScriptRoot\report-common.ps1", "`$PSScriptRoot\scripts\report-common.ps1", "`$PSScriptRoot\scripts\diagnostic-catalog.ps1", "`$PSScriptRoot\scripts\tui.ps1")
+    if ($text -eq "`$PSScriptRoot\scripts\process-runner.ps1") {
+        return Test-WdtEntrypointPath $ScriptPath $RepositoryRoot
+    }
     if ($text -notin $allowed) { return $false }
     $scriptsPath = [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'scripts'))
     $scriptDirectory = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptPath))
@@ -228,17 +236,17 @@ function Test-WdtAllowedNewObjectCommand {
     if ($typeName -in $safeTypes) { return $true }
 
     if ($typeName -eq 'char[]' -and
-        (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+        (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
         (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'New-WdtStreamCaptureState' -and
-        $CommandAst.Extent.Text -ceq 'New-Object char[] 4096') { return $true }
+        $CommandAst.Extent.Text -ceq 'New-Object char[] $script:WdtProcessRunnerConfig.StreamBufferSize') { return $true }
 
     if ($typeName -eq 'System.Net.Sockets.TcpClient' -and
         (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\network-check.ps1') -and
-        (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Test-HttpsTcpConnection' -and
+        (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Test-TcpEndpointConnection' -and
         $CommandAst.CommandElements.Count -eq 2) { return $true }
 
     if ($typeName -in @('System.Diagnostics.ProcessStartInfo', 'System.Diagnostics.Process') -and
-        (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+        (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
         (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-DiagnosticScript' -and
         $CommandAst.CommandElements.Count -eq 2) {
         return $true
@@ -333,6 +341,8 @@ function Get-WdtCommandSafetyIssue {
     }
 
     $leaf = Split-Path -Leaf ($rawName -replace '/', '\\')
+    if ($leaf -eq 'Invoke-DiagnosticScript' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return }
+    if ($leaf -in @('Resolve-WdtDiagnosticResult', 'New-WdtFindingObject') -and (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot)) { return }
     if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Ampersand -and $leaf -ne 'netsh.exe') { return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts.' }
 
     if ($leaf -eq 'Invoke-CimMethod') {
@@ -432,10 +442,12 @@ function Get-WdtMemberSafetyIssue {
                 ($pathVariable -ceq 'markdownReportPath' -and $linesVariable -ceq 'markdownLines')
             if ($isReportPair -and $MemberAst.Arguments[2].Extent.Text -ceq '[System.Text.Encoding]::UTF8') { return }
         }
-        if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+        if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
             (($typeName -eq 'System.Diagnostics.Process' -and $member -eq 'GetProcessById' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -or
-             ($typeName -eq 'System.Diagnostics.Stopwatch' -and $member -eq 'StartNew' -and (Get-WdtEnclosingFunctionName $MemberAst) -in @('Invoke-DiagnosticScript', 'Stop-WdtProcessTree')) -or
-             ($typeName -eq 'Security.Principal.WindowsIdentity' -and $member -eq 'GetCurrent' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport'))) { return }
+             ($typeName -eq 'System.Diagnostics.Stopwatch' -and $member -eq 'StartNew' -and (Get-WdtEnclosingFunctionName $MemberAst) -in @('Invoke-DiagnosticScript', 'Stop-WdtProcessTree')))) { return }
+        if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+            $typeName -eq 'Security.Principal.WindowsIdentity' -and $member -eq 'GetCurrent' -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport') { return }
 
         $safeStaticMethods = @(
             'IO.Path::GetExtension',
@@ -464,18 +476,18 @@ function Get-WdtMemberSafetyIssue {
     }
 
     $receiver = if ($MemberAst.Expression -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Expression.VariablePath.UserPath } else { '' }
-    if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return }
-    if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and (
+    if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot)) { return }
+    if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and (
             (((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -and $member -in @('Kill', 'WaitForExit', 'Dispose')) -or
             ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree' -and $member -eq 'Stop') -or
-            ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and $member -in @('Stop', 'Dispose')) -or
-            ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport' -and $member -eq 'IsInRole')
+            ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and $member -in @('Stop', 'Dispose'))
         )) { return }
-    if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+    if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport' -and $member -eq 'IsInRole') { return }
+    if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
         (Get-WdtEnclosingFunctionName $MemberAst) -in @('New-WdtStreamCaptureState', 'Read-WdtCompletedStreamChunks') -and
         $member -eq 'ReadAsync' -and $argumentCount -eq 3) { return }
     if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\network-check.ps1') -and
-        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Test-HttpsTcpConnection' -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Test-TcpEndpointConnection' -and
         $member -in @('ConnectAsync', 'Wait', 'Dispose')) { return }
     if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-W32tmQuery' -and
@@ -483,6 +495,7 @@ function Get-WdtMemberSafetyIssue {
             ($member -eq 'Dispose' -and $receiver -in @('process', 'stdoutReader', 'stderrReader') -and $argumentCount -eq 0))) {
         return
     }
+
     if ($member -eq 'GetString' -and $receiver -ceq 'Encoding' -and $argumentCount -eq 1 -and
         (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'ConvertFrom-WdtOemBytes') {
