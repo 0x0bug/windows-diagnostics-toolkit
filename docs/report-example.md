@@ -37,7 +37,7 @@ OK modules     : 7
 [OK] Windows Update Check - No findings.
 
 == System Information ==
-Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\system-info.ps1
+Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\system\diagnostic.ps1
 Exit code: 0
 
 Windows Diagnostics Toolkit - System Information
@@ -57,7 +57,7 @@ Memory        : 32.00 GB
 GPU           : Example GPU
 
 == Security Posture ==
-Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\security-posture.ps1
+Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\security\diagnostic.ps1
 Exit code: 0
 
 == Defender ==
@@ -75,7 +75,7 @@ Protection status : Off
 Volume status     : FullyDecrypted
 
 == Network Check ==
-Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\network-check.ps1
+Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\network\diagnostic.ps1
 Exit code: 0
 
 == Active Network Adapters ==
@@ -93,7 +93,7 @@ Proxy server   : https=<REDACTED>@proxy.example.invalid:8443
 Auto config URL: https://proxy.example.invalid/config.pac?token=<REDACTED>
 
 == Time Sync Diagnostics ==
-Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\time-sync-diagnostics.ps1
+Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\time\diagnostic.ps1
 Exit code: 0
 
 == Windows Time Service ==
@@ -109,7 +109,7 @@ Source: Local CMOS Clock
 Source: Local CMOS Clock
 
 == Disk Health ==
-Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\disk-health.ps1
+Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\disk\diagnostic.ps1
 Exit code: 0
 
 == Physical Disks ==
@@ -119,7 +119,7 @@ Health     : Healthy
 Size       : 930.00 GB
 
 == Services Check ==
-Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\services-check.ps1
+Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\services\diagnostic.ps1
 Exit code: 0
 
 == Automatic Services Not Running ==
@@ -129,7 +129,7 @@ State       : Stopped
 StartMode   : Auto
 
 == Windows Update Check ==
-Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\windows-update-check.ps1
+Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\updates\diagnostic.ps1
 Exit code: 0
 
 == Pending Reboot ==

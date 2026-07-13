@@ -21,6 +21,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate.ps1
 5. Run the relevant module tests and a temporary-output smoke test.
 6. Remove generated reports before committing.
 
+## Built-in diagnostic modules
+
+Standard diagnostics live under `modules/<slug>/` with a declarative `module.psd1` and one automatically executed `diagnostic.ps1` entrypoint. Module-local helper scripts are allowed, but every package `.ps1` is parsed and checked by the AST safety policy. Do not add external plugin paths, lifecycle callbacks, executable manifest values, or remote loading.
+
+Use `-Module <Id>` for the general CLI selector. Existing individual switches and documented `scripts/*.ps1` paths are compatibility contracts. See [Built-in Diagnostic Module Authoring](docs/module-authoring.md) for the exact ten-field schema, option bindings, containment rules, and test commands.
+
 ## Reports and privacy
 
 Never attach a raw personal diagnostic report to an issue. Generate a combined report with `-PrivacyMode`, review it manually, and remove any remaining data you do not want to publish.

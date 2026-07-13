@@ -105,10 +105,14 @@ Explicit module switches run diagnostics immediately without opening the TUI:
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1 -Module System,Network
+.\Invoke-WindowsDiagnostics.ps1 -Module Events,Updates
 .\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
 .\Invoke-WindowsDiagnostics.ps1 -Network -NoExternalNetworkTests
 .\Invoke-WindowsDiagnostics.ps1 -Network -NetworkDnsTestName www.microsoft.com -NetworkHttpsEndpoint https://www.microsoft.com/ -NetworkIcmpTarget 1.1.1.1
 ```
+
+`-Module` is the general selector for built-in registry IDs. IDs are matched without regard to case, duplicates are removed, and execution follows registry order. It can be combined with the legacy switches below. `-All` discovers every reviewed manifest under `modules/`; external plugin directories are not supported.
 
 Each module has an independent 180-second timeout by default; change it with `-ModuleTimeoutSeconds`. On timeout WDT makes a bounded best-effort cleanup of the process tree it observed, revalidating PID, parent relationship, and creation time before termination. Cleanup failures are reported explicitly; absolute protection from every PID-reuse race is not claimed. Other module results are preserved, and the report records `MODULE_EXECUTION_TIMEOUT`, execution status, duration, and partial completeness.
 
@@ -119,7 +123,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 ```
 
-Without module switches the Windows PowerShell command opens the TUI. With `-All` or one or more module switches it runs directly in command-line mode.
+Without module selectors the Windows PowerShell command opens the TUI. With `-All`, `-Module`, or one or more legacy module switches it runs directly in command-line mode.
 
 Reports are written to the current directory unless `-OutputDirectory` is provided:
 
@@ -169,6 +173,15 @@ Review every report before publishing it. Standalone module output is raw and lo
 
 ## Run selected checks
 
+Use registry IDs for the general selector:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Module System,Network
+.\Invoke-WindowsDiagnostics.ps1 -Module Events,Updates
+```
+
+The existing individual switches remain supported for compatibility:
+
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -System
 .\Invoke-WindowsDiagnostics.ps1 -Security
@@ -196,8 +209,9 @@ The production scripts do not change network, disk, registry, services, schedule
 
 Repository validation includes:
 
+- strict declarative manifest and package-containment checks
 - PowerShell parser checks
-- an AST-based guard against dangerous or mutating commands
+- an AST-based guard against dangerous or mutating commands for every package `.ps1`
 - narrow allowlists for reviewed diagnostic-only native process calls
 - detection of generated reports, logs, temporary files, and backup files left in the repository
 - tests in both PowerShell 7 and Windows PowerShell 5.1
@@ -232,6 +246,7 @@ The GitHub Actions workflow runs validation, dependency-free tests, and a report
 ## Documentation
 
 - [Detailed usage](docs/usage.md)
+- [Built-in module authoring](docs/module-authoring.md)
 - [Anonymized TXT and Markdown report](docs/report-example.md)
 - [Project website and troubleshooting cases](site/index.html)
 - [Contributing](CONTRIBUTING.md)
