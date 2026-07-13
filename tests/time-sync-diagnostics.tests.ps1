@@ -28,7 +28,7 @@ function Test-ContainsLiteral {
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$timeScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\time-sync-diagnostics.ps1'
+$timeScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\time\diagnostic.ps1'
 $scriptSource = Get-Content -LiteralPath $timeScript -Raw
 
 Assert-True -Condition ($scriptSource.Contains("'/query /source'")) -Message 'Time diagnostics must query the configured time source.'

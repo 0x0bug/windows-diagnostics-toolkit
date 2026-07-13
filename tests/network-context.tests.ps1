@@ -28,7 +28,7 @@ function Test-ContainsLiteral {
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$networkScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\network-check.ps1'
+$networkScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\network\diagnostic.ps1'
 $scriptSource = Get-Content -LiteralPath $networkScript -Raw
 
 Assert-True -Condition $scriptSource.Contains('& netsh.exe winhttp show proxy') -Message 'Network diagnostics must use the exact read-only WinHTTP proxy query.'

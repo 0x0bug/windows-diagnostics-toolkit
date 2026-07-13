@@ -116,6 +116,8 @@ jobs:
       - name: Test module parsers, classification, and process runner with PowerShell 7
         shell: pwsh
         run: |
+          .\tests\module-registry.tests.ps1
+          .\tests\module-compatibility.tests.ps1
           .\tests\module-parser.tests.ps1
           .\tests\diagnostic-classification.tests.ps1
           .\tests\process-runner.tests.ps1
@@ -123,6 +125,8 @@ jobs:
       - name: Test module parsers, classification, and process runner with Windows PowerShell 5.1
         shell: powershell
         run: |
+          .\tests\module-registry.tests.ps1
+          .\tests\module-compatibility.tests.ps1
           .\tests\module-parser.tests.ps1
           .\tests\diagnostic-classification.tests.ps1
           .\tests\process-runner.tests.ps1

@@ -121,8 +121,14 @@ Use `-All` or one or more module selectors to skip the TUI:
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -All
 .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
+.\Invoke-WindowsDiagnostics.ps1 -Module System,Network
+.\Invoke-WindowsDiagnostics.ps1 -Module Events,Updates
 .\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
 ```
+
+`-Module` accepts built-in manifest IDs without regard to case. Duplicate IDs are removed and the final execution order comes from the registry, not from argument order. The general selector can be combined with the existing individual switches. `-All` selects every reviewed package discovered under `modules/`.
+
+WDT does not load external plugin directories, current-directory scripts, user-profile modules, or remotely downloaded code. Built-in packages are part of the repository and must pass review, parser checks, and AST safety validation.
 
 Module execution is bounded independently. The default is `-ModuleTimeoutSeconds 180`. After timeout WDT performs a bounded best-effort cleanup of the observed child tree and revalidates PID, ancestry, and creation time immediately before termination. Snapshot races and descendants created after the snapshot cannot be ruled out without stronger OS primitives, so cleanup failure is reported rather than hidden. Results from other modules are kept, and timeout is reported as `MODULE_EXECUTION_TIMEOUT` with duration and `Partial` completeness.
 
@@ -148,6 +154,8 @@ Generated filenames:
 WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.txt
 WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
 ```
+
+See [Built-in Diagnostic Module Authoring](module-authoring.md) for the trusted package and manifest contract.
 
 ## Privacy Mode
 
