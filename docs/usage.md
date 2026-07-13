@@ -291,7 +291,9 @@ pwsh -NoProfile -File .\scripts\disk-health.ps1 `
 
 ### Crash and Hang Diagnostics
 
-Reads Application Error, Windows Error Reporting, Application Hang, BugCheck events, and dump-file metadata. Dump contents are never read.
+Reads Application Error, Windows Error Reporting, Application Hang, BugCheck, available Reliability Monitor records, and dump-file metadata. Event and reliability evidence for the same application failure is deduplicated, then repeated failures are grouped by application, crash or hang type, and failure code when available. Dump contents are never read.
+
+The default lookback is 7 days. A single application crash older than 24 hours remains context; recent or repeated failures can create `WARN`, while `ERROR` is reserved for repeated recent BugChecks. If Reliability Monitor is unavailable, Event Log and dump metadata remain available as the fallback.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Crashes
@@ -307,7 +309,9 @@ pwsh -NoProfile -File .\scripts\crash-hang-diagnostics.ps1 `
 
 ### Event Log Check
 
-Reads recent Critical and Error events from the System and Application logs.
+Reads and groups recent Critical and Error events from the System and Application logs. Groups include provider, Event ID, level, count, first and last occurrence, and one representative message.
+
+The default lookback is 24 hours. An event's Critical or Error level alone does not create a finding; most events remain context. Findings come only from a small documented high-signal subset, and an unavailable log source is reported as unavailable context rather than a system failure.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Events
@@ -316,7 +320,7 @@ pwsh -NoProfile -File .\scripts\event-log-check.ps1
 
 ### Services and Startup
 
-Checks service states, startup entries, and scheduled tasks. The main wrapper enables both optional inventories so the title matches the work performed. `Auto + Stopped` alone is displayed as `Indeterminate`, because trigger-start, delayed, conditional, and intentionally idle services can be stopped normally. WARN requires a pending state or non-zero service exit code.
+Checks service states, startup entries, and scheduled tasks. The main wrapper enables both optional inventories so the title matches the work performed. `Auto + Stopped` alone is displayed as `Indeterminate`, because trigger-start, delayed, conditional, and intentionally idle services can be stopped normally. Pending states are suspicious context; findings require a stronger signal such as an actionable service exit code or the explicitly documented critical RPC service being disabled. Exit code `1077` (not started since boot) remains context. Startup entries and scheduled-task results remain context.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Services
@@ -332,12 +336,33 @@ pwsh -NoProfile -File .\scripts\services-check.ps1 `
 
 ### Windows Update
 
-Reads Windows version, recent installed updates, reboot indicators, update-related services, and optional update events.
+Reads Windows version, recent installed updates, reboot indicators, update-related service context, and confirmed Windows Update installation or download failures. Matching failures are grouped with timestamp range, source, Event ID, update identifier or title, error code, and count.
+
+The default failure lookback is 30 days. A stopped update-related service does not create a warning by itself because Windows can start manual and trigger-start services only when needed. A finding requires a confirmed recent failure, an update-specific pending reboot indicator, or an explicitly unavailable core update infrastructure state. Event-log access failures are shown as unavailable context.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Updates
 pwsh -NoProfile -File .\scripts\windows-update-check.ps1
 ```
+
+Use `-IncludeEventLog` with the standalone script to include representative event messages in addition to the grouped failure fields.
+
+### Finding code migration
+
+This signal-quality update removes availability and generic-severity findings that did not prove a Windows failure. Consumers of finding codes should use the following migration:
+
+| Previous code | Current behavior or code |
+|---|---|
+| `RECENT_CRITICAL_EVENTS`, `RECENT_ERROR_EVENTS` | Generic events are context; documented matches use `EVENT_UNEXPECTED_SHUTDOWN` or `EVENT_FILE_SYSTEM_CORRUPTION` |
+| `EVENT_LOG_SOURCE_UNAVAILABLE` | Unavailable log is context only |
+| `WINDOWS_UPDATE_EVENT_ISSUES` | `WINDOWS_UPDATE_INSTALL_FAILURE` or `WINDOWS_UPDATE_DOWNLOAD_FAILURE` |
+| `WINDOWS_UPDATE_SERVICE_ISSUES` | `WINDOWS_UPDATE_INFRASTRUCTURE_UNAVAILABLE` only for the core-service rule |
+| `WINDOWS_UPDATE_SOURCE_UNAVAILABLE` | Unavailable source is context only |
+| `SERVICE_STATE_CONFIRMED` | `SERVICE_EXIT_CODE_NONZERO` or `CRITICAL_SERVICE_DISABLED`; pending state is context |
+| `SERVICE_INVENTORY_UNAVAILABLE`, `STARTUP_SOURCE_UNAVAILABLE`, `SCHEDULED_TASK_SOURCE_UNAVAILABLE` | Unavailable optional inventory is context only |
+| `CRASH_APPLICATION_EVENTS_UNAVAILABLE`, `CRASH_BUGCHECK_EVENTS_UNAVAILABLE`, `CRASH_DUMP_METADATA_UNAVAILABLE`, `CRASH_RECENT_DUMPS_FOUND` | Source and dump availability is context only |
+
+`PENDING_REBOOT`, `CRASH_APPLICATION_FAILURES_DETECTED`, and `CRASH_BUGCHECK_DETECTED` are retained. Their evidence now includes grouped counts and timestamps; crash severity also accounts for recency and repetition.
 
 ## Troubleshooting
 
