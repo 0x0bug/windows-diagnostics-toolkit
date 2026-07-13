@@ -430,6 +430,11 @@ $incidents = @(Merge-DuplicateCrashRecords @($records.ToArray()) $cutoffUtc)
 $groups = @(Group-CrashRecords $incidents)
 $applicationGroups = @($groups | Where-Object { $_.Kind -in @('Crash', 'Hang') })
 $bugCheckGroups = @($groups | Where-Object { $_.Kind -eq 'BugCheck' })
+$unavailableCrashEventSources = @($sources | Where-Object { $null -ne $_.Result.Error })
+
+if ($unavailableCrashEventSources.Count -eq $sources.Count -and $null -ne $reliability.Error) {
+    Write-WdtFinding -Severity WARN -Code 'CRASH_ASSESSMENT_UNAVAILABLE' -Message 'Crash and hang assessment could not be completed because all primary event and reliability sources were unavailable.' -Evidence ('EventSources={0}/{1} unavailable; ReliabilityMonitor=Unavailable' -f $unavailableCrashEventSources.Count, $sources.Count)
+}
 
 Write-Section 'Summary'
 Write-Host ('Time window         : Last {0} day(s)' -f $SinceDays)

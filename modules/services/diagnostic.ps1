@@ -273,6 +273,10 @@ $runningServices = @(
         Sort-Object -Property Name
 )
 
+if ($null -ne $serviceInventory.Error) {
+    Write-WdtFinding -Severity WARN -Code 'SERVICE_INVENTORY_UNAVAILABLE' -Message 'Services assessment could not be completed because the Win32_Service inventory was unavailable.' -Evidence (ConvertTo-SafeSingleLine -Value $serviceInventory.Error)
+}
+
 if ($nonZeroExitCodeServices.Count -gt 0) {
     $serviceExitCodeEvidence = @(
         $nonZeroExitCodeServices |

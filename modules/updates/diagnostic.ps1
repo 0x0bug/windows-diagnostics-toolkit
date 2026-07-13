@@ -527,6 +527,19 @@ $failureGroups = @(Group-WindowsUpdateFailures -Failures $eventInventory.Failure
 $failureGroupsToShow = @($failureGroups | Select-Object -First $MaxEvents)
 $pendingRebootFindingIndicators = @(Get-PendingRebootFindingIndicators -Indicators $pendingReboot.Indicators)
 $infrastructureState = Get-WindowsUpdateInfrastructureState -Services $updateServices.Services -InventoryAvailable ($null -eq $updateServices.Error)
+$updateSpecificRebootIndicatorNames = @(
+    'Component Based Servicing RebootPending',
+    'Windows Update Auto Update RebootRequired'
+)
+$unavailableUpdateSpecificRebootIndicators = @(
+    $pendingReboot.Errors |
+        Where-Object { $updateSpecificRebootIndicatorNames -contains [string]$_.Name }
+)
+$failureLogErrorCount = @($eventInventory.Errors).Count
+$failureLogCount = @($eventInventory.Logs).Count
+$allFailureLogsUnavailable = $failureLogErrorCount -eq $failureLogCount
+$serviceInventoryUnavailable = $null -ne $updateServices.Error
+$updateSpecificRebootIndicatorsUnavailable = $unavailableUpdateSpecificRebootIndicators.Count -eq $updateSpecificRebootIndicatorNames.Count
 
 $unavailableSources = New-Object System.Collections.Generic.List[string]
 if ($null -ne $windowsVersion.Error) {
@@ -543,6 +556,10 @@ if ($null -ne $updateServices.Error) {
 }
 foreach ($errorItem in @($eventInventory.Errors)) {
     $unavailableSources.Add(('Event log/{0}: {1}' -f $errorItem.LogName, (ConvertTo-SafeSingleLine -Value $errorItem.Error)))
+}
+
+if ($allFailureLogsUnavailable -and $serviceInventoryUnavailable -and $updateSpecificRebootIndicatorsUnavailable) {
+    Write-WdtFinding -Severity WARN -Code 'WINDOWS_UPDATE_ASSESSMENT_UNAVAILABLE' -Message 'Windows Update assessment could not be completed because all confirming source groups were unavailable.' -Evidence ('FailureLogs={0}/{1} unavailable; ServiceInventory=Unavailable; UpdateRebootIndicators={2}/{3} unavailable' -f $failureLogErrorCount, $failureLogCount, $unavailableUpdateSpecificRebootIndicators.Count, $updateSpecificRebootIndicatorNames.Count)
 }
 
 if ($pendingRebootFindingIndicators.Count -gt 0) {

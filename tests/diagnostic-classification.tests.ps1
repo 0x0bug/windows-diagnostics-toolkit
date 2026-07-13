@@ -79,6 +79,18 @@ try {
             $env:WDT_FINDING_PROTOCOL = '1'
             & $eventsScript -SinceHours 24 6>&1 | ForEach-Object { [string]$_ }
         })
+
+    $eventAssessmentUnavailableOutput = @(& {
+            function Get-WinEvent {
+                [CmdletBinding()]
+                param([hashtable]$FilterHashtable, [int]$MaxEvents)
+
+                throw 'Fixture all event sources unavailable.'
+            }
+
+            $env:WDT_FINDING_PROTOCOL = '1'
+            & $eventsScript -SinceHours 24 6>&1 | ForEach-Object { [string]$_ }
+        })
 }
 finally {
     $env:WDT_FINDING_PROTOCOL = $previousProtocolMode
@@ -87,7 +99,14 @@ $eventModuleText = $eventModuleOutput -join "`n"
 Assert-True ($eventModuleText.Contains('EVENT_UNEXPECTED_SHUTDOWN')) 'A documented high-signal event must emit a finding.'
 Assert-True (-not $eventModuleText.Contains('RECENT_ERROR_EVENTS')) 'A generic Error event must not emit the legacy blanket finding.'
 Assert-True (-not $eventModuleText.Contains('EVENT_LOG_SOURCE_UNAVAILABLE')) 'Partial event-log access must remain context.'
+Assert-True (-not $eventModuleText.Contains('EVENT_LOG_ASSESSMENT_UNAVAILABLE')) 'One unavailable Event Log source with working fallbacks must remain context.'
 Assert-True (-not ($eventModuleText -match '"Severity":"ERROR"')) 'Partial event-log access must not create ERROR.'
+$eventAssessmentUnavailableText = $eventAssessmentUnavailableOutput -join "`n"
+Assert-Equal 1 ([regex]::Matches($eventAssessmentUnavailableText, '@@WDT_FINDING@@').Count) 'Complete Event Log source loss must emit exactly one finding.'
+Assert-Equal 1 ([regex]::Matches($eventAssessmentUnavailableText, 'EVENT_LOG_ASSESSMENT_UNAVAILABLE').Count) 'Complete Event Log source loss must emit one assessment-level code.'
+Assert-True ($eventAssessmentUnavailableText.Contains('assessment could not be completed')) 'Event Log availability message must describe an incomplete assessment.'
+Assert-True ($eventAssessmentUnavailableText.Contains('"Severity":"WARN"')) 'Event Log assessment availability must emit WARN.'
+Assert-True (-not ($eventAssessmentUnavailableText -match '"Severity":"ERROR"')) 'Event Log availability must never create ERROR.'
 
 # Windows Update fixtures: only confirmed event templates, update-specific reboot
 # indicators, and explicit core-infrastructure failures create findings.
@@ -194,6 +213,43 @@ try {
             $env:WDT_FINDING_PROTOCOL = '1'
             & $updatesScript -SinceDays 30 -MaxEvents 1 6>&1 | ForEach-Object { [string]$_ }
         })
+
+    $partialUpdateAvailabilityOutput = @(& {
+            function Get-CimInstance {
+                [CmdletBinding()]
+                param([string]$ClassName)
+                if ($ClassName -eq 'Win32_OperatingSystem') { return [pscustomobject]@{ Caption='Fixture Windows'; Version='10.0'; BuildNumber='1'; InstallDate=$null; LastBootUpTime=(Get-Date).AddHours(-2) } }
+                return [pscustomobject]@{ Name='wuauserv'; DisplayName='Windows Update'; State='Stopped'; StartMode='Manual'; ExitCode=0 }
+            }
+            function Get-HotFix { [CmdletBinding()] param(); return @() }
+            function Test-Path { [CmdletBinding()] param([string]$LiteralPath); return $false }
+            function Get-ItemProperty { [CmdletBinding()] param([string]$LiteralPath); return [pscustomobject]@{} }
+            function Get-WinEvent {
+                [CmdletBinding()]
+                param([hashtable]$FilterHashtable)
+                if ($FilterHashtable.LogName -eq 'System') { throw 'Fixture System update log unavailable.' }
+                return @()
+            }
+
+            $env:WDT_FINDING_PROTOCOL = '1'
+            & $updatesScript -SinceDays 30 6>&1 | ForEach-Object { [string]$_ }
+        })
+
+    $updateAssessmentUnavailableOutput = @(& {
+            function Get-CimInstance {
+                [CmdletBinding()]
+                param([string]$ClassName)
+                if ($ClassName -eq 'Win32_OperatingSystem') { return [pscustomobject]@{ Caption='Fixture Windows'; Version='10.0'; BuildNumber='1'; InstallDate=$null; LastBootUpTime=(Get-Date).AddHours(-2) } }
+                throw 'Fixture update service inventory unavailable.'
+            }
+            function Get-HotFix { [CmdletBinding()] param(); return @() }
+            function Test-Path { [CmdletBinding()] param([string]$LiteralPath); throw 'Fixture reboot indicator unavailable.' }
+            function Get-ItemProperty { [CmdletBinding()] param([string]$LiteralPath); throw 'Fixture pending rename unavailable.' }
+            function Get-WinEvent { [CmdletBinding()] param([hashtable]$FilterHashtable); throw 'Fixture update event log unavailable.' }
+
+            $env:WDT_FINDING_PROTOCOL = '1'
+            & $updatesScript -SinceDays 30 6>&1 | ForEach-Object { [string]$_ }
+        })
 }
 finally {
     $env:WDT_FINDING_PROTOCOL = $previousProtocolMode
@@ -204,6 +260,15 @@ Assert-Equal 1 ([regex]::Matches($updateModuleText, 'WINDOWS_UPDATE_INSTALL_FAIL
 Assert-True ($updateModuleText.Contains('Displayed groups  : 1')) 'MaxEvents must limit the detailed Windows Update group list.'
 Assert-True ($updateModuleText.Contains('PENDING_REBOOT')) 'An update-specific reboot indicator must emit its own finding.'
 Assert-True (-not $updateModuleText.Contains('WINDOWS_UPDATE_INFRASTRUCTURE_UNAVAILABLE')) 'Stopped Manual wuauserv with ExitCode 1077 must not emit WARN.'
+$partialUpdateAvailabilityText = $partialUpdateAvailabilityOutput -join "`n"
+Assert-True (-not $partialUpdateAvailabilityText.Contains('WINDOWS_UPDATE_ASSESSMENT_UNAVAILABLE')) 'One unavailable update channel with working source groups must remain context.'
+Assert-True (-not $partialUpdateAvailabilityText.Contains('@@WDT_FINDING@@')) 'Partial Windows Update source availability must not emit a finding without a failure signal.'
+$updateAssessmentUnavailableText = $updateAssessmentUnavailableOutput -join "`n"
+Assert-Equal 1 ([regex]::Matches($updateAssessmentUnavailableText, '@@WDT_FINDING@@').Count) 'Complete Windows Update source-group loss must emit exactly one finding.'
+Assert-Equal 1 ([regex]::Matches($updateAssessmentUnavailableText, 'WINDOWS_UPDATE_ASSESSMENT_UNAVAILABLE').Count) 'Complete Windows Update source-group loss must emit one assessment-level code.'
+Assert-True ($updateAssessmentUnavailableText.Contains('assessment could not be completed')) 'Windows Update availability message must describe an incomplete assessment.'
+Assert-True ($updateAssessmentUnavailableText.Contains('"Severity":"WARN"')) 'Windows Update assessment availability must emit WARN.'
+Assert-True (-not ($updateAssessmentUnavailableText -match '"Severity":"ERROR"')) 'Windows Update availability must never create ERROR.'
 
 # Service fixtures: idle and optional inventories remain context; only reviewed
 # exit codes and the one curated critical-service rule create findings.
@@ -232,12 +297,29 @@ try {
             $env:WDT_FINDING_PROTOCOL = '1'
             & $servicesScript -IncludeStartup -IncludeScheduledTasks 6>&1 | ForEach-Object { [string]$_ }
         })
+
+    $serviceInventoryUnavailableOutput = @(& {
+            function Get-CimInstance { [CmdletBinding()] param([string]$ClassName); throw 'Fixture Win32_Service inventory unavailable.' }
+            function Test-Path { [CmdletBinding()] param([string]$LiteralPath); throw 'Fixture startup source unavailable.' }
+            function Get-Command { [CmdletBinding()] param([string]$Name); return $null }
+
+            $env:WDT_FINDING_PROTOCOL = '1'
+            & $servicesScript -IncludeStartup -IncludeScheduledTasks 6>&1 | ForEach-Object { [string]$_ }
+        })
 }
 finally {
     $env:WDT_FINDING_PROTOCOL = $previousProtocolMode
 }
 $serviceModuleText = $serviceModuleOutput -join "`n"
 Assert-True (-not $serviceModuleText.Contains('@@WDT_FINDING@@')) 'Startup entries and scheduled task results without a confirmed service signal must not emit WARN.'
+$serviceInventoryUnavailableText = $serviceInventoryUnavailableOutput -join "`n"
+Assert-Equal 1 ([regex]::Matches($serviceInventoryUnavailableText, '@@WDT_FINDING@@').Count) 'Unavailable core service inventory must emit exactly one finding even when optional sources are unavailable.'
+Assert-Equal 1 ([regex]::Matches($serviceInventoryUnavailableText, 'SERVICE_INVENTORY_UNAVAILABLE').Count) 'Unavailable Win32_Service inventory must emit the core availability code once.'
+Assert-True (-not $serviceInventoryUnavailableText.Contains('STARTUP_SOURCE_UNAVAILABLE')) 'Unavailable startup inventory must remain context only.'
+Assert-True (-not $serviceInventoryUnavailableText.Contains('SCHEDULED_TASK_SOURCE_UNAVAILABLE')) 'Unavailable scheduled-task inventory must remain context only.'
+Assert-True ($serviceInventoryUnavailableText.Contains('assessment could not be completed')) 'Services availability message must describe an incomplete assessment.'
+Assert-True ($serviceInventoryUnavailableText.Contains('"Severity":"WARN"')) 'Unavailable core service inventory must emit WARN.'
+Assert-True (-not ($serviceInventoryUnavailableText -match '"Severity":"ERROR"')) 'Service inventory availability must never create ERROR.'
 
 Import-TestFunctions (Join-Path $repositoryRoot 'modules\network\diagnostic.ps1') @('Get-NetworkReachabilityClassification','Test-TcpEndpointConnection')
 Assert-Equal 'Reachable' (Get-NetworkReachabilityClassification $true 'Unavailable' 'Resolved: 1.2.3.4' 'Reachable' $true) 'Unavailable route inventory must not override working DNS/TCP.'

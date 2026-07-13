@@ -323,6 +323,10 @@ else {
     'Partial'
 }
 
+if ($unavailableLogs.Count -eq $logs.Count -and $null -ne $signalResult.Error) {
+    Write-WdtFinding -Severity WARN -Code 'EVENT_LOG_ASSESSMENT_UNAVAILABLE' -Message 'Event Log assessment could not be completed because all primary event sources were unavailable.' -Evidence 'Unavailable=System, Application, High-signal query'
+}
+
 foreach ($group in @($eventGroups | Where-Object { $_.IsSignal })) {
     $findingEvidence = 'Count={0}; First={1:o}; Last={2:o}; Provider={3}; Id={4}; Level={5}; Logs={6}' -f
         $group.Count,

@@ -179,6 +179,32 @@ try {
             & $crashScript 6>&1 | ForEach-Object { [string]$_ }
         })
 
+    $reliabilityFallbackOutput = @(& {
+            function Get-WinEvent {
+                [CmdletBinding()]
+                param([hashtable]$FilterHashtable, [int]$MaxEvents)
+
+                throw 'Fixture crash event source unavailable.'
+            }
+
+            function Get-CimInstance {
+                [CmdletBinding()]
+                param([string]$Namespace, [string]$ClassName, [string]$Filter)
+
+                return @()
+            }
+
+            function Test-Path {
+                [CmdletBinding()]
+                param([string]$LiteralPath, [string]$PathType)
+
+                return $false
+            }
+
+            $env:WDT_FINDING_PROTOCOL = '1'
+            & $crashScript 6>&1 | ForEach-Object { [string]$_ }
+        })
+
     $unavailableOutput = @(& {
             function Get-WinEvent {
                 [CmdletBinding()]
@@ -213,13 +239,23 @@ $fixtureText = $fixtureOutput -join "`n"
 Assert-True -Condition $fixtureText.Contains('CRASH_APPLICATION_FAILURES_DETECTED') -Message 'Application crash fixture did not emit a WARN finding.'
 Assert-True -Condition $fixtureText.Contains('CRASH_BUGCHECK_DETECTED') -Message 'BugCheck fixture did not emit a separate high-signal finding.'
 Assert-True -Condition ($fixtureText -match 'Reliability Monitor: Unavailable') -Message 'Unavailable Reliability Monitor did not preserve the Event Log fallback.'
+Assert-True -Condition (-not $fixtureText.Contains('CRASH_ASSESSMENT_UNAVAILABLE')) -Message 'Working Event Log sources must suppress the crash assessment availability finding.'
 Assert-True -Condition ($fixtureText -notmatch '"Severity":"ERROR"') -Message 'A single recent BugCheck must not be escalated to ERROR.'
+
+$reliabilityFallbackText = $reliabilityFallbackOutput -join "`n"
+Assert-True -Condition ($reliabilityFallbackText.Contains('Reliability Monitor: Available')) -Message 'Working Reliability Monitor fallback was not reported as available.'
+Assert-True -Condition (-not $reliabilityFallbackText.Contains('CRASH_ASSESSMENT_UNAVAILABLE')) -Message 'Working Reliability Monitor fallback must suppress the crash assessment availability finding.'
+Assert-True -Condition (-not $reliabilityFallbackText.Contains('@@WDT_FINDING@@')) -Message 'Unavailable crash Event Logs with a working empty Reliability fallback must remain context.'
 
 $unavailableText = $unavailableOutput -join "`n"
 foreach ($code in @('CRASH_APPLICATION_EVENTS_UNAVAILABLE', 'CRASH_BUGCHECK_EVENTS_UNAVAILABLE', 'CRASH_DUMP_METADATA_UNAVAILABLE')) {
     Assert-True -Condition (-not $unavailableText.Contains($code)) -Message ("Unavailable context must not emit legacy finding '{0}'." -f $code)
 }
-Assert-True -Condition (-not $unavailableText.Contains('@@WDT_FINDING@@')) -Message 'Unavailable crash sources must not create findings.'
+Assert-Equal 1 ([regex]::Matches($unavailableText, '@@WDT_FINDING@@').Count) 'Complete crash source loss must emit exactly one finding.'
+Assert-Equal 1 ([regex]::Matches($unavailableText, 'CRASH_ASSESSMENT_UNAVAILABLE').Count) 'Complete crash source loss must emit one assessment-level code.'
+Assert-True -Condition ($unavailableText.Contains('assessment could not be completed')) -Message 'Crash availability message must describe an incomplete assessment.'
+Assert-True -Condition ($unavailableText.Contains('"Severity":"WARN"')) -Message 'Crash assessment availability must emit WARN.'
+Assert-True -Condition ($unavailableText -notmatch '"Severity":"ERROR"') -Message 'Crash source availability must never create ERROR.'
 Assert-True -Condition ($unavailableText -match 'Reliability Monitor: Unavailable') -Message 'Unavailable Reliability Monitor must be shown as context.'
 
 $temporaryRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
