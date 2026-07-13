@@ -54,6 +54,7 @@ function Get-PhysicalDiskInfo {
                     HealthStatus = $disk.HealthStatus
                     Size         = $disk.Size
                     Source       = 'Get-PhysicalDisk'
+                    StorageObject = $disk
                 }
             }
 
@@ -71,6 +72,7 @@ function Get-PhysicalDiskInfo {
                     HealthStatus = if ($_.Status) { $_.Status } else { 'Unknown' }
                     Size         = $_.Size
                     Source       = 'Win32_DiskDrive'
+                    StorageObject = $null
                 }
             }
     }
@@ -78,6 +80,22 @@ function Get-PhysicalDiskInfo {
         Write-Warning "Could not read physical disks with CIM fallback. $($_.Exception.Message)"
         return $null
     }
+}
+
+function Get-StorageReliabilityData {
+    param($StorageObject)
+    if ($null -eq $StorageObject) {
+        return [pscustomobject]@{ Available = $false; Data = $null; Note = 'Reliability counters are not exposed by this storage source.' }
+    }
+    if ($null -eq (Get-Command Get-StorageReliabilityCounter -ErrorAction SilentlyContinue)) {
+        return [pscustomobject]@{ Available = $false; Data = $null; Note = 'Get-StorageReliabilityCounter is unavailable.' }
+    }
+    try {
+        $data = $StorageObject | Get-StorageReliabilityCounter -ErrorAction Stop
+        if ($null -eq $data) { return [pscustomobject]@{ Available = $false; Data = $null; Note = 'The storage API returned no reliability counters.' } }
+        return [pscustomobject]@{ Available = $true; Data = $data; Note = $null }
+    }
+    catch { return [pscustomobject]@{ Available = $false; Data = $null; Note = ('Reliability counters could not be read: {0}' -f $_.Exception.Message) } }
 }
 
 function Get-VolumeInfo {
@@ -145,8 +163,9 @@ function Get-VolumeInfo {
     }
 }
 
-Write-Host 'Windows Diagnostics Toolkit - Disk Health'
+Write-Host 'Windows Diagnostics Toolkit - Storage Status'
 Write-Host 'Mode: read-only'
+Write-Host 'Scope: Windows-reported storage status, available reliability counters, and volume free space; not a complete SMART/NVMe diagnostic.'
 
 $physicalDisks = @(Get-PhysicalDiskInfo)
 $volumes = @(Get-VolumeInfo)
@@ -154,7 +173,7 @@ $volumes = @(Get-VolumeInfo)
 Write-Section 'Physical Disks'
 if ($physicalDisks.Count -eq 0) {
     Write-Host 'No physical disk information available.'
-    Write-WdtFinding -Severity 'WARN' -Code 'DISK_INFORMATION_UNAVAILABLE' -Message 'Physical disk health information is unavailable.'
+    Write-Host 'Data availability: physical disk status is unavailable.'
 }
 else {
     foreach ($disk in $physicalDisks) {
@@ -164,10 +183,21 @@ else {
         Write-Host ('Health       : {0}' -f $disk.HealthStatus)
         Write-Host ('Size         : {0}' -f (Format-Bytes -Bytes $disk.Size))
         Write-Host ('Source       : {0}' -f $disk.Source)
+        $reliability = Get-StorageReliabilityData -StorageObject $disk.StorageObject
+        if ($reliability.Available) {
+            Write-Host ('Reliability : Available')
+            foreach ($metric in @('Temperature', 'Wear', 'ReadErrorsTotal', 'WriteErrorsTotal', 'PowerOnHours')) {
+                if ($null -ne $reliability.Data.$metric) { Write-Host ('{0,-12}: {1}' -f $metric, $reliability.Data.$metric) }
+            }
+        }
+        else {
+            Write-Host 'Reliability : Unavailable (normal for some USB, RAID, virtual, and controller-backed disks)'
+            if (-not [string]::IsNullOrWhiteSpace([string]$reliability.Note)) { Write-Host ('Collection note: {0}' -f $reliability.Note) }
+        }
 
         $healthStatus = [string]$disk.HealthStatus
         if ([string]::IsNullOrWhiteSpace($healthStatus) -or $healthStatus -eq 'Unknown') {
-            Write-WdtFinding -Severity 'WARN' -Code 'DISK_HEALTH_UNKNOWN' -Message "Health status is unavailable for disk '$($disk.FriendlyName)'." -Evidence "Source: $($disk.Source)"
+            Write-Host ('Windows-reported state: Indeterminate (source: {0})' -f $disk.Source)
         }
         elseif ($healthStatus -eq 'Warning') {
             Write-WdtFinding -Severity 'WARN' -Code 'DISK_HEALTH_WARNING' -Message "Disk '$($disk.FriendlyName)' reports a warning health state." -Evidence "Health status: $healthStatus"
@@ -183,7 +213,7 @@ else {
 Write-Section 'Volumes'
 if ($volumes.Count -eq 0) {
     Write-Host 'No volume information available.'
-    Write-WdtFinding -Severity 'WARN' -Code 'VOLUME_INFORMATION_UNAVAILABLE' -Message 'Volume free-space information is unavailable.'
+    Write-Host 'Data availability: volume free-space data is unavailable.'
 }
 else {
     foreach ($volume in $volumes) {

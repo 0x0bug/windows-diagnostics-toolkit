@@ -106,7 +106,11 @@ Explicit module switches run diagnostics immediately without opening the TUI:
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 .\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
+.\Invoke-WindowsDiagnostics.ps1 -Network -NoExternalNetworkTests
+.\Invoke-WindowsDiagnostics.ps1 -Network -NetworkDnsTestName www.microsoft.com -NetworkHttpsEndpoint https://www.microsoft.com/ -NetworkIcmpTarget 1.1.1.1
 ```
+
+Each module has an independent 180-second timeout by default; change it with `-ModuleTimeoutSeconds`. On timeout WDT makes a bounded best-effort cleanup of the process tree it observed, revalidating PID, parent relationship, and creation time before termination. Cleanup failures are reported explicitly; absolute protection from every PID-reuse race is not claimed. Other module results are preserved, and the report records `MODULE_EXECUTION_TIMEOUT`, execution status, duration, and partial completeness.
 
 Windows PowerShell 5.1 non-interactive example:
 
@@ -130,13 +134,13 @@ WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
 | --- | --- |
 | System | Windows version, CPU, memory, GPU, uptime, system drive |
 | Security | Defender, Firewall, Secure Boot, TPM, BitLocker status |
-| Performance | Memory, CPU snapshot, pagefile, top processes by memory and cumulative CPU time |
-| Network | Adapters, IP/DNS/DHCP, gateways, routes, WinINET/WinHTTP proxy, reachability |
+| Performance | Memory, three short CPU samples, pagefile, process CPU activity deltas, memory and cumulative CPU time |
+| Network | Adapters, route/default gateway, system DNS resolution, TCP to a configured HTTPS endpoint, and optional ICMP |
 | Time | W32Time service, timezone, clock, source, status, optional events |
-| Disk | Physical disk health and volume free space |
+| Storage | Windows-reported storage state, available reliability counters, and volume free space |
 | Crashes | Application crash/hang events, BugCheck events, dump-file metadata |
 | Event Log | Recent Critical and Error events from System and Application logs |
-| Services | Automatic services not running, optional startup and scheduled-task checks |
+| Services | Service states, startup entries, and scheduled tasks; `Auto + Stopped` alone is indeterminate, not a warning |
 | Windows Update | Version, recent updates, reboot indicators, update-related services and optional events |
 
 The report begins with a findings summary so the user can see what needs attention before reading every section.
@@ -207,7 +211,7 @@ The safety guard reduces accidental scope expansion, but it is not a formal proo
 - No third-party runtime dependencies
 - Administrator rights are not required for normal use where Windows exposes the requested data to the current user
 
-Some sources expose less detail without elevation. The toolkit reports unavailable data and continues where possible.
+Reports state elevation and execution completeness: `Success` is `Complete`, timeout or non-zero exit is `Partial`, and launch failure or cancellation is `Unavailable`. Overall collection is `Unavailable` only when every selected module is unavailable, `Partial` when any result is partial or unavailable alongside another result, and otherwise `Complete`. Standard-user execution is not itself a problem. Completeness does not infer individual data-source availability from finding names.
 
 ## Validation
 

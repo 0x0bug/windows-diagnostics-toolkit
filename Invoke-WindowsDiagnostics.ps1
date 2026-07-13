@@ -14,7 +14,16 @@ param(
     [string]$OutputDirectory = (Get-Location).Path,
     [switch]$ExportMarkdown,
     [switch]$PrivacyMode,
-    [switch]$Interactive
+    [switch]$Interactive,
+    [ValidateRange(1, 2147483)]
+    [int]$ModuleTimeoutSeconds = 180,
+    [switch]$NoExternalNetworkTests,
+    [ValidateNotNullOrEmpty()]
+    [string]$NetworkDnsTestName = 'www.microsoft.com',
+    [ValidateNotNullOrEmpty()]
+    [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
+    [ValidateNotNullOrEmpty()]
+    [string]$NetworkIcmpTarget = '1.1.1.1'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -52,96 +61,21 @@ function Get-CurrentPowerShellPath {
     return Join-Path -Path $PSHOME -ChildPath 'powershell.exe'
 }
 
-function Get-RelativeDisplayPath {
-    param(
-        [Parameter(Mandatory = $true)][string]$BasePath,
-        [Parameter(Mandatory = $true)][string]$TargetPath
-    )
-
-    $baseUri = New-Object -TypeName System.Uri -ArgumentList (($BasePath.TrimEnd('\') + '\'))
-    $targetUri = New-Object -TypeName System.Uri -ArgumentList $TargetPath
-    $relativePath = $baseUri.MakeRelativeUri($targetUri).ToString()
-    return [System.Uri]::UnescapeDataString($relativePath).Replace('/', '\')
+$processRunnerPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\process-runner.ps1'
+if (-not (Test-Path -LiteralPath $processRunnerPath -PathType Leaf)) {
+    throw "Missing process runner: $processRunnerPath"
 }
 
-function Convert-TextToLines {
-    param([string]$Text)
+. $PSScriptRoot\scripts\process-runner.ps1
 
-    if ([string]::IsNullOrEmpty($Text)) {
-        return @()
-    }
+function Get-WdtCollectionCompleteness {
+    param([Parameter(Mandatory = $true)][object[]]$Results)
 
-    $lines = @($Text -split "`r?`n")
-    if ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') {
-        return @($lines[0..($lines.Count - 2)])
-    }
-
-    return $lines
-}
-
-function ConvertTo-CommandArgument {
-    param([Parameter(Mandatory = $true)][string]$Value)
-
-    return '"' + $Value.Replace('"', '\"') + '"'
-}
-
-function Invoke-DiagnosticScript {
-    param(
-        [Parameter(Mandatory = $true)][string]$Title,
-        [Parameter(Mandatory = $true)][string]$ScriptPath,
-        [Parameter(Mandatory = $true)][string]$PowerShellPath,
-        [Parameter(Mandatory = $true)][string]$RepositoryRoot
-    )
-
-    $result = [ordered]@{
-        Title       = $Title
-        Command     = '{0} -NoProfile -ExecutionPolicy Bypass -File {1}' -f (Split-Path -Leaf $PowerShellPath), (Get-RelativeDisplayPath -BasePath $RepositoryRoot -TargetPath $ScriptPath)
-        ExitCode    = $null
-        OutputLines = @()
-        ErrorLines  = @()
-    }
-
-    if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
-        $result.ExitCode = 1
-        $result.ErrorLines = @("Missing script: $ScriptPath")
-        return Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
-    }
-
-    try {
-        $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
-        $escapedScriptPath = $ScriptPath.Replace("'", "''")
-        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath'"
-
-        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $startInfo.FileName = $PowerShellPath
-        $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -Command {0}' -f (ConvertTo-CommandArgument -Value $commandText)
-        $startInfo.WorkingDirectory = $RepositoryRoot
-        $startInfo.UseShellExecute = $false
-        $startInfo.RedirectStandardOutput = $true
-        $startInfo.RedirectStandardError = $true
-        $startInfo.CreateNoWindow = $true
-        $startInfo.StandardOutputEncoding = $utf8NoBom
-        $startInfo.StandardErrorEncoding = $utf8NoBom
-        $startInfo.EnvironmentVariables['WDT_FINDING_PROTOCOL'] = '1'
-
-        $process = New-Object System.Diagnostics.Process
-        $process.StartInfo = $startInfo
-
-        [void]$process.Start()
-        $standardOutput = $process.StandardOutput.ReadToEnd()
-        $standardError = $process.StandardError.ReadToEnd()
-        $process.WaitForExit()
-
-        $result.ExitCode = $process.ExitCode
-        $result.OutputLines = @(Convert-TextToLines -Text $standardOutput)
-        $result.ErrorLines = @(Convert-TextToLines -Text $standardError)
-    }
-    catch {
-        $result.ExitCode = 1
-        $result.ErrorLines = @("Failed to run script: $($_.Exception.Message)")
-    }
-
-    return Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
+    if (@($Results).Count -eq 0) { throw 'At least one module result is required.' }
+    $values = @($Results | ForEach-Object { [string]$_.Completeness })
+    if (@($values | Where-Object { $_ -eq 'Unavailable' }).Count -eq $values.Count) { return 'Unavailable' }
+    if (@($values | Where-Object { $_ -eq 'Complete' }).Count -eq $values.Count) { return 'Complete' }
+    return 'Partial'
 }
 
 function Add-TextSection {
@@ -154,6 +88,9 @@ function Add-TextSection {
     $Lines.Add(('== {0} ==' -f $Result.Title))
     $Lines.Add(('Command: {0}' -f $Result.Command))
     $Lines.Add(('Exit code: {0}' -f $Result.ExitCode))
+    $Lines.Add(('Execution: {0}' -f $Result.Status))
+    $Lines.Add(('Duration: {0:N2} s' -f $Result.Duration.TotalSeconds))
+    $Lines.Add(('Completeness: {0}' -f $Result.Completeness))
     $Lines.Add('')
 
     if ($Result.OutputLines.Count -gt 0) {
@@ -185,6 +122,9 @@ function Add-MarkdownSection {
     $Lines.Add('')
     $Lines.Add(('- Command: `{0}`' -f $Result.Command))
     $Lines.Add(('- Exit code: `{0}`' -f $Result.ExitCode))
+    $Lines.Add(('- Execution: `{0}`' -f $Result.Status))
+    $Lines.Add(('- Duration: `{0:N2} s`' -f $Result.Duration.TotalSeconds))
+    $Lines.Add(('- Completeness: `{0}`' -f $Result.Completeness))
     $Lines.Add('')
     $Lines.Add('```text')
 
@@ -323,7 +263,12 @@ function Invoke-WdtReport {
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
         [bool]$ExportMarkdown,
         [bool]$PrivacyMode,
-        [bool]$SuppressConsoleOutput
+        [bool]$SuppressConsoleOutput,
+        [int]$ModuleTimeoutSeconds = 180,
+        [bool]$NoExternalNetworkTests,
+        [string]$NetworkDnsTestName = 'www.microsoft.com',
+        [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
+        [string]$NetworkIcmpTarget = '1.1.1.1'
     )
 
     $startedAt = Get-Date
@@ -340,6 +285,7 @@ function Invoke-WdtReport {
             $selectedChecks.Add([pscustomobject]@{
                     Title = $definition.Title
                     Path  = Join-Path -Path $repositoryRoot -ChildPath ("scripts\{0}" -f $definition.Script)
+                    Name  = $definition.Name
                 })
         }
     }
@@ -368,10 +314,19 @@ function Invoke-WdtReport {
     $createdAt = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($check in $selectedChecks) {
-        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot))
+        $scriptArguments = @()
+        if ($check.Name -eq 'Network') {
+            if ($NoExternalNetworkTests) { $scriptArguments += '-NoExternalNetworkTests' }
+            $scriptArguments += @('-DnsTestName', $NetworkDnsTestName, '-HttpsEndpoint', $NetworkHttpsEndpoint, '-IcmpTarget', $NetworkIcmpTarget)
+        }
+        if ($check.Name -eq 'Services') { $scriptArguments += @('-IncludeStartup', '-IncludeScheduledTasks') }
+        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot -TimeoutSeconds $ModuleTimeoutSeconds -ScriptArguments $scriptArguments))
     }
 
     $privacyModeLabel = if ($PrivacyMode) { 'enabled' } else { 'disabled' }
+    $isElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $elevationLabel = if ($isElevated) { 'Elevated' } else { 'Standard user' }
+    $collectionCompleteness = Get-WdtCollectionCompleteness -Results @($results.ToArray())
     $displayComputerName = [string]$env:COMPUTERNAME
     $displayTextReportPath = $textReportPath
     $displayMarkdownReportPath = $markdownReportPath
@@ -395,6 +350,8 @@ function Invoke-WdtReport {
     $textLines.Add(('Computer name : {0}' -f $displayComputerName))
     $textLines.Add(('Mode          : read-only'))
     $textLines.Add(('Privacy mode  : {0}' -f $privacyModeLabel))
+    $textLines.Add(('Elevation     : {0}' -f $elevationLabel))
+    $textLines.Add(('Collection completeness: {0}' -f $collectionCompleteness))
     $textLines.Add(('Output        : {0}' -f $displayTextReportPath))
     $textLines.Add(('Selected      : {0}' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
     Add-TextFindingsSummary -Lines $textLines -Summary $findingsSummary
@@ -416,6 +373,8 @@ function Invoke-WdtReport {
         $markdownLines.Add(('- Computer name: `{0}`' -f $displayComputerName))
         $markdownLines.Add(('- Mode: `read-only`'))
         $markdownLines.Add(('- Privacy mode: `{0}`' -f $privacyModeLabel))
+        $markdownLines.Add(('- Elevation: `{0}`' -f $elevationLabel))
+        $markdownLines.Add(('- Collection completeness: `{0}`' -f $collectionCompleteness))
         $markdownLines.Add(('- TXT report: `{0}`' -f $displayTextReportPath))
         $markdownLines.Add(('- Selected: `{0}`' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
         Add-MarkdownFindingsSummary -Lines $markdownLines -Summary $findingsSummary
@@ -498,14 +457,21 @@ if ($launchMode -eq 'Interactive') {
         Join-Path -Path (Get-Location).Path -ChildPath 'WindowsDiagnosticsReports'
     }
     $initialSelection = if ($All -or $hasExplicitSelection) { @($selectedModules.ToArray()) } else { $null }
-    $interactiveExitCode = Invoke-WdtInteractiveSession -InitialSelection $initialSelection -OutputDirectory $interactiveOutputDirectory
+    $interactiveExitCode = Invoke-WdtInteractiveSession `
+        -InitialSelection $initialSelection `
+        -OutputDirectory $interactiveOutputDirectory `
+        -ModuleTimeoutSeconds $ModuleTimeoutSeconds `
+        -NoExternalNetworkTests ([bool]$NoExternalNetworkTests) `
+        -NetworkDnsTestName $NetworkDnsTestName `
+        -NetworkHttpsEndpoint $NetworkHttpsEndpoint `
+        -NetworkIcmpTarget $NetworkIcmpTarget
     if ($interactiveExitCode -ne 0) {
         exit $interactiveExitCode
     }
     return
 }
 
-$reportResult = Invoke-WdtReport -SelectedModules @($selectedModules.ToArray()) -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode
+$reportResult = Invoke-WdtReport -SelectedModules @($selectedModules.ToArray()) -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode -ModuleTimeoutSeconds $ModuleTimeoutSeconds -NoExternalNetworkTests:$NoExternalNetworkTests -NetworkDnsTestName $NetworkDnsTestName -NetworkHttpsEndpoint $NetworkHttpsEndpoint -NetworkIcmpTarget $NetworkIcmpTarget
 if ($reportResult.ExitCode -ne 0) {
     exit $reportResult.ExitCode
 }

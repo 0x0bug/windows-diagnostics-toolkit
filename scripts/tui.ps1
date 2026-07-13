@@ -40,7 +40,14 @@ function Get-WdtTuiSelectedModule {
 }
 
 function ConvertTo-WdtReportParameters {
-    param([Parameter(Mandatory = $true)]$State)
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [int]$ModuleTimeoutSeconds = 180,
+        [bool]$NoExternalNetworkTests = $false,
+        [string]$NetworkDnsTestName = 'www.microsoft.com',
+        [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
+        [string]$NetworkIcmpTarget = '1.1.1.1'
+    )
 
     return @{
         SelectedModules = @(Get-WdtTuiSelectedModule -State $State)
@@ -48,6 +55,11 @@ function ConvertTo-WdtReportParameters {
         PrivacyMode = [bool]$State.PrivacyMode
         ExportMarkdown = [bool]$State.ExportMarkdown
         SuppressConsoleOutput = $true
+        ModuleTimeoutSeconds = $ModuleTimeoutSeconds
+        NoExternalNetworkTests = $NoExternalNetworkTests
+        NetworkDnsTestName = $NetworkDnsTestName
+        NetworkHttpsEndpoint = $NetworkHttpsEndpoint
+        NetworkIcmpTarget = $NetworkIcmpTarget
     }
 }
 
@@ -828,6 +840,35 @@ function Reset-WdtTuiFrame {
     $script:WdtTuiPreviousFrame = @()
 }
 
+function Get-WdtTuiExitAnchorRow {
+    param([int]$FrameHeight, [int]$BufferHeight)
+
+    $lastFrameRow = [Math]::Max(0, $FrameHeight - 1)
+    $lastBufferRow = [Math]::Max(0, $BufferHeight - 1)
+    return [Math]::Min($lastFrameRow, $lastBufferRow)
+}
+
+function Complete-WdtTuiConsoleFrame {
+    $frameHeight = @($script:WdtTuiPreviousFrame).Count
+    $wroteNewline = $false
+    try {
+        if ($frameHeight -gt 0 -and -not [System.Console]::IsOutputRedirected) {
+            $anchorRow = Get-WdtTuiExitAnchorRow -FrameHeight $frameHeight -BufferHeight ([System.Console]::BufferHeight)
+            [System.Console]::SetCursorPosition(0, $anchorRow)
+        }
+        Write-Host ''
+        $wroteNewline = $true
+    }
+    catch {
+        if (-not $wroteNewline) {
+            try { Write-Host '' } catch { }
+        }
+    }
+    finally {
+        Reset-WdtTuiFrame
+    }
+}
+
 function Show-WdtTuiFrame {
     param([Parameter(Mandatory = $true)]$Layout, [int]$Width, [bool]$ForceFull)
 
@@ -982,7 +1023,12 @@ function Show-WdtTuiRunResult {
 function Invoke-WdtInteractiveSession {
     param(
         [string[]]$InitialSelection,
-        [Parameter(Mandatory = $true)][string]$OutputDirectory
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [int]$ModuleTimeoutSeconds = 180,
+        [bool]$NoExternalNetworkTests = $false,
+        [string]$NetworkDnsTestName = 'www.microsoft.com',
+        [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
+        [string]$NetworkIcmpTarget = '1.1.1.1'
     )
 
     if ([System.Console]::IsInputRedirected) {
@@ -1095,7 +1141,13 @@ function Invoke-WdtInteractiveSession {
                 continue
             }
 
-            $reportParameters = ConvertTo-WdtReportParameters -State $state
+            $reportParameters = ConvertTo-WdtReportParameters `
+                -State $state `
+                -ModuleTimeoutSeconds $ModuleTimeoutSeconds `
+                -NoExternalNetworkTests $NoExternalNetworkTests `
+                -NetworkDnsTestName $NetworkDnsTestName `
+                -NetworkHttpsEndpoint $NetworkHttpsEndpoint `
+                -NetworkIcmpTarget $NetworkIcmpTarget
             if (@($reportParameters.SelectedModules).Count -eq 0) {
                 $state.ErrorMessage = 'Select at least one diagnostic module.'
                 continue
@@ -1153,11 +1205,10 @@ function Invoke-WdtInteractiveSession {
         }
     }
     finally {
-        Reset-WdtTuiFrame
+        Complete-WdtTuiConsoleFrame
         if ($null -ne $originalCursorVisible) {
             try { [System.Console]::CursorVisible = $originalCursorVisible } catch { }
         }
-        Write-Host ''
     }
     return $lastExitCode
 }

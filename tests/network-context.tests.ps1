@@ -144,7 +144,7 @@ try {
             }
 
             $env:WDT_FINDING_PROTOCOL = '1'
-            & $networkScript -DnsTestName '' -InternetTestHost '' 6>&1 | ForEach-Object { [string]$_ }
+            & $networkScript -NoExternalNetworkTests 6>&1 | ForEach-Object { [string]$_ }
         })
 }
 finally {
@@ -165,6 +165,10 @@ foreach ($code in @('NETWORK_ADAPTERS_UNAVAILABLE', 'NETWORK_ROUTES_UNAVAILABLE'
     Assert-True -Condition $unavailableText.Contains($code) -Message ("Unavailable fixture did not emit '{0}'." -f $code)
 }
 Assert-True -Condition ($unavailableText -notmatch '"Severity":"ERROR"') -Message 'Unavailable network sources must not create ERROR findings.'
+Assert-True -Condition $unavailableText.Contains('Overall reachability: NotTested') -Message 'Disabled external tests must report NotTested.'
+foreach ($probeLabel in @('DNS /', 'TCP HTTPS /', 'Optional ICMP /')) {
+    Assert-True -Condition (-not $unavailableText.Contains($probeLabel)) -Message ("Disabled external tests unexpectedly ran probe: {0}" -f $probeLabel)
+}
 
 $standaloneOutput = @(& $networkScript -DnsTestName '' -InternetTestHost '' 6>&1 | ForEach-Object { [string]$_ })
 foreach ($section in @('Active Network Adapters', 'Active Routes (Default First)', 'WinINET Proxy', 'WinHTTP Proxy')) {

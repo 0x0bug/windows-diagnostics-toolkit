@@ -65,6 +65,19 @@ function Get-ServiceInventory {
     }
 }
 
+function Get-ServiceDiagnosticState {
+    param([Parameter(Mandatory = $true)]$Service)
+
+    if ([string]$Service.State -in @('Start Pending', 'Stop Pending', 'Continue Pending', 'Pause Pending')) {
+        return 'WarnPending'
+    }
+    if ([int]$Service.ExitCode -ne 0) { return 'WarnExitCode' }
+    if ([string]$Service.StartMode -eq 'Auto' -and [string]$Service.State -eq 'Stopped') {
+        return 'Indeterminate'
+    }
+    return 'Normal'
+}
+
 function Get-StartupEntryInventory {
     $registryPaths = @(
         'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
@@ -201,13 +214,13 @@ $services = @($serviceInventory.Services)
 
 $automaticNotRunning = @(
     $services |
-        Where-Object { $_.StartMode -eq 'Auto' -and $_.State -ne 'Running' } |
+        Where-Object { (Get-ServiceDiagnosticState -Service $_) -eq 'Indeterminate' } |
         Sort-Object -Property Name
 )
 
 $nonOkServiceStates = @(
     $services |
-        Where-Object { $_.State -notin @('Running', 'Stopped') } |
+        Where-Object { (Get-ServiceDiagnosticState -Service $_) -like 'Warn*' } |
         Sort-Object -Property State, Name
 )
 
@@ -221,10 +234,7 @@ if ($null -ne $serviceInventory.Error) {
     Write-WdtFinding -Severity WARN -Code 'SERVICE_INVENTORY_UNAVAILABLE' -Message 'The Windows service inventory could not be read.' -Evidence (ConvertTo-SafeSingleLine -Value $serviceInventory.Error)
 }
 else {
-    $serviceStateIssues = @(
-        @($automaticNotRunning) + @($nonOkServiceStates) |
-            Sort-Object -Property Name -Unique
-    )
+    $serviceStateIssues = @($nonOkServiceStates | Sort-Object -Property Name -Unique)
 
     if ($serviceStateIssues.Count -gt 0) {
         $serviceIssueEvidence = @(
@@ -233,7 +243,7 @@ else {
                 ForEach-Object { '{0}={1} ({2})' -f $_.Name, $_.State, $_.StartMode }
         ) -join '; '
 
-        Write-WdtFinding -Severity WARN -Code 'SERVICE_STATE_ISSUES' -Message ('{0} service(s) need attention: {1} automatic service(s) are not running and {2} service(s) have a non-OK state.' -f $serviceStateIssues.Count, $automaticNotRunning.Count, $nonOkServiceStates.Count) -Evidence $serviceIssueEvidence
+        Write-WdtFinding -Severity WARN -Code 'SERVICE_STATE_CONFIRMED' -Message ('{0} service(s) have a pending state or non-zero service exit code.' -f $serviceStateIssues.Count) -Evidence $serviceIssueEvidence
     }
 }
 
@@ -244,22 +254,23 @@ if ($null -ne $serviceInventory.Error) {
 else {
     Write-Host ('Total services                 : {0}' -f $services.Count)
     Write-Host ('Running services               : {0}' -f $runningServices.Count)
-    Write-Host ('Automatic services not running : {0}' -f $automaticNotRunning.Count)
-    Write-Host ('Non-OK service states          : {0}' -f $nonOkServiceStates.Count)
+    Write-Host ('Auto + Stopped (Indeterminate) : {0}' -f $automaticNotRunning.Count)
+    Write-Host ('Confirmed service issues       : {0}' -f $nonOkServiceStates.Count)
 }
 
 Write-Host ('Startup entries included       : {0}' -f [bool]$IncludeStartup)
 Write-Host ('Scheduled tasks included       : {0}' -f [bool]$IncludeScheduledTasks)
 
-Write-Section 'Automatic Services Not Running'
+Write-Section 'Automatic Stopped Services (Indeterminate)'
 if ($null -ne $serviceInventory.Error) {
     Write-Host 'Skipped because service inventory is unavailable.'
 }
 else {
+    Write-Host 'Stopped automatic services can be trigger-start, delayed, conditional, or intentionally idle; this state alone is not a warning.'
     Write-ServiceRows -Services $automaticNotRunning -Limit $MaxItems
 }
 
-Write-Section 'Non-OK Service States'
+Write-Section 'Pending States or Non-Zero Exit Codes'
 if ($null -ne $serviceInventory.Error) {
     Write-Host 'Skipped because service inventory is unavailable.'
 }
