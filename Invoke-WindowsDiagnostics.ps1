@@ -23,7 +23,8 @@ param(
     [ValidateNotNullOrEmpty()]
     [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
     [ValidateNotNullOrEmpty()]
-    [string]$NetworkIcmpTarget = '1.1.1.1'
+    [string]$NetworkIcmpTarget = '1.1.1.1',
+    [string[]]$Module
 )
 
 $ErrorActionPreference = 'Stop'
@@ -36,12 +37,22 @@ if (-not (Test-Path -LiteralPath $reportCommonPath -PathType Leaf)) {
 
 . $PSScriptRoot\scripts\report-common.ps1
 
-$catalogPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\diagnostic-catalog.ps1'
-if (-not (Test-Path -LiteralPath $catalogPath -PathType Leaf)) {
-    throw "Missing diagnostic catalog: $catalogPath"
+$moduleRegistryPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\module-registry.ps1'
+if (-not (Test-Path -LiteralPath $moduleRegistryPath -PathType Leaf)) {
+    throw "Missing module registry: $moduleRegistryPath"
 }
 
-. $PSScriptRoot\scripts\diagnostic-catalog.ps1
+. $PSScriptRoot\scripts\module-registry.ps1
+
+$moduleRoot = Join-Path -Path $repositoryRoot -ChildPath 'modules'
+$registrySnapshot = Get-WdtModuleRegistry -ModuleRoot $moduleRoot
+
+$coreOptionValues = New-Object 'System.Collections.Generic.Dictionary[string,object]' ([System.StringComparer]::OrdinalIgnoreCase)
+$coreOptionValues['NoExternalNetworkTests'] = [bool]$NoExternalNetworkTests
+$coreOptionValues['NetworkDnsTestName'] = $NetworkDnsTestName
+$coreOptionValues['NetworkHttpsEndpoint'] = $NetworkHttpsEndpoint
+$coreOptionValues['NetworkIcmpTarget'] = $NetworkIcmpTarget
+$coreOptions = New-Object 'System.Collections.ObjectModel.ReadOnlyDictionary[string,object]' $coreOptionValues
 
 function Get-CurrentPowerShellPath {
     try {
@@ -259,37 +270,17 @@ function Protect-WdtDiagnosticResults {
 
 function Invoke-WdtReport {
     param(
-        [Parameter(Mandatory = $true)][AllowEmptyCollection()][string[]]$SelectedModules,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ModuleDefinitions,
+        [Parameter(Mandatory = $true)]$CoreOptions,
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
         [bool]$ExportMarkdown,
         [bool]$PrivacyMode,
         [bool]$SuppressConsoleOutput,
-        [int]$ModuleTimeoutSeconds = 180,
-        [bool]$NoExternalNetworkTests,
-        [string]$NetworkDnsTestName = 'www.microsoft.com',
-        [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
-        [string]$NetworkIcmpTarget = '1.1.1.1'
+        [int]$ModuleTimeoutSeconds = 180
     )
 
     $startedAt = Get-Date
-    $selectedChecks = New-Object System.Collections.Generic.List[object]
-    $checkDefinitions = @(Get-WdtDiagnosticDefinition)
-    $knownModuleNames = @($checkDefinitions | ForEach-Object { $_.Name })
-    $unknownModuleNames = @($SelectedModules | Where-Object { $_ -notin $knownModuleNames })
-    if ($unknownModuleNames.Count -gt 0) {
-        throw ('Unknown diagnostic module(s): {0}' -f ($unknownModuleNames -join ', '))
-    }
-
-    foreach ($definition in $checkDefinitions) {
-        if ($definition.Name -in $SelectedModules) {
-            $selectedChecks.Add([pscustomobject]@{
-                    Title = $definition.Title
-                    Path  = Join-Path -Path $repositoryRoot -ChildPath ("scripts\{0}" -f $definition.Script)
-                    Name  = $definition.Name
-                })
-        }
-    }
-
+    $selectedChecks = @($ModuleDefinitions)
     if ($selectedChecks.Count -eq 0) {
         throw 'At least one diagnostic module must be selected.'
     }
@@ -314,13 +305,8 @@ function Invoke-WdtReport {
     $createdAt = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($check in $selectedChecks) {
-        $scriptArguments = @()
-        if ($check.Name -eq 'Network') {
-            if ($NoExternalNetworkTests) { $scriptArguments += '-NoExternalNetworkTests' }
-            $scriptArguments += @('-DnsTestName', $NetworkDnsTestName, '-HttpsEndpoint', $NetworkHttpsEndpoint, '-IcmpTarget', $NetworkIcmpTarget)
-        }
-        if ($check.Name -eq 'Services') { $scriptArguments += @('-IncludeStartup', '-IncludeScheduledTasks') }
-        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.Path -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot -TimeoutSeconds $ModuleTimeoutSeconds -ScriptArguments $scriptArguments))
+        $scriptArguments = @(Get-WdtModuleInvocationArguments -Definition $check -CoreOptions $CoreOptions)
+        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.EntryPoint -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot -TimeoutSeconds $ModuleTimeoutSeconds -ScriptArguments $scriptArguments))
     }
 
     $privacyModeLabel = if ($PrivacyMode) { 'enabled' } else { 'disabled' }
@@ -405,31 +391,32 @@ function Invoke-WdtReport {
     }
 }
 
-$selectedModules = New-Object System.Collections.Generic.List[string]
-foreach ($selection in @(
-        [pscustomobject]@{ Name = 'System'; Enabled = $System },
-        [pscustomobject]@{ Name = 'Security'; Enabled = $Security },
-        [pscustomobject]@{ Name = 'Performance'; Enabled = $Performance },
-        [pscustomobject]@{ Name = 'Network'; Enabled = $Network },
-        [pscustomobject]@{ Name = 'Time'; Enabled = $Time },
-        [pscustomobject]@{ Name = 'Disk'; Enabled = $Disk },
-        [pscustomobject]@{ Name = 'Crashes'; Enabled = $Crashes },
-        [pscustomobject]@{ Name = 'Events'; Enabled = $Events },
-        [pscustomobject]@{ Name = 'Services'; Enabled = $Services },
-        [pscustomobject]@{ Name = 'Updates'; Enabled = $Updates }
-    )) {
-    if ($selection.Enabled) {
-        $selectedModules.Add($selection.Name)
-    }
+$legacySelections = [ordered]@{
+    System      = [bool]$System
+    Security    = [bool]$Security
+    Performance = [bool]$Performance
+    Network     = [bool]$Network
+    Time        = [bool]$Time
+    Disk        = [bool]$Disk
+    Crashes     = [bool]$Crashes
+    Events      = [bool]$Events
+    Services    = [bool]$Services
+    Updates     = [bool]$Updates
 }
 
-$hasExplicitSelection = $selectedModules.Count -gt 0
-if ($All) {
-    $selectedModules = New-Object System.Collections.Generic.List[string]
-    foreach ($definition in @(Get-WdtDiagnosticDefinition)) {
-        $selectedModules.Add($definition.Name)
-    }
+$missingLegacyIds = @($legacySelections.Keys | Where-Object { -not $registrySnapshot.ById.ContainsKey([string]$_) })
+if ($missingLegacyIds.Count -gt 0) {
+    throw ('Built-in module registry is missing legacy module(s): {0}' -f (($missingLegacyIds | Sort-Object) -join ', '))
 }
+
+$moduleIds = if ($PSBoundParameters.ContainsKey('Module')) { @($Module) } else { @() }
+$hasLegacySelection = @($legacySelections.GetEnumerator() | Where-Object { [bool]$_.Value }).Count -gt 0
+$hasExplicitSelection = $moduleIds.Count -gt 0 -or $hasLegacySelection
+$selectedDefinitions = @(Resolve-WdtModuleSelection `
+        -Registry $registrySnapshot `
+        -ModuleIds $moduleIds `
+        -LegacySelections $legacySelections `
+        -AllRequested:([bool]$All))
 
 $launchMode = Get-WdtLaunchMode `
     -InteractiveRequested ([bool]$Interactive) `
@@ -456,8 +443,9 @@ if ($launchMode -eq 'Interactive') {
     else {
         Join-Path -Path (Get-Location).Path -ChildPath 'WindowsDiagnosticsReports'
     }
-    $initialSelection = if ($All -or $hasExplicitSelection) { @($selectedModules.ToArray()) } else { $null }
+    $initialSelection = if ($All -or $hasExplicitSelection) { @($selectedDefinitions | ForEach-Object { [string]$_.Id }) } else { $null }
     $interactiveExitCode = Invoke-WdtInteractiveSession `
+        -RegistrySnapshot $registrySnapshot `
         -InitialSelection $initialSelection `
         -OutputDirectory $interactiveOutputDirectory `
         -ModuleTimeoutSeconds $ModuleTimeoutSeconds `
@@ -471,7 +459,7 @@ if ($launchMode -eq 'Interactive') {
     return
 }
 
-$reportResult = Invoke-WdtReport -SelectedModules @($selectedModules.ToArray()) -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode -ModuleTimeoutSeconds $ModuleTimeoutSeconds -NoExternalNetworkTests:$NoExternalNetworkTests -NetworkDnsTestName $NetworkDnsTestName -NetworkHttpsEndpoint $NetworkHttpsEndpoint -NetworkIcmpTarget $NetworkIcmpTarget
+$reportResult = Invoke-WdtReport -ModuleDefinitions $selectedDefinitions -CoreOptions $coreOptions -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode -ModuleTimeoutSeconds $ModuleTimeoutSeconds
 if ($reportResult.ExitCode -ne 0) {
     exit $reportResult.ExitCode
 }

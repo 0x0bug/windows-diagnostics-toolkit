@@ -2,26 +2,29 @@
 param()
 
 function Get-WdtRecommendedSelection {
-    return @(Get-WdtDiagnosticDefinition | Where-Object { $_.Recommended } | ForEach-Object { $_.Name })
+    param([Parameter(Mandatory = $true)]$RegistrySnapshot)
+    return @($RegistrySnapshot.Modules | Where-Object { $_.Recommended } | ForEach-Object { $_.Id })
 }
 
 function New-WdtTuiState {
     param(
+        [Parameter(Mandatory = $true)]$RegistrySnapshot,
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
         [string[]]$InitialSelection
     )
 
     $selectedNames = @($InitialSelection)
     if ($null -eq $InitialSelection -or $InitialSelection.Count -eq 0) {
-        $selectedNames = @(Get-WdtRecommendedSelection)
+        $selectedNames = @(Get-WdtRecommendedSelection -RegistrySnapshot $RegistrySnapshot)
     }
 
     return [pscustomobject]@{
-        Diagnostics = @(Get-WdtDiagnosticDefinition | ForEach-Object {
+        RegistrySnapshot = $RegistrySnapshot
+        Diagnostics = @($RegistrySnapshot.Modules | ForEach-Object {
                 [pscustomobject]@{
-                    Name = $_.Name
+                    Id = $_.Id
                     Label = $_.Label
-                    Selected = $_.Name -in $selectedNames
+                    Selected = $_.Id -in $selectedNames
                 }
             })
         PrivacyMode = $true
@@ -36,12 +39,13 @@ function New-WdtTuiState {
 
 function Get-WdtTuiSelectedModule {
     param([Parameter(Mandatory = $true)]$State)
-    return @($State.Diagnostics | Where-Object { $_.Selected } | ForEach-Object { $_.Name })
+    return @($State.Diagnostics | Where-Object { $_.Selected } | ForEach-Object { $_.Id })
 }
 
 function ConvertTo-WdtReportParameters {
     param(
         [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)]$RegistrySnapshot,
         [int]$ModuleTimeoutSeconds = 180,
         [bool]$NoExternalNetworkTests = $false,
         [string]$NetworkDnsTestName = 'www.microsoft.com',
@@ -49,17 +53,27 @@ function ConvertTo-WdtReportParameters {
         [string]$NetworkIcmpTarget = '1.1.1.1'
     )
 
+    if (-not [System.Object]::ReferenceEquals($State.RegistrySnapshot, $RegistrySnapshot)) {
+        throw 'The TUI state and report conversion must use the same registry snapshot.'
+    }
+
+    $selectedIds = @(Get-WdtTuiSelectedModule -State $State)
+    $moduleDefinitions = @($RegistrySnapshot.Modules | Where-Object { $_.Id -in $selectedIds })
+    $coreOptions = [System.Collections.Generic.Dictionary[string,object]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $coreOptions.Add('NoExternalNetworkTests', [bool]$NoExternalNetworkTests)
+    $coreOptions.Add('NetworkDnsTestName', [string]$NetworkDnsTestName)
+    $coreOptions.Add('NetworkHttpsEndpoint', [string]$NetworkHttpsEndpoint)
+    $coreOptions.Add('NetworkIcmpTarget', [string]$NetworkIcmpTarget)
+    $readOnlyCoreOptions = [System.Collections.ObjectModel.ReadOnlyDictionary[string,object]]::new($coreOptions)
+
     return @{
-        SelectedModules = @(Get-WdtTuiSelectedModule -State $State)
+        ModuleDefinitions = $moduleDefinitions
+        CoreOptions = $readOnlyCoreOptions
         OutputDirectory = $State.OutputDirectory
         PrivacyMode = [bool]$State.PrivacyMode
         ExportMarkdown = [bool]$State.ExportMarkdown
         SuppressConsoleOutput = $true
         ModuleTimeoutSeconds = $ModuleTimeoutSeconds
-        NoExternalNetworkTests = $NoExternalNetworkTests
-        NetworkDnsTestName = $NetworkDnsTestName
-        NetworkHttpsEndpoint = $NetworkHttpsEndpoint
-        NetworkIcmpTarget = $NetworkIcmpTarget
     }
 }
 
@@ -67,7 +81,7 @@ function Get-WdtTuiMenuItem {
     param([Parameter(Mandatory = $true)]$State)
 
     $items = @($State.Diagnostics | ForEach-Object {
-            [pscustomobject]@{ Kind = 'Diagnostic'; Name = $_.Name; Label = $_.Label }
+            [pscustomobject]@{ Kind = 'Diagnostic'; Id = $_.Id; Label = $_.Label }
         })
     $items += @(
         [pscustomobject]@{ Kind = 'Privacy'; Name = 'PrivacyMode'; Label = 'Privacy Mode' },
@@ -100,8 +114,9 @@ function Update-WdtTuiState {
     )
 
     $nextState = [pscustomobject]@{
+        RegistrySnapshot = $State.RegistrySnapshot
         Diagnostics = @($State.Diagnostics | ForEach-Object {
-                [pscustomobject]@{ Name = $_.Name; Label = $_.Label; Selected = [bool]$_.Selected }
+                [pscustomobject]@{ Id = $_.Id; Label = $_.Label; Selected = [bool]$_.Selected }
             })
         PrivacyMode = [bool]$State.PrivacyMode
         ExportMarkdown = [bool]$State.ExportMarkdown
@@ -126,8 +141,8 @@ function Update-WdtTuiState {
         return $nextState
     }
     if ($Action -eq 'SelectRecommended') {
-        $recommended = @(Get-WdtRecommendedSelection)
-        foreach ($diagnostic in $nextState.Diagnostics) { $diagnostic.Selected = $diagnostic.Name -in $recommended }
+        $recommended = @(Get-WdtRecommendedSelection -RegistrySnapshot $nextState.RegistrySnapshot)
+        foreach ($diagnostic in $nextState.Diagnostics) { $diagnostic.Selected = $diagnostic.Id -in $recommended }
         return $nextState
     }
     if ($Action -eq 'SetOutputDirectory') {
@@ -144,7 +159,7 @@ function Update-WdtTuiState {
     if ($Action -eq 'ToggleCurrent' -or $Action -eq 'SelectCurrent') {
         if ($currentItem.Kind -eq 'Diagnostic') {
             foreach ($diagnostic in $nextState.Diagnostics) {
-                if ($diagnostic.Name -eq $currentItem.Name) {
+                if ($diagnostic.Id -eq $currentItem.Id) {
                     $diagnostic.Selected = -not $diagnostic.Selected
                     break
                 }
@@ -409,7 +424,7 @@ function New-WdtTuiMenuLine {
     $numberSegment = if ($ShowItemNumbers) { New-WdtTuiSegment -Text $numberPrefix -Color 'DarkGray' } else { $null }
 
     if ($Item.Kind -eq 'Diagnostic') {
-        $diagnostic = @($State.Diagnostics | Where-Object { $_.Name -eq $Item.Name })[0]
+        $diagnostic = @($State.Diagnostics | Where-Object { $_.Id -eq $Item.Id })[0]
         $checked = [bool]$diagnostic.Selected
         $mark = if ($checked) { '[x]' } else { '[ ]' }
         $markColor = if ($checked) { 'Green' } else { 'DarkGray' }
@@ -471,6 +486,88 @@ function Get-WdtTuiViewport {
     return [pscustomobject]@{ Start = $start; End = $start + $visible - 1; Capacity = $visible }
 }
 
+function Get-WdtTuiDiagnosticViewport {
+    param(
+        [int]$DiagnosticCount,
+        [int]$CursorIndex,
+        [int]$Rows,
+        [int]$Columns = 1
+    )
+
+    $anchor = if ($CursorIndex -lt $DiagnosticCount) { $CursorIndex } else { $DiagnosticCount - 1 }
+    return Get-WdtTuiViewport -ItemCount $DiagnosticCount -CursorIndex $anchor -Capacity ($Rows * $Columns)
+}
+
+function Join-WdtTuiDiagnosticColumns {
+    param(
+        [Parameter(Mandatory = $true)]$LeftLine,
+        [Parameter(Mandatory = $true)]$RightLine,
+        [int]$Width
+    )
+
+    $leftWidth = [Math]::Floor([Math]::Max(0, $Width - 1) / 2)
+    $rightWidth = [Math]::Max(0, $Width - $leftWidth - 1)
+    $left = Add-WdtTuiLinePadding -Line $LeftLine -Width $leftWidth
+    $right = Add-WdtTuiLinePadding -Line $RightLine -Width $rightWidth
+    return New-WdtTuiLine -Segments @(
+        $left.Segments,
+        (New-WdtTuiSegment -Text ' '),
+        $right.Segments
+    )
+}
+
+function Get-WdtTuiDiagnosticLines {
+    param(
+        [Parameter(Mandatory = $true)]$State,
+        [Parameter(Mandatory = $true)][object[]]$Items,
+        [Parameter(Mandatory = $true)]$Viewport,
+        [int]$Rows,
+        [int]$Columns,
+        [int]$Width,
+        [bool]$ShowItemNumbers
+    )
+
+    if ($Columns -eq 1) {
+        return @($Viewport.Start..$Viewport.End | ForEach-Object {
+                New-WdtTuiMenuLine -State $State -Item $Items[$_] -Index $_ -Width $Width -ShowItemNumbers $ShowItemNumbers
+            })
+    }
+
+    $lines = @()
+    for ($row = 0; $row -lt $Rows; $row++) {
+        $leftIndex = $Viewport.Start + $row
+        $rightIndex = $Viewport.Start + $Rows + $row
+        $leftLine = if ($leftIndex -le $Viewport.End) {
+            New-WdtTuiMenuLine -State $State -Item $Items[$leftIndex] -Index $leftIndex -Width ([Math]::Floor([Math]::Max(0, $Width - 1) / 2)) -ShowItemNumbers $ShowItemNumbers
+        }
+        else { New-WdtTuiTextLine -Text '' }
+        $rightLine = if ($rightIndex -le $Viewport.End) {
+            New-WdtTuiMenuLine -State $State -Item $Items[$rightIndex] -Index $rightIndex -Width ([Math]::Max(0, $Width - [Math]::Floor([Math]::Max(0, $Width - 1) / 2) - 1)) -ShowItemNumbers $ShowItemNumbers
+        }
+        else { New-WdtTuiTextLine -Text '' }
+        $lines += Join-WdtTuiDiagnosticColumns -LeftLine $leftLine -RightLine $rightLine -Width $Width
+    }
+    return @($lines)
+}
+
+function Get-WdtTuiDiagnosticHeader {
+    param([string]$Text, [int]$DiagnosticCount, [Parameter(Mandatory = $true)]$Viewport)
+
+    if ($Viewport.Capacity -lt $DiagnosticCount) {
+        return '{0} {1}-{2} of {3}' -f $Text, ($Viewport.Start + 1), ($Viewport.End + 1), $DiagnosticCount
+    }
+    return $Text
+}
+
+function Get-WdtTuiVisibleIndexes {
+    param([int]$DiagnosticCount, [Parameter(Mandatory = $true)]$Viewport)
+
+    return @(
+        @($Viewport.Start..$Viewport.End)
+        @($DiagnosticCount..($DiagnosticCount + 4))
+    )
+}
+
 function ConvertTo-WdtTuiFallbackAction {
     param([string]$Answer)
     if ($Answer -ieq 'Exit') { return 'Exit' }
@@ -522,6 +619,7 @@ function Get-WdtTuiWideLayout {
     param(
         [Parameter(Mandatory = $true)]$State,
         [int]$Width,
+        [int]$Height,
         [bool]$Short,
         [ValidateSet('Ascii', 'Unicode')][string]$LogoMode = 'Ascii',
         [bool]$ShowItemNumbers
@@ -532,6 +630,9 @@ function Get-WdtTuiWideLayout {
     $contentWidth = $Width - 3
     $leftWidth = [Math]::Floor($contentWidth * 0.56)
     $rightWidth = $contentWidth - $leftWidth
+    $diagnosticRows = if ($Short) { $Height - 11 } else { $Height - 16 }
+    $diagnosticColumns = if ($State.Diagnostics.Count -le $diagnosticRows) { 1 } else { 2 }
+    $diagnosticViewport = Get-WdtTuiDiagnosticViewport -DiagnosticCount $State.Diagnostics.Count -CursorIndex $State.CursorIndex -Rows $diagnosticRows -Columns $diagnosticColumns
     $lines = @((New-WdtTuiBorderLine -Width $Width))
 
     if ($Short) {
@@ -553,29 +654,36 @@ function Get-WdtTuiWideLayout {
     $lines += New-WdtTuiBorderLine -Width $Width
 
     $leftPanel = @()
-    $leftPanel += New-WdtTuiAlignedLine -LeftText ' DIAGNOSTICS' -RightText ('Selected: {0} / {1} ' -f $selectedCount, $State.Diagnostics.Count) -Width $leftWidth -LeftColor 'Cyan' -RightColor 'Cyan'
+    $diagnosticHeader = Get-WdtTuiDiagnosticHeader -Text ' DIAGNOSTICS' -DiagnosticCount $State.Diagnostics.Count -Viewport $diagnosticViewport
+    $leftPanel += New-WdtTuiAlignedLine -LeftText $diagnosticHeader -RightText ('Selected: {0} / {1} ' -f $selectedCount, $State.Diagnostics.Count) -Width $leftWidth -LeftColor 'Cyan' -RightColor 'Cyan'
     $leftPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $leftWidth - 2))) -Color 'DarkGray'
-    for ($index = 0; $index -lt $State.Diagnostics.Count; $index++) {
-        $leftPanel += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $leftWidth -ShowItemNumbers $ShowItemNumbers
-    }
+    $leftPanel += Get-WdtTuiDiagnosticLines -State $State -Items $items -Viewport $diagnosticViewport -Rows $diagnosticRows -Columns $diagnosticColumns -Width $leftWidth -ShowItemNumbers $ShowItemNumbers
     if (-not $Short) { $leftPanel += New-WdtTuiTextLine -Text '' }
 
+    $privacyIndex = $State.Diagnostics.Count
+    $markdownIndex = $privacyIndex + 1
+    $outputIndex = $privacyIndex + 2
+    $runIndex = $privacyIndex + 3
+    $exitIndex = $privacyIndex + 4
     $rightPanel = @()
     $rightPanel += New-WdtTuiTextLine -Text ' OPTIONS' -Color 'Cyan'
     $rightPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $rightWidth - 2))) -Color 'DarkGray'
-    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[10] -Index 10 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
-    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[11] -Index 11 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[$privacyIndex] -Index $privacyIndex -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[$markdownIndex] -Index $markdownIndex -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
     if (-not $Short) { $rightPanel += New-WdtTuiTextLine -Text '' }
     $rightPanel += New-WdtTuiTextLine -Text ' OUTPUT' -Color 'Cyan'
     $rightPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $rightWidth - 2))) -Color 'DarkGray'
-    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[12] -Index 12 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[$outputIndex] -Index $outputIndex -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
     $rightPanel += New-WdtTuiTextLine -Text ''
     $rightPanel += New-WdtTuiTextLine -Text (' ' + ('-' * [Math]::Max(0, $rightWidth - 2))) -Color 'DarkGray'
-    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[13] -Index 13 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
-    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[14] -Index 14 -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[$runIndex] -Index $runIndex -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
+    $rightPanel += New-WdtTuiMenuLine -State $State -Item $items[$exitIndex] -Index $exitIndex -Width ($rightWidth - 1) -ShowItemNumbers $ShowItemNumbers
     $rightPanel += New-WdtTuiTextLine -Text ''
 
-    for ($index = 0; $index -lt $leftPanel.Count; $index++) {
+    $panelHeight = [Math]::Max($leftPanel.Count, $rightPanel.Count)
+    while ($leftPanel.Count -lt $panelHeight) { $leftPanel += New-WdtTuiTextLine -Text '' }
+    while ($rightPanel.Count -lt $panelHeight) { $rightPanel += New-WdtTuiTextLine -Text '' }
+    for ($index = 0; $index -lt $panelHeight; $index++) {
         $lines += Join-WdtTuiColumns -LeftLine $leftPanel[$index] -RightLine $rightPanel[$index] -LeftWidth $leftWidth -RightWidth $rightWidth
     }
     $lines += New-WdtTuiBorderLine -Width $Width
@@ -590,37 +698,54 @@ function Get-WdtTuiWideLayout {
     $lines += New-WdtTuiBorderLine -Width $Width
 
     $mode = if ($Short) { 'WideShort' } else { 'Wide' }
-    return [pscustomobject]@{ Mode = $mode; Lines = @($lines); Viewport = $null; VisibleIndexes = @(0..14) }
+    return [pscustomobject]@{
+        Mode = $mode
+        Lines = @($lines)
+        Viewport = $diagnosticViewport
+        VisibleIndexes = @(Get-WdtTuiVisibleIndexes -DiagnosticCount $State.Diagnostics.Count -Viewport $diagnosticViewport)
+    }
 }
 
 function Get-WdtTuiNormalLayout {
     param(
         [Parameter(Mandatory = $true)]$State,
         [int]$Width,
+        [int]$Height,
         [bool]$ShowItemNumbers
     )
 
     $items = @(Get-WdtTuiMenuItem -State $State)
     $selectedCount = @(Get-WdtTuiSelectedModule -State $State).Count
+    $diagnosticRows = $Height - 11
+    $diagnosticViewport = Get-WdtTuiDiagnosticViewport -DiagnosticCount $State.Diagnostics.Count -CursorIndex $State.CursorIndex -Rows $diagnosticRows
     $lines = @()
     $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'WDT - Windows Diagnostics Toolkit' -Width $Width) -Color 'Cyan'
     $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text 'Read-only | Local reports | No telemetry' -Width $Width) -Color 'DarkGray'
-    $lines += New-WdtTuiAlignedLine -LeftText 'DIAGNOSTICS' -RightText ('Selected: {0} / {1}' -f $selectedCount, $State.Diagnostics.Count) -Width $Width -LeftColor 'Cyan' -RightColor 'Cyan'
-    for ($index = 0; $index -lt $State.Diagnostics.Count; $index++) {
-        $lines += New-WdtTuiMenuLine -State $State -Item $items[$index] -Index $index -Width $Width -ShowItemNumbers $ShowItemNumbers
-    }
+    $diagnosticHeader = Get-WdtTuiDiagnosticHeader -Text 'DIAGNOSTICS' -DiagnosticCount $State.Diagnostics.Count -Viewport $diagnosticViewport
+    $lines += New-WdtTuiAlignedLine -LeftText $diagnosticHeader -RightText ('Selected: {0} / {1}' -f $selectedCount, $State.Diagnostics.Count) -Width $Width -LeftColor 'Cyan' -RightColor 'Cyan'
+    $lines += Get-WdtTuiDiagnosticLines -State $State -Items $items -Viewport $diagnosticViewport -Rows $diagnosticRows -Columns 1 -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $privacyIndex = $State.Diagnostics.Count
+    $markdownIndex = $privacyIndex + 1
+    $outputIndex = $privacyIndex + 2
+    $runIndex = $privacyIndex + 3
+    $exitIndex = $privacyIndex + 4
     $lines += New-WdtTuiAlignedLine -LeftText 'OPTIONS' -RightText 'OUTPUT / ACTIONS' -Width $Width -LeftColor 'Cyan' -RightColor 'Cyan'
-    $lines += New-WdtTuiMenuLine -State $State -Item $items[10] -Index 10 -Width $Width -ShowItemNumbers $ShowItemNumbers
-    $lines += New-WdtTuiMenuLine -State $State -Item $items[11] -Index 11 -Width $Width -ShowItemNumbers $ShowItemNumbers
-    $lines += New-WdtTuiMenuLine -State $State -Item $items[12] -Index 12 -Width $Width -ShowItemNumbers $ShowItemNumbers
-    $lines += New-WdtTuiMenuLine -State $State -Item $items[13] -Index 13 -Width $Width -ShowItemNumbers $ShowItemNumbers
-    $lines += New-WdtTuiMenuLine -State $State -Item $items[14] -Index 14 -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[$privacyIndex] -Index $privacyIndex -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[$markdownIndex] -Index $markdownIndex -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[$outputIndex] -Index $outputIndex -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[$runIndex] -Index $runIndex -Width $Width -ShowItemNumbers $ShowItemNumbers
+    $lines += New-WdtTuiMenuLine -State $State -Item $items[$exitIndex] -Index $exitIndex -Width $Width -ShowItemNumbers $ShowItemNumbers
     $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text (Get-WdtTuiHelpText -Mode 'Normal') -Width $Width) -Color 'DarkGray'
     $footerText = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { Get-WdtTuiFooterText } else { 'Error: ' + $State.ErrorMessage }
     $footerColor = if ([string]::IsNullOrWhiteSpace($State.ErrorMessage)) { 'Cyan' } else { 'Red' }
     $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $footerText -Width $Width) -Color $footerColor
 
-    return [pscustomobject]@{ Mode = 'Normal'; Lines = @($lines); Viewport = $null; VisibleIndexes = @(0..14) }
+    return [pscustomobject]@{
+        Mode = 'Normal'
+        Lines = @($lines)
+        Viewport = $diagnosticViewport
+        VisibleIndexes = @(Get-WdtTuiVisibleIndexes -DiagnosticCount $State.Diagnostics.Count -Viewport $diagnosticViewport)
+    }
 }
 
 function Get-WdtTuiCompactLayout {
@@ -674,11 +799,11 @@ function Get-WdtTuiLayout {
     $hostHeight = $Height
     $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $hostWidth
     $mode = Get-WdtTuiLayoutMode -Width $hostWidth -Height $hostHeight
-    if ($mode -eq 'Wide') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Short $false -LogoMode $LogoMode -ShowItemNumbers $ShowItemNumbers }
-    if ($mode -eq 'WideShort') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Short $true -LogoMode 'Ascii' -ShowItemNumbers $ShowItemNumbers }
+    if ($mode -eq 'Wide') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Height $hostHeight -Short $false -LogoMode $LogoMode -ShowItemNumbers $ShowItemNumbers }
+    if ($mode -eq 'WideShort') { return Get-WdtTuiWideLayout -State $State -Width $renderWidth -Height $hostHeight -Short $true -LogoMode 'Ascii' -ShowItemNumbers $ShowItemNumbers }
     if ($mode -eq 'Normal') {
         $normalWidth = [Math]::Min($renderWidth, 96)
-        return Get-WdtTuiNormalLayout -State $State -Width $normalWidth -ShowItemNumbers $ShowItemNumbers
+        return Get-WdtTuiNormalLayout -State $State -Width $normalWidth -Height $hostHeight -ShowItemNumbers $ShowItemNumbers
     }
     if ($mode -eq 'Compact') { return Get-WdtTuiCompactLayout -State $State -Width $renderWidth -Height $hostHeight -ShowItemNumbers $ShowItemNumbers }
     return Get-WdtTuiTooSmallLayout -Width $renderWidth -Height $hostHeight -HostWidth $hostWidth
@@ -1022,6 +1147,7 @@ function Show-WdtTuiRunResult {
 
 function Invoke-WdtInteractiveSession {
     param(
+        [Parameter(Mandatory = $true)]$RegistrySnapshot,
         [string[]]$InitialSelection,
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
         [int]$ModuleTimeoutSeconds = 180,
@@ -1037,7 +1163,7 @@ function Invoke-WdtInteractiveSession {
         return 2
     }
 
-    $state = New-WdtTuiState -OutputDirectory $OutputDirectory -InitialSelection $InitialSelection
+    $state = New-WdtTuiState -RegistrySnapshot $RegistrySnapshot -OutputDirectory $OutputDirectory -InitialSelection $InitialSelection
     $useReadKey = $true
     $lastExitCode = 0
     $originalCursorVisible = $null
@@ -1143,19 +1269,20 @@ function Invoke-WdtInteractiveSession {
 
             $reportParameters = ConvertTo-WdtReportParameters `
                 -State $state `
+                -RegistrySnapshot $RegistrySnapshot `
                 -ModuleTimeoutSeconds $ModuleTimeoutSeconds `
                 -NoExternalNetworkTests $NoExternalNetworkTests `
                 -NetworkDnsTestName $NetworkDnsTestName `
                 -NetworkHttpsEndpoint $NetworkHttpsEndpoint `
                 -NetworkIcmpTarget $NetworkIcmpTarget
-            if (@($reportParameters.SelectedModules).Count -eq 0) {
+            if (@($reportParameters.ModuleDefinitions).Count -eq 0) {
                 $state.ErrorMessage = 'Select at least one diagnostic module.'
                 continue
             }
 
             $size = Get-WdtTuiHostSize
             $renderWidth = Get-WdtTuiRenderWidth -WindowWidth $size.Width
-            $runningLayout = Get-WdtTuiRunningLayout -SelectedCount @($reportParameters.SelectedModules).Count -Width $renderWidth
+            $runningLayout = Get-WdtTuiRunningLayout -SelectedCount @($reportParameters.ModuleDefinitions).Count -Width $renderWidth
             Show-WdtTuiFrame -Layout $runningLayout -Width $size.Width
             try {
                 $result = Invoke-WdtReport @reportParameters
