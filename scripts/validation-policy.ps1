@@ -29,22 +29,183 @@ function Test-WdtProcessRunnerPath {
     return Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\process-runner.ps1'
 }
 
-function Test-WdtAllowedDotSource {
-    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
-    if ($CommandAst.InvocationOperator -ne [System.Management.Automation.Language.TokenKind]::Dot -or $CommandAst.CommandElements.Count -ne 1) { return $false }
-    $text = $CommandAst.CommandElements[0].Extent.Text
-    $allowed = @("`$PSScriptRoot\validation-policy.ps1", "`$PSScriptRoot\report-common.ps1", "`$PSScriptRoot\scripts\report-common.ps1", "`$PSScriptRoot\scripts\diagnostic-catalog.ps1", "`$PSScriptRoot\scripts\tui.ps1")
-    if ($text -eq "`$PSScriptRoot\scripts\process-runner.ps1") {
-        return Test-WdtEntrypointPath $ScriptPath $RepositoryRoot
+function Test-WdtModuleRegistryPath {
+    param([string]$ScriptPath, [string]$RepositoryRoot)
+    return Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\module-registry.ps1'
+}
+
+function Resolve-WdtStaticScriptRootPath {
+    param($PathAst, [string]$ScriptPath)
+
+    if ($PathAst -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -and
+        $PathAst -isnot [System.Management.Automation.Language.ExpandableStringExpressionAst]) { return $null }
+
+    $text = $PathAst.Extent.Text.Trim()
+    if ($text.Length -ge 2 -and $text[0] -eq "'" -and $text[$text.Length - 1] -eq "'") { return $null }
+    if ($text.Length -ge 2 -and $text[0] -eq '"' -and $text[$text.Length - 1] -eq '"') {
+        $text = $text.Substring(1, $text.Length - 2)
     }
-    if ($text -notin $allowed) { return $false }
-    $scriptsPath = [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'scripts'))
-    $scriptDirectory = [System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptPath))
-    return ($text -eq "`$PSScriptRoot\validation-policy.ps1" -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\validate.ps1')) -or
-        ($text -eq "`$PSScriptRoot\report-common.ps1" -and [string]::Equals($scriptDirectory, $scriptsPath, [System.StringComparison]::OrdinalIgnoreCase)) -or
-        ($text -eq "`$PSScriptRoot\scripts\report-common.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) -or
-        ($text -eq "`$PSScriptRoot\scripts\diagnostic-catalog.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) -or
-        ($text -eq "`$PSScriptRoot\scripts\tui.ps1" -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot))
+
+    $prefix = '$PSScriptRoot'
+    if (-not $text.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)) { return $null }
+    $relativePath = $text.Substring($prefix.Length)
+    if ($relativePath.Length -lt 2 -or $relativePath[0] -notin @('\', '/')) { return $null }
+    $relativePath = $relativePath.TrimStart('\', '/')
+    if ([string]::IsNullOrWhiteSpace($relativePath) -or $relativePath -match '[`$():]') { return $null }
+
+    try {
+        return [System.IO.Path]::GetFullPath((Join-Path -Path (Split-Path -Parent $ScriptPath) -ChildPath $relativePath))
+    }
+    catch {
+        return $null
+    }
+}
+
+function Test-WdtPathInCollection {
+    param([string]$Path, $Paths)
+
+    foreach ($candidate in @($Paths)) {
+        if ([string]::Equals([System.IO.Path]::GetFullPath([string]$Path), [System.IO.Path]::GetFullPath([string]$candidate), [System.StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Test-WdtPathWithinDirectory {
+    param([string]$Path, [string]$Directory)
+
+    $fullPath = [System.IO.Path]::GetFullPath($Path)
+    $fullDirectory = [System.IO.Path]::GetFullPath($Directory).TrimEnd(
+        [System.IO.Path]::DirectorySeparatorChar,
+        [System.IO.Path]::AltDirectorySeparatorChar
+    )
+    $prefix = $fullDirectory + [System.IO.Path]::DirectorySeparatorChar
+    return $fullPath.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase)
+}
+
+function Get-WdtModuleScriptClassification {
+    param([string]$ScriptPath, $RegistrySnapshot)
+
+    foreach ($definition in @($RegistrySnapshot.Modules)) {
+        if (-not (Test-WdtPathWithinDirectory -Path $ScriptPath -Directory $definition.ModuleDirectory)) { continue }
+        if (Test-WdtPathInCollection -Path $ScriptPath -Paths $definition.ScriptPaths) { return 'Registered' }
+        return 'SnapshotMismatch'
+    }
+
+    return 'Orphan'
+}
+
+function Get-WdtModuleDefinitionForScript {
+    param([string]$ScriptPath, $RegistrySnapshot)
+
+    if ($null -eq $RegistrySnapshot) { return $null }
+    foreach ($definition in @($RegistrySnapshot.Modules)) {
+        if (Test-WdtPathInCollection -Path $ScriptPath -Paths $definition.ScriptPaths) {
+            return $definition
+        }
+    }
+
+    return $null
+}
+
+function Test-WdtAllowedDotSource {
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot, $RegistrySnapshot, $ModuleDefinition)
+
+    if ($CommandAst.InvocationOperator -ne [System.Management.Automation.Language.TokenKind]::Dot -or
+        $CommandAst.CommandElements.Count -ne 1 -or $CommandAst.Redirections.Count -ne 0) { return $false }
+
+    $targetPath = Resolve-WdtStaticScriptRootPath -PathAst $CommandAst.CommandElements[0] -ScriptPath $ScriptPath
+    if ([string]::IsNullOrWhiteSpace($targetPath)) { return $false }
+
+    $fixedImports = @(
+        [pscustomobject]@{ Caller = 'scripts\validate.ps1'; Target = 'scripts\validation-policy.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\validate.ps1'; Target = 'scripts\module-registry.ps1' },
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\module-registry.ps1' },
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\report-common.ps1' },
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\process-runner.ps1' },
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\tui.ps1' }
+    )
+    foreach ($fixedImport in $fixedImports) {
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot $fixedImport.Caller) -and
+            (Test-WdtScriptPath $targetPath $RepositoryRoot $fixedImport.Target)) { return $true }
+    }
+
+    if ($null -eq $ModuleDefinition) {
+        $ModuleDefinition = Get-WdtModuleDefinitionForScript -ScriptPath $ScriptPath -RegistrySnapshot $RegistrySnapshot
+    }
+    if ($null -eq $ModuleDefinition) { return $false }
+
+    if (Test-WdtPathInCollection -Path $targetPath -Paths $ModuleDefinition.ScriptPaths) { return $true }
+    return (Test-WdtPathInCollection -Path $ScriptPath -Paths @($ModuleDefinition.EntryPoint)) -and
+        (Test-WdtScriptPath $targetPath $RepositoryRoot 'scripts\report-common.ps1')
+}
+
+function Test-WdtTerminalTopLevelCommand {
+    param([Parameter(Mandatory = $true)][System.Management.Automation.Language.CommandAst]$CommandAst)
+
+    if ($null -ne (Get-WdtEnclosingFunctionAst -Ast $CommandAst)) { return $false }
+    if ($CommandAst.Parent -isnot [System.Management.Automation.Language.PipelineAst]) { return $false }
+    $pipeline = $CommandAst.Parent
+    if (@($pipeline.PipelineElements).Count -ne 1 -or
+        -not [System.Object]::ReferenceEquals($pipeline.PipelineElements[0], $CommandAst)) { return $false }
+
+    $current = $pipeline.Parent
+    while ($null -ne $current -and $current -isnot [System.Management.Automation.Language.ScriptBlockAst]) {
+        $current = $current.Parent
+    }
+    if ($null -eq $current -or $null -eq $current.EndBlock) { return $false }
+    $statements = @($current.EndBlock.Statements)
+    return $statements.Count -gt 0 -and [System.Object]::ReferenceEquals($statements[$statements.Count - 1], $pipeline)
+}
+
+function Test-WdtAllowedRegisteredScriptInvocation {
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot, $RegistrySnapshot, $ModuleDefinition)
+
+    if ($CommandAst.InvocationOperator -ne [System.Management.Automation.Language.TokenKind]::Ampersand -or
+        $CommandAst.Redirections.Count -ne 0 -or $CommandAst.CommandElements.Count -lt 1) { return $false }
+
+    $targetPath = Resolve-WdtStaticScriptRootPath -PathAst $CommandAst.CommandElements[0] -ScriptPath $ScriptPath
+    if ([string]::IsNullOrWhiteSpace($targetPath)) { return $false }
+
+    if ($null -eq $ModuleDefinition) {
+        $ModuleDefinition = Get-WdtModuleDefinitionForScript -ScriptPath $ScriptPath -RegistrySnapshot $RegistrySnapshot
+    }
+    if ($null -ne $ModuleDefinition) {
+        return Test-WdtPathInCollection -Path $targetPath -Paths $ModuleDefinition.ScriptPaths
+    }
+
+    $scriptsDirectory = [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot 'scripts'))
+    if (-not [string]::Equals([System.IO.Path]::GetFullPath((Split-Path -Parent $ScriptPath)), $scriptsDirectory, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+    if (-not (Test-WdtTerminalTopLevelCommand -CommandAst $CommandAst)) { return $false }
+    if ($CommandAst.CommandElements.Count -ne 2) { return $false }
+    $forwardedParameters = $CommandAst.CommandElements[1]
+    if ($forwardedParameters -isnot [System.Management.Automation.Language.VariableExpressionAst] -or
+        -not $forwardedParameters.Splatted -or $forwardedParameters.VariablePath.UserPath -cne 'PSBoundParameters') { return $false }
+
+    $launcherTargets = @{
+        'crash-hang-diagnostics.ps1' = 'modules\crashes\diagnostic.ps1'
+        'disk-health.ps1' = 'modules\disk\diagnostic.ps1'
+        'event-log-check.ps1' = 'modules\events\diagnostic.ps1'
+        'network-check.ps1' = 'modules\network\diagnostic.ps1'
+        'performance-snapshot.ps1' = 'modules\performance\diagnostic.ps1'
+        'security-posture.ps1' = 'modules\security\diagnostic.ps1'
+        'services-check.ps1' = 'modules\services\diagnostic.ps1'
+        'system-info.ps1' = 'modules\system\diagnostic.ps1'
+        'time-sync-diagnostics.ps1' = 'modules\time\diagnostic.ps1'
+        'windows-update-check.ps1' = 'modules\updates\diagnostic.ps1'
+    }
+    $launcherName = Split-Path -Leaf $ScriptPath
+    if (-not $launcherTargets.ContainsKey($launcherName)) { return $false }
+    $expectedTarget = [System.IO.Path]::GetFullPath((Join-Path $RepositoryRoot $launcherTargets[$launcherName]))
+    if (-not [string]::Equals($targetPath, $expectedTarget, [System.StringComparison]::OrdinalIgnoreCase)) { return $false }
+
+    foreach ($definition in @($RegistrySnapshot.Modules)) {
+        if (Test-WdtPathInCollection -Path $expectedTarget -Paths @($definition.EntryPoint)) { return $true }
+    }
+
+    return $false
 }
 
 function Test-WdtAllowedNewItemCommand {
@@ -92,16 +253,106 @@ function Test-WdtScriptPath {
 function Get-WdtEnclosingFunctionName {
     param([System.Management.Automation.Language.Ast]$Ast)
 
+    $functionAst = Get-WdtEnclosingFunctionAst -Ast $Ast
+    if ($null -ne $functionAst) { return $functionAst.Name }
+    return $null
+}
+
+function Get-WdtEnclosingFunctionAst {
+    param([System.Management.Automation.Language.Ast]$Ast)
+
     $current = $Ast.Parent
     while ($null -ne $current) {
         if ($current -is [System.Management.Automation.Language.FunctionDefinitionAst]) {
-            return $current.Name
+            return $current
         }
 
         $current = $current.Parent
     }
 
     return $null
+}
+
+function ConvertTo-WdtNormalizedAstText {
+    param([Parameter(Mandatory = $true)][System.Management.Automation.Language.Ast]$Ast)
+    return (($Ast.Extent.Text -replace '\s+', ' ').Trim())
+}
+
+function Test-WdtAllowedW32tmProcessShape {
+    param(
+        [Parameter(Mandatory = $true)][System.Management.Automation.Language.Ast]$Ast,
+        [string]$ScriptPath,
+        [string]$RepositoryRoot,
+        [string[]]$LocalFunctionNames
+    )
+
+    if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1')) { return $false }
+    if ('Get-Command' -in @($LocalFunctionNames)) { return $false }
+
+    $functionAst = Get-WdtEnclosingFunctionAst -Ast $Ast
+    if ($null -eq $functionAst -or $functionAst.Name -cne 'Invoke-W32tmQuery') { return $false }
+
+    $expectedCommands = @(
+        "Get-Command -Name 'w32tm.exe' -ErrorAction SilentlyContinue",
+        'Get-WdtOemEncoding',
+        'New-Object System.Diagnostics.Process',
+        'New-Object System.Diagnostics.ProcessStartInfo',
+        'New-WdtW32tmResult -Stdout $stdout -Stderr $stderr -ExitCode $exitCode'
+    ) | Sort-Object
+    $actualCommands = @($functionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |
+            ForEach-Object { ConvertTo-WdtNormalizedAstText -Ast $_ } | Sort-Object)
+    if ($actualCommands.Count -ne $expectedCommands.Count) { return $false }
+    for ($index = 0; $index -lt $expectedCommands.Count; $index++) {
+        if ($actualCommands[$index] -cne $expectedCommands[$index]) { return $false }
+    }
+
+    $expectedAssignments = @(
+        '$command = Get-Command -Name ''w32tm.exe'' -ErrorAction SilentlyContinue',
+        '$exitCode = $process.ExitCode',
+        '$oemEncoding = Get-WdtOemEncoding',
+        '$process = $null',
+        '$process = New-Object System.Diagnostics.Process',
+        '$process.StartInfo = $startInfo',
+        '$stderr = $stderrReader.ReadToEnd()',
+        '$stderrReader = $null',
+        '$stderrReader = $process.StandardError',
+        '$startInfo = New-Object System.Diagnostics.ProcessStartInfo',
+        '$startInfo.Arguments = if ($Query -eq ''Source'') { ''/query /source'' } else { ''/query /status /verbose'' }',
+        '$startInfo.CreateNoWindow = $true',
+        '$startInfo.FileName = $command.Source',
+        '$startInfo.RedirectStandardError = $true',
+        '$startInfo.RedirectStandardOutput = $true',
+        '$startInfo.StandardErrorEncoding = $oemEncoding',
+        '$startInfo.StandardOutputEncoding = $oemEncoding',
+        '$startInfo.UseShellExecute = $false',
+        '$stdout = $stdoutReader.ReadToEnd()',
+        '$stdoutReader = $null',
+        '$stdoutReader = $process.StandardOutput'
+    ) | Sort-Object
+    $actualAssignments = @($functionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true) |
+            ForEach-Object { ConvertTo-WdtNormalizedAstText -Ast $_ } | Sort-Object)
+    if ($actualAssignments.Count -ne $expectedAssignments.Count) { return $false }
+    for ($index = 0; $index -lt $expectedAssignments.Count; $index++) {
+        if ($actualAssignments[$index] -cne $expectedAssignments[$index]) { return $false }
+    }
+
+    $expectedMemberCalls = @(
+        '$process.Dispose()',
+        '$process.Start()',
+        '$process.WaitForExit()',
+        '$stderrReader.Dispose()',
+        '$stderrReader.ReadToEnd()',
+        '$stdoutReader.Dispose()',
+        '$stdoutReader.ReadToEnd()'
+    ) | Sort-Object
+    $actualMemberCalls = @($functionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true) |
+            ForEach-Object { ConvertTo-WdtNormalizedAstText -Ast $_ } | Sort-Object)
+    if ($actualMemberCalls.Count -ne $expectedMemberCalls.Count) { return $false }
+    for ($index = 0; $index -lt $expectedMemberCalls.Count; $index++) {
+        if ($actualMemberCalls[$index] -cne $expectedMemberCalls[$index]) { return $false }
+    }
+
+    return $true
 }
 
 function Test-WdtSimpleVariable {
@@ -137,7 +388,7 @@ function Test-WdtAllowedInternalCallbackInvocation {
 function Test-WdtAllowedBitLockerCimQuery {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
 
-    if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\security-posture.ps1')) { return $false }
+    if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\security\diagnostic.ps1')) { return $false }
     if ($CommandAst.GetCommandName() -ine 'Invoke-CimMethod') { return $false }
     if ($CommandAst.Redirections.Count -ne 0) { return $false }
 
@@ -197,7 +448,7 @@ function Get-WdtNewObjectTypeName {
 }
 
 function Test-WdtAllowedNewObjectCommand {
-    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot, [string[]]$LocalFunctionNames)
 
     if ($CommandAst.Redirections.Count -ne 0) { return $false }
     $elements = @($CommandAst.CommandElements)
@@ -231,7 +482,9 @@ function Test-WdtAllowedNewObjectCommand {
         'System.Collections.Generic.List[int]',
         'System.Collections.Generic.List[double]',
         'System.Collections.Generic.List[System.IO.FileInfo]',
-        'System.Collections.Generic.Queue[System.IO.DirectoryInfo]'
+        'System.Collections.Generic.Queue[System.IO.DirectoryInfo]',
+        'System.Collections.Generic.Dictionary[string,object]',
+        'System.Collections.ObjectModel.ReadOnlyDictionary[string,object]'
     )
     if ($typeName -in $safeTypes) { return $true }
 
@@ -241,7 +494,7 @@ function Test-WdtAllowedNewObjectCommand {
         $CommandAst.Extent.Text -ceq 'New-Object char[] $script:WdtProcessRunnerConfig.StreamBufferSize') { return $true }
 
     if ($typeName -eq 'System.Net.Sockets.TcpClient' -and
-        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\network-check.ps1') -and
+        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\network\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Test-TcpEndpointConnection' -and
         $CommandAst.CommandElements.Count -eq 2) { return $true }
 
@@ -252,9 +505,10 @@ function Test-WdtAllowedNewObjectCommand {
         return $true
     }
     if ($typeName -in @('System.Diagnostics.ProcessStartInfo', 'System.Diagnostics.Process') -and
-        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
+        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-W32tmQuery' -and
-        $CommandAst.CommandElements.Count -eq 2) {
+        $CommandAst.CommandElements.Count -eq 2 -and
+        (Test-WdtAllowedW32tmProcessShape -Ast $CommandAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot -LocalFunctionNames $LocalFunctionNames)) {
         return $true
     }
 
@@ -314,6 +568,48 @@ function Test-WdtAllowedPowerShellCommand {
     )
 }
 
+function Test-WdtAllowedManifestImport {
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
+
+    if (-not (Test-WdtModuleRegistryPath $ScriptPath $RepositoryRoot) -or
+        $CommandAst.GetCommandName() -ine 'Import-PowerShellDataFile' -or
+        $CommandAst.Redirections.Count -ne 0) { return $false }
+
+    $elements = @($CommandAst.CommandElements)
+    if ($elements.Count -ne 5) { return $false }
+    return $elements[1] -is [System.Management.Automation.Language.CommandParameterAst] -and
+        $elements[1].ParameterName -ieq 'LiteralPath' -and
+        (Test-WdtSimpleVariable $elements[2] 'fullManifestPath') -and
+        $elements[3] -is [System.Management.Automation.Language.CommandParameterAst] -and
+        $elements[3].ParameterName -ieq 'ErrorAction' -and
+        $elements[4] -is [System.Management.Automation.Language.StringConstantExpressionAst] -and
+        $elements[4].Value -ieq 'Stop'
+}
+
+function Test-WdtAllowedParserParseFile {
+    param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot)
+
+    if ($MemberAst.Expression -isnot [System.Management.Automation.Language.TypeExpressionAst] -or
+        $MemberAst.Expression.TypeName.FullName -ne 'System.Management.Automation.Language.Parser' -or
+        [string]$MemberAst.Member.Value -ne 'ParseFile' -or $MemberAst.Arguments.Count -ne 3) { return $false }
+
+    $arguments = @($MemberAst.Arguments | ForEach-Object { ConvertTo-WdtNormalizedAstText -Ast $_ })
+    $functionName = Get-WdtEnclosingFunctionName $MemberAst
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\validate.ps1') -and $null -eq $functionName) {
+        return $arguments[0] -ceq '$script.FullName' -and $arguments[1] -ceq '[ref]$tokens' -and $arguments[2] -ceq '[ref]$parseErrors'
+    }
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\validation-policy.ps1') -and $functionName -ceq 'Get-WdtSafetyIssues') {
+        return $arguments[0] -ceq '$helperPath' -and $arguments[1] -ceq '[ref]$helperTokens' -and $arguments[2] -ceq '[ref]$helperErrors'
+    }
+    if ((Test-WdtModuleRegistryPath $ScriptPath $RepositoryRoot) -and $functionName -ceq 'Import-WdtModuleManifest') {
+        $manifestForm = $arguments[0] -ceq '$fullManifestPath' -and $arguments[1] -ceq '[ref]$tokens' -and $arguments[2] -ceq '[ref]$parseErrors'
+        $entrypointForm = $arguments[0] -ceq '$entryPointPath' -and $arguments[1] -ceq '[ref]$entryTokens' -and $arguments[2] -ceq '[ref]$entryErrors'
+        return $manifestForm -or $entrypointForm
+    }
+
+    return $false
+}
+
 function Test-WdtAllowedTuiReportInvocation {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
 
@@ -329,11 +625,12 @@ function Test-WdtAllowedTuiReportInvocation {
 }
 
 function Get-WdtCommandSafetyIssue {
-    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot, [string[]]$LocalFunctionNames)
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot, [string[]]$LocalFunctionNames, $RegistrySnapshot, $ModuleDefinition)
     if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Dot) {
-        if (-not (Test-WdtAllowedDotSource $CommandAst $ScriptPath $RepositoryRoot)) { return New-WdtSafetyIssue $CommandAst 'Dot-sourced script is not an approved repository helper.' }
+        if (-not (Test-WdtAllowedDotSource $CommandAst $ScriptPath $RepositoryRoot $RegistrySnapshot $ModuleDefinition)) { return New-WdtSafetyIssue $CommandAst 'Dot-sourced script is not an approved repository helper.' }
         return
     }
+    if (Test-WdtAllowedRegisteredScriptInvocation $CommandAst $ScriptPath $RepositoryRoot $RegistrySnapshot $ModuleDefinition) { return }
     $rawName = $CommandAst.GetCommandName()
     if ([string]::IsNullOrWhiteSpace($rawName)) {
         if (Test-WdtAllowedInternalCallbackInvocation $CommandAst $ScriptPath $RepositoryRoot) { return }
@@ -348,6 +645,11 @@ function Get-WdtCommandSafetyIssue {
     if ($leaf -eq 'Invoke-CimMethod') {
         if (Test-WdtAllowedBitLockerCimQuery $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'Invoke-CimMethod is only allowed for approved read-only BitLocker status queries.'
+    }
+
+    if ($leaf -eq 'Import-PowerShellDataFile') {
+        if (Test-WdtAllowedManifestImport $CommandAst $ScriptPath $RepositoryRoot) { return }
+        return New-WdtSafetyIssue $CommandAst 'Import-PowerShellDataFile is only allowed for the exact registry manifest importer form.'
     }
 
     if ($leaf -eq 'Invoke-WdtReport') {
@@ -370,15 +672,13 @@ function Get-WdtCommandSafetyIssue {
         return New-WdtSafetyIssue $CommandAst 'Clear-Host is only allowed in approved TUI rendering functions without redirection.'
     }
 
-    if ($leaf -eq 'Get-WdtDiagnosticDefinition' -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1')) { return }
-
     if ($leaf -eq 'New-Item') {
         if (Test-WdtAllowedNewItemCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'New-Item is only allowed in Invoke-WindowsDiagnostics.ps1 for -OutputDirectory creation.'
     }
 
     if ($leaf -eq 'New-Object') {
-        if (Test-WdtAllowedNewObjectCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
+        if (Test-WdtAllowedNewObjectCommand $CommandAst $ScriptPath $RepositoryRoot $LocalFunctionNames) { return }
         return New-WdtSafetyIssue $CommandAst 'New-Object type is not in the reviewed safe-type allowlist.'
     }
 
@@ -407,12 +707,35 @@ function Get-WdtCommandSafetyIssue {
 }
 
 function Get-WdtMemberSafetyIssue {
-    param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot)
+    param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot, [string[]]$LocalFunctionNames)
     $member = [string]$MemberAst.Member.Value
     $argumentCount = $MemberAst.Arguments.Count
     $isStatic = $MemberAst.Expression -is [System.Management.Automation.Language.TypeExpressionAst]
     if ($isStatic) {
         $typeName = $MemberAst.Expression.TypeName.FullName
+        if (Test-WdtModuleRegistryPath $ScriptPath $RepositoryRoot) {
+            $registryStaticMethods = @(
+                'System.Collections.Generic.Dictionary[string,object]::new',
+                'System.Collections.Generic.Dictionary[string,string]::new',
+                'System.Collections.Generic.HashSet[string]::new',
+                'System.Collections.Generic.List[object]::new',
+                'System.Collections.Generic.List[string]::new',
+                'System.Collections.Generic.Queue[string]::new',
+                'System.Collections.ObjectModel.ReadOnlyDictionary[string,object]::new',
+                'System.Collections.ObjectModel.ReadOnlyDictionary[string,string]::new',
+                'System.Array::Sort',
+                'System.IO.Directory::Exists',
+                'System.IO.File::Exists',
+                'System.IO.Path::GetFileName',
+                'System.IO.Path::IsPathRooted'
+            )
+            if (("{0}::{1}" -f $typeName, $member) -in $registryStaticMethods) { return }
+        }
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+            ("{0}::{1}" -f $typeName, $member) -in @(
+                'System.Collections.Generic.Dictionary[string,object]::new',
+                'System.Collections.ObjectModel.ReadOnlyDictionary[string,object]::new'
+            )) { return }
         if ($typeName -eq 'System.Console' -and $member -eq 'ReadKey' -and
             (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
             (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Wait-WdtTuiEvent' -and
@@ -439,7 +762,7 @@ function Get-WdtMemberSafetyIssue {
             return
         }
         if ($typeName -eq 'System.Text.Encoding' -and $member -eq 'GetEncoding' -and
-            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
+            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
             (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Get-WdtOemEncoding' -and
             $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -ceq '$oemCodePage') {
             return
@@ -457,6 +780,10 @@ function Get-WdtMemberSafetyIssue {
         if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
             $typeName -eq 'Security.Principal.WindowsIdentity' -and $member -eq 'GetCurrent' -and
             (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport') { return }
+        if ($typeName -eq 'System.Management.Automation.Language.Parser' -and $member -eq 'ParseFile') {
+            if (Test-WdtAllowedParserParseFile -MemberAst $MemberAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot) { return }
+            return New-WdtSafetyIssue $MemberAst 'Parser::ParseFile is only allowed for exact production validation and registry parser forms.'
+        }
 
         $safeStaticMethods = @(
             'IO.Path::GetExtension',
@@ -470,9 +797,10 @@ function Get-WdtMemberSafetyIssue {
             'string::IsNullOrWhiteSpace',
             'System.Diagnostics.Process::GetCurrentProcess',
             'System.Guid::TryParse',
+            'System.Object::ReferenceEquals',
             'System.IO.Path::GetExtension',
             'System.IO.Path::GetFullPath',
-            'System.Management.Automation.Language.Parser::ParseFile',
+            'System.IO.Path::GetPathRoot',
             'System.Net.Dns::GetHostAddresses',
             'System.Net.IPAddress::TryParse',
             'System.Text.RegularExpressions.Regex::Escape',
@@ -485,6 +813,8 @@ function Get-WdtMemberSafetyIssue {
     }
 
     $receiver = if ($MemberAst.Expression -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Expression.VariablePath.UserPath } else { '' }
+    if ((Test-WdtModuleRegistryPath $ScriptPath $RepositoryRoot) -and $member -eq 'AsReadOnly' -and
+        $receiver -in @('list', 'moduleList') -and $argumentCount -eq 0) { return }
     if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot)) { return }
     if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and (
             (((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -and $member -in @('Kill', 'WaitForExit', 'Dispose')) -or
@@ -495,18 +825,19 @@ function Get-WdtMemberSafetyIssue {
     if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
         (Get-WdtEnclosingFunctionName $MemberAst) -in @('New-WdtStreamCaptureState', 'Read-WdtCompletedStreamChunks') -and
         $member -eq 'ReadAsync' -and $argumentCount -eq 3) { return }
-    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\network-check.ps1') -and
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\network\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Test-TcpEndpointConnection' -and
         $member -in @('ConnectAsync', 'Wait', 'Dispose')) { return }
-    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-W32tmQuery' -and
+        (Test-WdtAllowedW32tmProcessShape -Ast $MemberAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot -LocalFunctionNames $LocalFunctionNames) -and
         (($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0) -or
             ($member -eq 'Dispose' -and $receiver -in @('process', 'stdoutReader', 'stderrReader') -and $argumentCount -eq 0))) {
         return
     }
 
     if ($member -eq 'GetString' -and $receiver -ceq 'Encoding' -and $argumentCount -eq 1 -and
-        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\time-sync-diagnostics.ps1') -and
+        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'ConvertFrom-WdtOemBytes') {
         return
     }
@@ -526,6 +857,7 @@ function Get-WdtMemberSafetyIssue {
         'FindAll',
         'GetAddressBytes',
         'GetCommandName',
+        'GetEnumerator',
         'GetUnresolvedProviderPathFromPSPath',
         'IndexOf',
         'LastIndexOf',
@@ -541,6 +873,7 @@ function Get-WdtMemberSafetyIssue {
         'ToUpperInvariant',
         'Trim',
         'TrimEnd',
+        'TrimStart',
         'WaitForExit'
     )
     if ($member -in $safeInstanceMethods) { return }
@@ -568,22 +901,23 @@ function Get-WdtConsolePropertySafetyIssue {
 }
 
 function Get-WdtSafetyIssues {
-    param([Parameter(Mandatory = $true)]$Ast, [Parameter(Mandatory = $true)][string]$ScriptPath, [Parameter(Mandatory = $true)][string]$RepositoryRoot)
-    $localFunctionNames = @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
-    $approvedImports = @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | Where-Object { Test-WdtAllowedDotSource $_ $ScriptPath $RepositoryRoot })
+    param(
+        [Parameter(Mandatory = $true)]$Ast,
+        [Parameter(Mandatory = $true)][string]$ScriptPath,
+        [Parameter(Mandatory = $true)][string]$RepositoryRoot,
+        $RegistrySnapshot,
+        $ModuleDefinition,
+        [string[]]$PackageFunctionNames = @()
+    )
+
+    if ($null -eq $ModuleDefinition) {
+        $ModuleDefinition = Get-WdtModuleDefinitionForScript -ScriptPath $ScriptPath -RegistrySnapshot $RegistrySnapshot
+    }
+    $localFunctionNames = @($PackageFunctionNames) + @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
+    $approvedImports = @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true) | Where-Object { Test-WdtAllowedDotSource $_ $ScriptPath $RepositoryRoot $RegistrySnapshot $ModuleDefinition })
     foreach ($import in $approvedImports) {
-        $helperPath = if ($import.CommandElements[0].Extent.Text -like '*validation-policy.ps1') {
-            Join-Path $RepositoryRoot 'scripts\validation-policy.ps1'
-        }
-        elseif ($import.CommandElements[0].Extent.Text -like '*tui.ps1') {
-            Join-Path $RepositoryRoot 'scripts\tui.ps1'
-        }
-        elseif ($import.CommandElements[0].Extent.Text -like '*diagnostic-catalog.ps1') {
-            Join-Path $RepositoryRoot 'scripts\diagnostic-catalog.ps1'
-        }
-        else {
-            Join-Path $RepositoryRoot 'scripts\report-common.ps1'
-        }
+        $helperPath = Resolve-WdtStaticScriptRootPath -PathAst $import.CommandElements[0] -ScriptPath $ScriptPath
+        if ([string]::IsNullOrWhiteSpace($helperPath) -or -not (Test-Path -LiteralPath $helperPath -PathType Leaf)) { continue }
         $helperTokens = $null
         $helperErrors = $null
         $helperAst = [System.Management.Automation.Language.Parser]::ParseFile($helperPath, [ref]$helperTokens, [ref]$helperErrors)
@@ -591,8 +925,9 @@ function Get-WdtSafetyIssues {
             $localFunctionNames += @($helperAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
         }
     }
-    foreach ($command in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))) { Get-WdtCommandSafetyIssue $command $ScriptPath $RepositoryRoot $localFunctionNames }
-    foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtMemberSafetyIssue $member $ScriptPath $RepositoryRoot }
+    $localFunctionNames = @($localFunctionNames | Sort-Object -Unique)
+    foreach ($command in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))) { Get-WdtCommandSafetyIssue $command $ScriptPath $RepositoryRoot $localFunctionNames $RegistrySnapshot $ModuleDefinition }
+    foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtMemberSafetyIssue $member $ScriptPath $RepositoryRoot $localFunctionNames }
     foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.MemberExpressionAst] -and $n -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtConsolePropertySafetyIssue $member $ScriptPath $RepositoryRoot }
     foreach ($variable in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -like 'function:*' }, $true))) {
         New-WdtSafetyIssue $variable 'Dynamic function provider access is not allowed in production scripts.'

@@ -40,7 +40,7 @@ function Test-ContainsLiteral {
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$performanceScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\performance-snapshot.ps1'
+$performanceScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\performance\diagnostic.ps1'
 $scriptSource = Get-Content -LiteralPath $performanceScript -Raw
 
 foreach ($forbiddenPattern in @('\.Path\b', '\.Owner\b', 'CommandLine')) {

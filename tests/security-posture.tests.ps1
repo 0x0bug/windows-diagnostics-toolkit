@@ -28,7 +28,7 @@ function Test-ContainsLiteral {
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$securityScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\security-posture.ps1'
+$securityScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\security\diagnostic.ps1'
 $scriptSource = Get-Content -LiteralPath $securityScript -Raw
 
 foreach ($forbiddenText in @('KeyProtector', 'RecoveryPassword', 'Recovery Key', 'CommandLine')) {

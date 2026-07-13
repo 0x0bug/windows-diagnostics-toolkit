@@ -28,7 +28,7 @@ function Test-ContainsLiteral {
 }
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$crashScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\crash-hang-diagnostics.ps1'
+$crashScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\crashes\diagnostic.ps1'
 $scriptSource = Get-Content -LiteralPath $crashScript -Raw
 
 foreach ($forbiddenText in @('Get-Content', 'Get-FileHash', 'CommandLine')) {

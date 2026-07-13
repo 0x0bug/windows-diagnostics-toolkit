@@ -3,18 +3,20 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$moduleScripts = @(
-    'system-info.ps1', 'security-posture.ps1', 'performance-snapshot.ps1', 'network-check.ps1',
-    'time-sync-diagnostics.ps1', 'disk-health.ps1', 'crash-hang-diagnostics.ps1', 'event-log-check.ps1',
-    'services-check.ps1', 'windows-update-check.ps1'
-)
+$moduleRegistryPath = Join-Path $repositoryRoot 'scripts\module-registry.ps1'
+if (-not (Test-Path -LiteralPath $moduleRegistryPath -PathType Leaf)) { throw "Missing module registry: $moduleRegistryPath" }
+. $moduleRegistryPath
+
+$registrySnapshot = Get-WdtModuleRegistry -ModuleRoot (Join-Path $repositoryRoot 'modules')
+$moduleScripts = @($registrySnapshot.Modules | ForEach-Object { @($_.ScriptPaths) } | Sort-Object -Unique)
+if ($moduleScripts.Count -eq 0) { throw 'Module registry did not expose any PowerShell scripts.' }
 
 foreach ($script in $moduleScripts) {
-    $path = Join-Path $repositoryRoot "scripts\$script"
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing module $script." }
+    $path = [string]$script
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Missing registered module script $path." }
     $tokens = $null; $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$tokens, [ref]$errors)
-    if (@($errors).Count -ne 0) { throw "Parser errors in module $script." }
+    if (@($errors).Count -ne 0) { throw "Parser errors in registered module script $path." }
 }
 
-Write-Host 'Ten diagnostic module parser tests passed.'
+Write-Host ('Diagnostic module parser tests passed ({0} scripts).' -f $moduleScripts.Count)
