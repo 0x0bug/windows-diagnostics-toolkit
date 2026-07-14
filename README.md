@@ -142,12 +142,14 @@ WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
 | Network | Adapters, route/default gateway, system DNS resolution, TCP to a configured HTTPS endpoint, and optional ICMP |
 | Time | W32Time service, timezone, clock, source, status, optional events |
 | Storage | Windows-reported storage state, available reliability counters, and volume free space |
-| Crashes | Application crash/hang events, BugCheck events, dump-file metadata |
-| Event Log | Recent Critical and Error events from System and Application logs |
-| Services | Service states, startup entries, and scheduled tasks; `Auto + Stopped` alone is indeterminate, not a warning |
-| Windows Update | Version, recent updates, reboot indicators, update-related services and optional events |
+| Crashes | Grouped Application Error, Application Hang, WER, BugCheck, Reliability Monitor, and dump-file context; findings account for recency and repetition |
+| Event Log | Grouped recent Critical and Error context from System and Application; only a small documented high-signal subset creates findings |
+| Services | Service states, startup entries, and scheduled tasks; stopped services and optional inventories remain context unless a stronger signal is present |
+| Windows Update | Version, recent updates, reboot indicators, service context, and grouped installation or download failures |
 
 The report begins with a findings summary so the user can see what needs attention before reading every section.
+
+Event Log severity by itself does not prove that Windows is unhealthy: generic Critical and Error events remain diagnostic context rather than automatic `WARN` or `ERROR` findings. Repeated evidence is grouped with a count and first/last timestamps. The default lookback is 24 hours for Event Log, 7 days for crashes and hangs, and 30 days for Windows Update; evidence outside the selected window does not affect findings. A stopped Windows Update service is also context because manual and trigger-start services can be idle normally.
 
 ## Share reports safely
 

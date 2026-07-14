@@ -14,6 +14,14 @@ $ErrorActionPreference = 'Stop'
 
 . $PSScriptRoot\..\..\scripts\report-common.ps1
 
+# A stopped service is not a failure by itself because Windows services can be
+# started or stopped by trigger. RpcSs is the only curated critical-service rule.
+# https://learn.microsoft.com/en-us/windows/win32/services/service-trigger-events
+# Win32_Service documents ExitCode 1077 as "no attempts to start ... since boot";
+# that value is context, not a service failure.
+# https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-service
+# https://learn.microsoft.com/en-us/troubleshoot/windows-client/performance/disable-rpc-service-windows-process-not-work
+
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
     Write-Host ''
@@ -68,13 +76,32 @@ function Get-ServiceInventory {
 function Get-ServiceDiagnosticState {
     param([Parameter(Mandatory = $true)]$Service)
 
-    if ([string]$Service.State -in @('Start Pending', 'Stop Pending', 'Continue Pending', 'Pause Pending')) {
-        return 'WarnPending'
+    if ([string]$Service.Name -eq 'RpcSs' -and [string]$Service.StartMode -eq 'Disabled') {
+        return 'ConfirmedProblem'
     }
-    if ([int]$Service.ExitCode -ne 0) { return 'WarnExitCode' }
+
+    $exitCode = 0L
+    try {
+        if ($null -ne $Service.ExitCode) {
+            $exitCode = [long]$Service.ExitCode
+        }
+    }
+    catch {
+        return 'Suspicious'
+    }
+
+    if ($exitCode -notin @(0, 1077)) {
+        return 'ConfirmedProblem'
+    }
+
+    if ([string]$Service.State -in @('Start Pending', 'Stop Pending', 'Continue Pending', 'Pause Pending')) {
+        return 'Suspicious'
+    }
+
     if ([string]$Service.StartMode -eq 'Auto' -and [string]$Service.State -eq 'Stopped') {
         return 'Indeterminate'
     }
+
     return 'Normal'
 }
 
@@ -91,10 +118,6 @@ function Get-StartupEntryInventory {
     foreach ($path in $registryPaths) {
         try {
             if (-not (Test-Path -LiteralPath $path)) {
-                $errors.Add([pscustomobject]@{
-                    Path  = $path
-                    Error = 'Path not found'
-                })
                 continue
             }
 
@@ -218,10 +241,30 @@ $automaticNotRunning = @(
         Sort-Object -Property Name
 )
 
-$nonOkServiceStates = @(
+$suspiciousServiceStates = @(
     $services |
-        Where-Object { (Get-ServiceDiagnosticState -Service $_) -like 'Warn*' } |
+        Where-Object { (Get-ServiceDiagnosticState -Service $_) -eq 'Suspicious' } |
         Sort-Object -Property State, Name
+)
+
+$confirmedServiceProblems = @(
+    $services |
+        Where-Object { (Get-ServiceDiagnosticState -Service $_) -eq 'ConfirmedProblem' } |
+        Sort-Object -Property Name
+)
+
+$nonZeroExitCodeServices = @(
+    $services |
+        Where-Object {
+            $exitCode = $_.ExitCode -as [long]
+            $null -ne $exitCode -and $exitCode -notin @(0, 1077)
+        }
+)
+
+$disabledCriticalServices = @(
+    $services |
+        Where-Object { [string]$_.Name -eq 'RpcSs' -and [string]$_.StartMode -eq 'Disabled' } |
+        Sort-Object -Property Name
 )
 
 $runningServices = @(
@@ -231,20 +274,24 @@ $runningServices = @(
 )
 
 if ($null -ne $serviceInventory.Error) {
-    Write-WdtFinding -Severity WARN -Code 'SERVICE_INVENTORY_UNAVAILABLE' -Message 'The Windows service inventory could not be read.' -Evidence (ConvertTo-SafeSingleLine -Value $serviceInventory.Error)
+    Write-WdtFinding -Severity WARN -Code 'SERVICE_INVENTORY_UNAVAILABLE' -Message 'Services assessment could not be completed because the Win32_Service inventory was unavailable.' -Evidence (ConvertTo-SafeSingleLine -Value $serviceInventory.Error)
 }
-else {
-    $serviceStateIssues = @($nonOkServiceStates | Sort-Object -Property Name -Unique)
 
-    if ($serviceStateIssues.Count -gt 0) {
-        $serviceIssueEvidence = @(
-            $serviceStateIssues |
-                Select-Object -First 10 |
-                ForEach-Object { '{0}={1} ({2})' -f $_.Name, $_.State, $_.StartMode }
-        ) -join '; '
+if ($nonZeroExitCodeServices.Count -gt 0) {
+    $serviceExitCodeEvidence = @(
+        $nonZeroExitCodeServices |
+            Select-Object -First 10 |
+            ForEach-Object { '{0}={1} ({2}), ExitCode={3}' -f $_.Name, $_.State, $_.StartMode, $_.ExitCode }
+    ) -join '; '
+    Write-WdtFinding -Severity WARN -Code 'SERVICE_EXIT_CODE_NONZERO' -Message ('{0} service(s) report an actionable non-zero service exit code.' -f $nonZeroExitCodeServices.Count) -Evidence $serviceExitCodeEvidence
+}
 
-        Write-WdtFinding -Severity WARN -Code 'SERVICE_STATE_CONFIRMED' -Message ('{0} service(s) have a pending state or non-zero service exit code.' -f $serviceStateIssues.Count) -Evidence $serviceIssueEvidence
-    }
+if ($disabledCriticalServices.Count -gt 0) {
+    $criticalServiceEvidence = @(
+        $disabledCriticalServices |
+            ForEach-Object { '{0}={1} ({2})' -f $_.Name, $_.State, $_.StartMode }
+    ) -join '; '
+    Write-WdtFinding -Severity WARN -Code 'CRITICAL_SERVICE_DISABLED' -Message 'The Remote Procedure Call service is disabled.' -Evidence $criticalServiceEvidence
 }
 
 Write-Section 'Summary'
@@ -255,7 +302,8 @@ else {
     Write-Host ('Total services                 : {0}' -f $services.Count)
     Write-Host ('Running services               : {0}' -f $runningServices.Count)
     Write-Host ('Auto + Stopped (Indeterminate) : {0}' -f $automaticNotRunning.Count)
-    Write-Host ('Confirmed service issues       : {0}' -f $nonOkServiceStates.Count)
+    Write-Host ('Pending states (Suspicious)     : {0}' -f $suspiciousServiceStates.Count)
+    Write-Host ('Confirmed service problems     : {0}' -f $confirmedServiceProblems.Count)
 }
 
 Write-Host ('Startup entries included       : {0}' -f [bool]$IncludeStartup)
@@ -270,12 +318,21 @@ else {
     Write-ServiceRows -Services $automaticNotRunning -Limit $MaxItems
 }
 
-Write-Section 'Pending States or Non-Zero Exit Codes'
+Write-Section 'Pending Service States (Suspicious Context)'
 if ($null -ne $serviceInventory.Error) {
     Write-Host 'Skipped because service inventory is unavailable.'
 }
 else {
-    Write-ServiceRows -Services $nonOkServiceStates -Limit $MaxItems
+    Write-Host 'A pending state is a transition snapshot and does not create a finding by itself.'
+    Write-ServiceRows -Services $suspiciousServiceStates -Limit $MaxItems
+}
+
+Write-Section 'Confirmed Service Problems'
+if ($null -ne $serviceInventory.Error) {
+    Write-Host 'Skipped because service inventory is unavailable.'
+}
+else {
+    Write-ServiceRows -Services $confirmedServiceProblems -Limit $MaxItems
 }
 
 if ($IncludeRunning -and $null -eq $serviceInventory.Error) {
@@ -291,17 +348,6 @@ else {
     $startupInventory = Get-StartupEntryInventory
     $startupEntries = @($startupInventory.Entries | Sort-Object -Property Location, Name)
     $shownStartupEntries = @($startupEntries | Select-Object -First $MaxItems)
-    $startupSourceErrors = @($startupInventory.Errors | Where-Object { $_.Error -ne 'Path not found' })
-
-    if ($startupSourceErrors.Count -gt 0) {
-        $startupErrorEvidence = @(
-            $startupSourceErrors |
-                ForEach-Object { '{0}: {1}' -f $_.Path, (ConvertTo-SafeSingleLine -Value $_.Error) }
-        ) -join '; '
-
-        Write-WdtFinding -Severity WARN -Code 'STARTUP_SOURCE_UNAVAILABLE' -Message ('{0} startup source(s) could not be read.' -f $startupSourceErrors.Count) -Evidence $startupErrorEvidence
-    }
-
     Write-ItemLimitNote -Shown $shownStartupEntries.Count -Total $startupEntries.Count
 
     if ($shownStartupEntries.Count -eq 0) {
@@ -317,11 +363,11 @@ else {
     }
 
     foreach ($errorItem in @($startupInventory.Errors)) {
-        Write-Warning ("Startup source unavailable: {0} - {1}" -f $errorItem.Path, $errorItem.Error)
+        Write-Host ("Startup source unavailable (context only): {0} - {1}" -f $errorItem.Path, $errorItem.Error)
     }
 }
 
-Write-Section 'Scheduled Tasks With Non-Zero Last Result'
+Write-Section 'Scheduled Tasks With Non-Zero Last Result (Context)'
 if (-not $IncludeScheduledTasks) {
     Write-Host 'Skipped. Use -IncludeScheduledTasks to include read-only scheduled task checks.'
 }
@@ -329,12 +375,10 @@ else {
     $taskInventory = Get-ScheduledTaskInventory
 
     if ($taskInventory.Unavailable) {
-        Write-WdtFinding -Severity WARN -Code 'SCHEDULED_TASK_SOURCE_UNAVAILABLE' -Message 'Scheduled task diagnostics are unavailable.' -Evidence (ConvertTo-SafeSingleLine -Value $taskInventory.Error)
-        Write-Host ('Unavailable: {0}' -f $taskInventory.Error)
+        Write-Host ('Unavailable (context only): {0}' -f $taskInventory.Error)
     }
     elseif ($null -ne $taskInventory.Error) {
-        Write-WdtFinding -Severity WARN -Code 'SCHEDULED_TASK_SOURCE_UNAVAILABLE' -Message 'The scheduled task inventory could not be read.' -Evidence (ConvertTo-SafeSingleLine -Value $taskInventory.Error)
-        Write-Host ('Skipped because scheduled tasks are unavailable: {0}' -f $taskInventory.Error)
+        Write-Host ('Skipped because scheduled tasks are unavailable (context only): {0}' -f $taskInventory.Error)
     }
     else {
         $tasks = @($taskInventory.Tasks | Sort-Object -Property TaskPath, TaskName)
@@ -357,18 +401,8 @@ else {
             }
         }
 
-        if ($taskInventory.Errors.Count -gt 0) {
-            $taskErrorEvidence = @(
-                $taskInventory.Errors |
-                    Select-Object -First 10 |
-                    ForEach-Object { '{0}{1}: {2}' -f $_.TaskPath, $_.TaskName, (ConvertTo-SafeSingleLine -Value $_.Error) }
-            ) -join '; '
-
-            Write-WdtFinding -Severity WARN -Code 'SCHEDULED_TASK_SOURCE_UNAVAILABLE' -Message ('Details could not be read for {0} scheduled task(s).' -f $taskInventory.Errors.Count) -Evidence $taskErrorEvidence
-        }
-
         foreach ($errorItem in @($taskInventory.Errors | Select-Object -First $MaxItems)) {
-            Write-Warning ("Scheduled task info unavailable: {0}{1} - {2}" -f $errorItem.TaskPath, $errorItem.TaskName, $errorItem.Error)
+            Write-Host ("Scheduled task info unavailable (context only): {0}{1} - {2}" -f $errorItem.TaskPath, $errorItem.TaskName, $errorItem.Error)
         }
     }
 }
