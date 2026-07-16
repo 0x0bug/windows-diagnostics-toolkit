@@ -320,7 +320,9 @@ pwsh -NoProfile -File .\scripts\event-log-check.ps1
 
 ### Services and Startup
 
-Checks service states, startup entries, and scheduled tasks. The main wrapper enables both optional inventories so the title matches the work performed. `Auto + Stopped` alone is displayed as `Indeterminate`, because trigger-start, delayed, conditional, and intentionally idle services can be stopped normally. Pending states are suspicious context; findings require a stronger signal such as an actionable service exit code or the explicitly documented critical RPC service being disabled. Exit code `1077` (not started since boot) remains context. An unavailable core `Win32_Service` inventory creates `SERVICE_INVENTORY_UNAVAILABLE`; unavailable startup entries and scheduled tasks remain context.
+Checks service states, startup entries, and scheduled tasks. The main wrapper enables both optional inventories so the title matches the work performed. Startup entries include registry `Run` sources in both registry views plus the user and common Startup folders. Each row reports `State`, `State source`, `Source type`, `Location`, `Name`, and `Startup Command Line`. A registered entry is not necessarily active: only recognized `StartupApproved` records are reported as `Enabled` or `Disabled`; missing, malformed, inaccessible, or unknown records remain `Unknown` and do not create findings.
+
+`Auto + Stopped` alone is displayed as `Indeterminate`, because trigger-start, delayed, conditional, and intentionally idle services can be stopped normally. Pending states are suspicious context; findings require a stronger signal such as an actionable service exit code or the explicitly documented critical RPC service being disabled. Exit code `1077` (not started since boot) remains context. An unavailable core `Win32_Service` inventory creates `SERVICE_INVENTORY_UNAVAILABLE`; unavailable startup entries and scheduled tasks remain context.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Services

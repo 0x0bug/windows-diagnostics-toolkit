@@ -105,45 +105,277 @@ function Get-ServiceDiagnosticState {
     return 'Normal'
 }
 
-function Get-StartupEntryInventory {
-    $registryPaths = @(
-        'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run',
-        'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run',
-        'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
+function Get-StartupSourceDefinitions {
+    $startupFolderSuffix = 'Microsoft\Windows\Start Menu\Programs\Startup'
+    return @(
+        [pscustomobject]@{
+            SourceType       = 'Registry'
+            Location         = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+            ApprovalLocation = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+        },
+        [pscustomobject]@{
+            SourceType       = 'Registry'
+            Location         = 'HKCU:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
+            ApprovalLocation = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32'
+        },
+        [pscustomobject]@{
+            SourceType       = 'Registry'
+            Location         = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
+            ApprovalLocation = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run'
+        },
+        [pscustomobject]@{
+            SourceType       = 'Registry'
+            Location         = 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run'
+            ApprovalLocation = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\Run32'
+        },
+        [pscustomobject]@{
+            SourceType       = 'StartupFolder'
+            Location         = Join-Path -Path $env:APPDATA -ChildPath $startupFolderSuffix
+            ApprovalLocation = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder'
+        },
+        [pscustomobject]@{
+            SourceType       = 'StartupFolder'
+            Location         = Join-Path -Path $env:ProgramData -ChildPath $startupFolderSuffix
+            ApprovalLocation = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Explorer\StartupApproved\StartupFolder'
+        }
+    )
+}
+
+function ConvertFrom-StartupApprovedValue {
+    param($Value)
+
+    # StartupApproved is an undocumented binary contract. Accept only the two
+    # confirmed 12-byte state prefixes and keep every other shape conservative.
+    if ($Value -isnot [byte[]] -or $Value.Length -ne 12) {
+        return 'Unknown'
+    }
+
+    if ($Value[1] -ne 0 -or $Value[2] -ne 0 -or $Value[3] -ne 0) {
+        return 'Unknown'
+    }
+
+    if ($Value[0] -eq 2) { return 'Enabled' }
+    if ($Value[0] -eq 3) { return 'Disabled' }
+    return 'Unknown'
+}
+
+function Get-StartupApprovalInventory {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $values = @{}
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return [pscustomobject]@{
+            Path   = $Path
+            Exists = $false
+            Values = $values
+            Error  = $null
+        }
+    }
+
+    try {
+        $item = Get-ItemProperty -LiteralPath $Path -ErrorAction Stop
+        foreach ($property in @($item.PSObject.Properties | Where-Object { $_.Name -notin @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider') })) {
+            $values[$property.Name] = $property.Value
+        }
+
+        return [pscustomobject]@{
+            Path   = $Path
+            Exists = $true
+            Values = $values
+            Error  = $null
+        }
+    }
+    catch {
+        return [pscustomobject]@{
+            Path   = $Path
+            Exists = $true
+            Values = $values
+            Error  = $_.Exception.Message
+        }
+    }
+}
+
+function Resolve-StartupEntryState {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)]$ApprovalInventory
+    )
+
+    $path = [string]$ApprovalInventory.Path
+    if (-not [string]::IsNullOrWhiteSpace([string]$ApprovalInventory.Error)) {
+        return [pscustomobject]@{ State = 'Unknown'; StateSource = "StartupApproved read failed: $path" }
+    }
+
+    if (-not $ApprovalInventory.Exists) {
+        return [pscustomobject]@{ State = 'Unknown'; StateSource = "StartupApproved key missing: $path" }
+    }
+
+    if (-not $ApprovalInventory.Values.ContainsKey($Name)) {
+        return [pscustomobject]@{ State = 'Unknown'; StateSource = "StartupApproved value missing: $path" }
+    }
+
+    $state = ConvertFrom-StartupApprovedValue -Value $ApprovalInventory.Values[$Name]
+    if ($state -eq 'Unknown') {
+        return [pscustomobject]@{ State = 'Unknown'; StateSource = "StartupApproved value unrecognized: $path" }
+    }
+
+    return [pscustomobject]@{ State = $state; StateSource = $path }
+}
+
+function Get-StartupRegistrySourceInventory {
+    param(
+        [Parameter(Mandatory = $true)]$Definition,
+        $ApprovalInventory
     )
 
     $entries = New-Object System.Collections.Generic.List[object]
     $errors = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $ApprovalInventory) {
+        $ApprovalInventory = Get-StartupApprovalInventory -Path $Definition.ApprovalLocation
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$approvalInventory.Error)) {
+        $errors.Add([pscustomobject]@{ Path = $approvalInventory.Path; Error = $approvalInventory.Error })
+    }
 
-    foreach ($path in $registryPaths) {
-        try {
-            if (-not (Test-Path -LiteralPath $path)) {
-                continue
-            }
-
-            $item = Get-ItemProperty -LiteralPath $path -ErrorAction Stop
-            $properties = $item.PSObject.Properties |
-                Where-Object { $_.Name -notlike 'PS*' }
-
-            foreach ($property in $properties) {
+    try {
+        if (Test-Path -LiteralPath $Definition.Location) {
+            $item = Get-ItemProperty -LiteralPath $Definition.Location -ErrorAction Stop
+            foreach ($property in @($item.PSObject.Properties | Where-Object { $_.Name -notin @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider') })) {
+                $state = Resolve-StartupEntryState -Name $property.Name -ApprovalInventory $approvalInventory
                 $entries.Add([pscustomobject]@{
-                    Location = $path
-                    Name     = $property.Name
-                    Command  = [string]$property.Value
+                    State       = $state.State
+                    StateSource = $state.StateSource
+                    SourceType  = $Definition.SourceType
+                    Location    = $Definition.Location
+                    Name        = $property.Name
+                    Command     = [string]$property.Value
                 })
             }
         }
-        catch {
-            $errors.Add([pscustomobject]@{
-                Path  = $path
-                Error = $_.Exception.Message
-            })
+    }
+    catch {
+        $errors.Add([pscustomobject]@{ Path = $Definition.Location; Error = $_.Exception.Message })
+    }
+
+    return [pscustomobject]@{ Entries = @($entries.ToArray()); Errors = @($errors.ToArray()) }
+}
+
+function Get-StartupFolderSourceInventory {
+    param(
+        [Parameter(Mandatory = $true)]$Definition,
+        $ApprovalInventory
+    )
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    $errors = New-Object System.Collections.Generic.List[object]
+    if ($null -eq $ApprovalInventory) {
+        $ApprovalInventory = Get-StartupApprovalInventory -Path $Definition.ApprovalLocation
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string]$approvalInventory.Error)) {
+        $errors.Add([pscustomobject]@{ Path = $approvalInventory.Path; Error = $approvalInventory.Error })
+    }
+
+    try {
+        if (Test-Path -LiteralPath $Definition.Location -PathType Container) {
+            foreach ($file in @(Get-ChildItem -LiteralPath $Definition.Location -Force -File -ErrorAction Stop)) {
+                $state = Resolve-StartupEntryState -Name $file.Name -ApprovalInventory $approvalInventory
+                $entries.Add([pscustomobject]@{
+                    State       = $state.State
+                    StateSource = $state.StateSource
+                    SourceType  = $Definition.SourceType
+                    Location    = $Definition.Location
+                    Name        = $file.Name
+                    Command     = $file.FullName
+                })
+            }
+        }
+    }
+    catch {
+        $errors.Add([pscustomobject]@{ Path = $Definition.Location; Error = $_.Exception.Message })
+    }
+
+    return [pscustomobject]@{ Entries = @($entries.ToArray()); Errors = @($errors.ToArray()) }
+}
+
+function Merge-StartupInventory {
+    param([object[]]$SourceInventories)
+
+    $entries = New-Object System.Collections.Generic.List[object]
+    $errors = New-Object System.Collections.Generic.List[object]
+    foreach ($inventory in @($SourceInventories)) {
+        foreach ($entry in @($inventory.Entries)) { $entries.Add($entry) }
+        foreach ($errorItem in @($inventory.Errors)) { $errors.Add($errorItem) }
+    }
+
+    return [pscustomobject]@{ Entries = @($entries.ToArray()); Errors = @($errors.ToArray()) }
+}
+
+function Get-StartupEntriesForDisplay {
+    param(
+        [object[]]$Entries,
+        [Parameter(Mandatory = $true)][int]$Limit
+    )
+
+    $indexedEntries = for ($index = 0; $index -lt @($Entries).Count; $index++) {
+        $entry = @($Entries)[$index]
+        $stateRank = if ($entry.State -eq 'Enabled') { 0 } elseif ($entry.State -eq 'Disabled') { 1 } else { 2 }
+        [pscustomobject]@{
+            Entry         = $entry
+            StateRank     = $stateRank
+            SourceType    = [string]$entry.SourceType
+            Location      = [string]$entry.Location
+            Name          = [string]$entry.Name
+            Command       = [string]$entry.Command
+            OriginalIndex = $index
         }
     }
 
-    return [pscustomobject]@{
-        Entries = @($entries.ToArray())
-        Errors  = @($errors.ToArray())
+    return @($indexedEntries | Sort-Object -Property StateRank, SourceType, Location, Name, Command, OriginalIndex | Select-Object -First $Limit | ForEach-Object { $_.Entry })
+}
+
+function Get-StartupEntryInventory {
+    $sourceInventories = New-Object System.Collections.Generic.List[object]
+    foreach ($definition in @(Get-StartupSourceDefinitions)) {
+        if ($definition.SourceType -eq 'Registry') {
+            $sourceInventories.Add((Get-StartupRegistrySourceInventory -Definition $definition))
+        }
+        else {
+            $sourceInventories.Add((Get-StartupFolderSourceInventory -Definition $definition))
+        }
+    }
+
+    return Merge-StartupInventory -SourceInventories @($sourceInventories.ToArray())
+}
+
+function Write-StartupEntryRows {
+    param(
+        [Parameter(Mandatory = $true)]$Inventory,
+        [Parameter(Mandatory = $true)][int]$Limit
+    )
+
+    $entries = @($Inventory.Entries)
+    $shownEntries = @(Get-StartupEntriesForDisplay -Entries $entries -Limit $Limit)
+    Write-ItemLimitNote -Shown $shownEntries.Count -Total $entries.Count
+    Write-Host 'A registered startup entry is not necessarily active. State is reported only when StartupApproved contains a recognized value.'
+    Write-Host ''
+
+    if ($shownEntries.Count -eq 0) {
+        Write-Host 'No startup entries found.'
+    }
+    else {
+        foreach ($entry in $shownEntries) {
+            Write-Host ('State               : {0}' -f $entry.State)
+            Write-Host ('State source        : {0}' -f (ConvertTo-SafeSingleLine -Value $entry.StateSource))
+            Write-Host ('Source type         : {0}' -f $entry.SourceType)
+            Write-Host ('Location            : {0}' -f (ConvertTo-SafeSingleLine -Value $entry.Location))
+            Write-Host ('Name                : {0}' -f (ConvertTo-SafeSingleLine -Value $entry.Name))
+            Write-Host ('Startup Command Line: {0}' -f (ConvertTo-SafeSingleLine -Value $entry.Command))
+            Write-Host ''
+        }
+    }
+
+    foreach ($errorItem in @($Inventory.Errors)) {
+        Write-Host ("Startup source unavailable (context only): {0} - {1}" -f $errorItem.Path, $errorItem.Error)
     }
 }
 
@@ -346,25 +578,7 @@ if (-not $IncludeStartup) {
 }
 else {
     $startupInventory = Get-StartupEntryInventory
-    $startupEntries = @($startupInventory.Entries | Sort-Object -Property Location, Name)
-    $shownStartupEntries = @($startupEntries | Select-Object -First $MaxItems)
-    Write-ItemLimitNote -Shown $shownStartupEntries.Count -Total $startupEntries.Count
-
-    if ($shownStartupEntries.Count -eq 0) {
-        Write-Host 'No startup entries found.'
-    }
-    else {
-        foreach ($entry in $shownStartupEntries) {
-            Write-Host ('Location: {0}' -f $entry.Location)
-            Write-Host ('Name    : {0}' -f $entry.Name)
-            Write-Host ('Command : {0}' -f (ConvertTo-SafeSingleLine -Value $entry.Command))
-            Write-Host ''
-        }
-    }
-
-    foreach ($errorItem in @($startupInventory.Errors)) {
-        Write-Host ("Startup source unavailable (context only): {0} - {1}" -f $errorItem.Path, $errorItem.Error)
-    }
+    Write-StartupEntryRows -Inventory $startupInventory -Limit $MaxItems
 }
 
 Write-Section 'Scheduled Tasks With Non-Zero Last Result (Context)'
