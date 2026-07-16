@@ -64,6 +64,7 @@ Import-TestFunctions -Path $servicesScript -Names @(
     'ConvertTo-SafeSingleLine',
     'Get-StartupSourceDefinitions',
     'ConvertFrom-StartupApprovedValue',
+    'Get-StartupApprovalInventory',
     'Resolve-StartupEntryState',
     'Get-StartupFolderSourceInventory',
     'Merge-StartupInventory',
@@ -102,6 +103,13 @@ Assert-True $missingValueState.StateSource.Contains('value missing') 'A missing 
 $readErrorState = Resolve-StartupEntryState -Name 'Fixture' -ApprovalInventory (New-TestApprovalInventory -ErrorMessage 'fixture access denied')
 Assert-Equal 'Unknown' $readErrorState.State 'An unavailable StartupApproved source must remain Unknown.'
 Assert-True $readErrorState.StateSource.Contains('read failed') 'An unavailable approval source must be explained by StateSource.'
+
+# A provider failure while checking the key is captured as source context.
+function Test-Path { [CmdletBinding()] param([string]$LiteralPath); throw 'fixture provider unavailable' }
+$providerErrorInventory = Get-StartupApprovalInventory -Path 'HKCU:\Fixture\StartupApproved'
+Assert-True (-not [string]::IsNullOrWhiteSpace($providerErrorInventory.Error)) 'A StartupApproved provider failure must be captured.'
+Assert-True $providerErrorInventory.Error.Contains('fixture provider unavailable') 'The StartupApproved provider error lost its cause.'
+Remove-Item -Path Function:\Test-Path
 
 # 8. Definitions cover Run, Run32, and both Startup folders for HKCU and HKLM.
 $definitions = @(Get-StartupSourceDefinitions)
@@ -178,7 +186,7 @@ try {
     $privacyContext = New-WdtRedactionContext -ComputerName '' -UserName '' -UserDomain '' -UserProfile ''
     $protectedDisplay = Protect-WdtText -Text $displayText -Context $privacyContext
     Assert-True (-not $protectedDisplay.Contains('super-secret')) 'Privacy Mode leaked a startup command line.'
-    Assert-True $protectedDisplay.Contains('<ID-1>') 'Privacy Mode did not replace the startup command line with a stable ID token.'
+    Assert-True $protectedDisplay.Contains('fixture.exe --token=<REDACTED>') 'Privacy Mode did not preserve the executable while redacting the startup command secret.'
 }
 finally {
     if (Test-Path -LiteralPath $fixtureRoot) {

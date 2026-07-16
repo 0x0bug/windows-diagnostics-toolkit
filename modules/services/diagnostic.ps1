@@ -163,16 +163,18 @@ function Get-StartupApprovalInventory {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $values = @{}
-    if (-not (Test-Path -LiteralPath $Path)) {
-        return [pscustomobject]@{
-            Path   = $Path
-            Exists = $false
-            Values = $values
-            Error  = $null
-        }
-    }
-
+    $exists = $false
     try {
+        $exists = [bool](Test-Path -LiteralPath $Path)
+        if (-not $exists) {
+            return [pscustomobject]@{
+                Path   = $Path
+                Exists = $false
+                Values = $values
+                Error  = $null
+            }
+        }
+
         $item = Get-ItemProperty -LiteralPath $Path -ErrorAction Stop
         foreach ($property in @($item.PSObject.Properties | Where-Object { $_.Name -notin @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider') })) {
             $values[$property.Name] = $property.Value
@@ -188,7 +190,7 @@ function Get-StartupApprovalInventory {
     catch {
         return [pscustomobject]@{
             Path   = $Path
-            Exists = $true
+            Exists = $exists
             Values = $values
             Error  = $_.Exception.Message
         }
