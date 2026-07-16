@@ -77,12 +77,6 @@ function Convert-TextToLines {
     return $lines
 }
 
-function ConvertTo-CommandArgument {
-    param([Parameter(Mandatory = $true)][string]$Value)
-
-    return '"' + $Value.Replace('"', '\"') + '"'
-}
-
 function Get-WdtExecutionCompleteness {
     param(
         [Parameter(Mandatory = $true)][string]$Status,
@@ -430,11 +424,12 @@ function Invoke-DiagnosticScript {
                 if ($argument -match '^-[A-Za-z][A-Za-z0-9]*$') { $argument }
                 else { "'" + $argument.Replace("'", "''") + "'" }
             })
-        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath' $($escapedArguments -join ' ')"
+        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath' $($escapedArguments -join ' ') 6>&1"
+        $encodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($commandText))
 
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
         $startInfo.FileName = $PowerShellPath
-        $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -Command {0}' -f (ConvertTo-CommandArgument -Value $commandText)
+        $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand ' + $encodedCommand
         $startInfo.WorkingDirectory = $RepositoryRoot
         $startInfo.UseShellExecute = $false
         $startInfo.RedirectStandardOutput = $true

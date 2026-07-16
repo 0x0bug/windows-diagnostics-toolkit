@@ -92,6 +92,24 @@ Write-WdtFinding -Severity WARN -Code 'AUTHENTIC_FINDING' -Message 'Authenticate
     Assert-True (($findingResult.OutputLines -join "`n").Contains('@@WDT_FINDING@@')) 'Native marker-like output must remain ordinary diagnostic output.'
     Assert-True ((($findingResult | ConvertTo-Json -Depth 8) -notmatch '@@WDT_FINDING@@[A-Fa-f0-9]{32}:')) 'The active finding nonce must not remain in the resolved result or user-facing errors.'
 
+    $argumentFixture = Join-Path $fixtureRoot 'arguments.ps1'
+    $argumentSource = "param([string]`$Value1, [string]`$Value2, [string]`$Value3, [string]`$Value4, [string]`$Value5, [string]`$Value6, [string]`$Value7, [string]`$Value8)`r`nforeach (`$value in @(`$Value1, `$Value2, `$Value3, `$Value4, `$Value5, `$Value6, `$Value7, `$Value8)) {`r`n    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$value))`r`n}"
+    [IO.File]::WriteAllText($argumentFixture, $argumentSource, [Text.Encoding]::UTF8)
+    $unicodeValue = 'Unicode: ' + (-join @([char]0x041F, [char]0x0440, [char]0x0438, [char]0x0432, [char]0x0435, [char]0x0442, [char]0x0020, [char]0x96EA))
+    $argumentValues = @('', 'plain value', $unicodeValue, 'double"quote', 'trailing\', "single'quote", '$dollar; & ampersand', 'back`tick')
+    $scriptArguments = @()
+    for ($argumentIndex = 0; $argumentIndex -lt $argumentValues.Count; $argumentIndex++) {
+        $scriptArguments += '-Value' + ($argumentIndex + 1)
+        $scriptArguments += $argumentValues[$argumentIndex]
+    }
+    $argumentResult = Invoke-DiagnosticScript 'Arguments' $argumentFixture $powerShellPath $repositoryRoot 10 $scriptArguments
+    Assert-Equal 'Success' $argumentResult.Status 'Complex arguments must survive process launch.'
+    $expectedArguments = @($argumentValues | ForEach-Object { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_)) })
+    Assert-Equal $expectedArguments.Count $argumentResult.OutputLines.Count 'The argument fixture returned an unexpected number of values.'
+    for ($argumentIndex = 0; $argumentIndex -lt $expectedArguments.Count; $argumentIndex++) {
+        Assert-Equal $expectedArguments[$argumentIndex] $argumentResult.OutputLines[$argumentIndex] "Argument $argumentIndex did not round-trip exactly."
+    }
+
     $heldFixture = Join-Path $fixtureRoot 'held.ps1'
     [IO.File]::WriteAllText($heldFixture, "`$child=Start-Process -FilePath '$powerShellPath' -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 15' -NoNewWindow -PassThru; 'HELD_CHILD_PID='+`$child.Id; 'stdout-held'; [Console]::Error.WriteLine('stderr-held')", [Text.Encoding]::UTF8)
     $started = Get-Date
