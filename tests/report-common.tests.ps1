@@ -245,4 +245,67 @@ foreach ($proxyLabel in @('Proxy URL:', 'ProxyServer:')) {
     Assert-True -Condition (-not $proxyLabelResult.Contains('user:password')) -Message ("Credentials were not removed from '{0}'." -f $proxyLabel)
 }
 
+$semicolonCredentialFixture = Protect-WdtSensitiveUrlText -Text 'Endpoint=https://user:pa;ss@example.test/path'
+Assert-True -Condition (-not $semicolonCredentialFixture.Contains('user:pa;ss')) -Message 'Semicolons in URI userinfo must not bypass credential redaction.'
+Assert-True -Condition $semicolonCredentialFixture.Contains('https://<REDACTED>@example.test/path') -Message 'URI host and path must remain visible after semicolon credential redaction.'
+
+$fragmentSecretFixture = Protect-WdtSensitiveUrlText -Text 'https://example.test/callback#access_token=fragment-secret&mode=ok'
+Assert-True -Condition (-not $fragmentSecretFixture.Contains('fragment-secret')) -Message 'Sensitive URL fragment values must be redacted.'
+Assert-True -Condition $fragmentSecretFixture.Contains('#access_token=<REDACTED>&mode=ok') -Message 'Non-sensitive URL fragment context must remain visible.'
+
+$commandSecretFixtures = @(
+    [pscustomobject]@{ Input = 'tool.exe --api-token alpha --mode safe'; Secrets = @('alpha'); Preserved = @('tool.exe', '--mode safe') },
+    [pscustomobject]@{ Input = 'tool.exe --api-token=bravo --token charlie --token=delta'; Secrets = @('bravo', 'charlie', 'delta'); Preserved = @('tool.exe') },
+    [pscustomobject]@{ Input = 'tool.exe --password "quoted secret" --secret=''single secret'''; Secrets = @('quoted secret', 'single secret'); Preserved = @('tool.exe', '--password "<REDACTED>"', "--secret='<REDACTED>'") },
+    [pscustomobject]@{ Input = "tool.exe`t-Key`tEcho-Secret`t/ToKeN:slash-secret --KEY=last-secret"; Secrets = @('Echo-Secret', 'slash-secret', 'last-secret'); Preserved = @('tool.exe') },
+    [pscustomobject]@{ Input = 'tool.exe "--token=outer-secret" --password trailing\ --verbose'; Secrets = @('outer-secret', 'trailing\'); Preserved = @('tool.exe', '--verbose') }
+)
+foreach ($fixture in $commandSecretFixtures) {
+    $actual = Protect-WdtCommandLineSecrets -Text $fixture.Input
+    foreach ($secretValue in $fixture.Secrets) {
+        Assert-True -Condition (-not $actual.Contains($secretValue)) -Message "Command secret '$secretValue' was disclosed on PowerShell $($PSVersionTable.PSVersion)."
+    }
+    foreach ($preservedValue in $fixture.Preserved) {
+        Assert-True -Condition $actual.Contains($preservedValue) -Message "Useful command text '$preservedValue' was removed on PowerShell $($PSVersionTable.PSVersion)."
+    }
+}
+
+$commandNegativeFixtures = @(
+    'tool.exe --mode safe --monkey banana',
+    'tool.exe /endpoint:https://example.test/path -KeyboardLayout en-US',
+    'tool.exe --tokenizer enabled --password-policy strict'
+)
+foreach ($fixture in $commandNegativeFixtures) {
+    Assert-Equal -Expected $fixture -Actual (Protect-WdtCommandLineSecrets -Text $fixture) -Message "A non-secret command argument changed on PowerShell $($PSVersionTable.PSVersion)."
+}
+
+$encodedUrlFixtures = @(
+    [pscustomobject]@{ Input = 'https://example.test/?api%5Ftoken=query-secret&mode=ok'; Secret = 'query-secret'; Preserved = 'mode=ok' },
+    [pscustomobject]@{ Input = 'https://example.test/#access%2Dtoken=fragment-secret&view=summary'; Secret = 'fragment-secret'; Preserved = 'view=summary' },
+    [pscustomobject]@{ Input = 'https://example.test/?client%5Fsecret=client-value&api%2Dkey=key-value'; Secret = 'client-value'; SecondSecret = 'key-value'; Preserved = 'example.test' },
+    [pscustomobject]@{ Input = 'https://client%5Fsecret:userinfo-value@example.test/path'; Secret = 'userinfo-value'; Preserved = 'example.test/path' }
+)
+foreach ($fixture in $encodedUrlFixtures) {
+    $actual = Protect-WdtSensitiveUrlText -Text $fixture.Input
+    Assert-True -Condition (-not $actual.Contains($fixture.Secret)) -Message "Encoded URL key or userinfo secret '$($fixture.Secret)' was disclosed on PowerShell $($PSVersionTable.PSVersion)."
+    if ($fixture.PSObject.Properties.Name -contains 'SecondSecret') {
+        Assert-True -Condition (-not $actual.Contains($fixture.SecondSecret)) -Message "Repeated encoded URL secret '$($fixture.SecondSecret)' was disclosed on PowerShell $($PSVersionTable.PSVersion)."
+    }
+    Assert-True -Condition $actual.Contains($fixture.Preserved) -Message "Non-secret URL context '$($fixture.Preserved)' was removed on PowerShell $($PSVersionTable.PSVersion)."
+}
+
+$encodedUrlNegativeFixtures = @(
+    'https://example.test/?api%255Ftoken=not-double-decoded&mode=ok',
+    'https://example.test/?public%5Fkey=visible-value&access%5Flevel=reader',
+    'https://example.test/?caption=client%5Fsecret&mode=ok'
+)
+foreach ($fixture in $encodedUrlNegativeFixtures) {
+    Assert-Equal -Expected $fixture -Actual (Protect-WdtSensitiveUrlText -Text $fixture) -Message "A non-sensitive or double-encoded URL parameter changed on PowerShell $($PSVersionTable.PSVersion)."
+}
+
+$privacyCommandContext = New-WdtRedactionContext -ComputerName '' -UserName '' -UserDomain '' -UserProfile ''
+$privacyCommand = Protect-WdtText -Text 'CommandLine: tool.exe --token report-secret --mode diagnose' -Context $privacyCommandContext
+Assert-True -Condition (-not $privacyCommand.Contains('report-secret')) -Message 'Privacy Mode leaked a command-line secret.'
+Assert-True -Condition $privacyCommand.Contains('CommandLine: tool.exe --token <REDACTED> --mode diagnose') -Message 'Privacy Mode removed diagnostically useful command text.'
+
 Write-Host 'Report common tests passed.'

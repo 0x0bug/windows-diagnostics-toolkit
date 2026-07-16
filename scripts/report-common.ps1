@@ -10,18 +10,69 @@ function Protect-WdtSensitiveUrlText {
         return $Text
     }
 
-    $credentialPattern = '(?i)(?<Prefix>\b(?:(?:https?|socks[45]?)://|(?:https?|socks|proxy)=|proxy(?:\s*(?:url|server(?:\(s\))?))?\s*:\s*))[^/\s;@]+@'
+    $uriCredentialPattern = '(?i)(?<Prefix>\b(?:https?|socks[45]?)://)[^/\s@]+@'
     $protectedText = [System.Text.RegularExpressions.Regex]::Replace(
         $Text,
-        $credentialPattern,
+        $uriCredentialPattern,
         '${Prefix}<REDACTED>@'
     )
 
-    $sensitiveQueryPattern = '(?i)(?<Prefix>[?&](?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|api[_-]?key|token|key|secret|password|passwd|pwd|credential|auth|authorization|signature|sig|sas|code|session(?:id)?|jwt|x-amz-[a-z0-9_-]+)=)[^&#\s]+'
+    $proxyCredentialPattern = '(?i)(?<Prefix>\b(?:(?:https?|socks|proxy)=|proxy(?:\s*(?:url|server(?:\(s\))?))?\s*:\s*))[^/\s;@]+@'
+    $protectedText = [System.Text.RegularExpressions.Regex]::Replace(
+        $protectedText,
+        $proxyCredentialPattern,
+        '${Prefix}<REDACTED>@'
+    )
+
+    $sensitiveQueryPattern = '(?<Prefix>[?&#])(?<Key>[^=&#\s]+)=(?<Value>[^&#\s]*)'
+    $sensitiveQueryEvaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param([System.Text.RegularExpressions.Match]$Match)
+
+        try {
+            $normalizedKey = [System.Uri]::UnescapeDataString($Match.Groups['Key'].Value)
+        }
+        catch [System.UriFormatException] {
+            return $Match.Value
+        }
+
+        if ($normalizedKey -notmatch '(?i)^(?:access[_-]?token|refresh[_-]?token|id[_-]?token|client[_-]?secret|api[_-]?token|api[_-]?key|token|key|secret|password|passwd|pwd|credential|auth|authorization|signature|sig|sas|code|session(?:id)?|jwt|x-amz-[a-z0-9_-]+)$') {
+            return $Match.Value
+        }
+
+        return $Match.Groups['Prefix'].Value + $Match.Groups['Key'].Value + '=<REDACTED>'
+    }
+
     return [System.Text.RegularExpressions.Regex]::Replace(
         $protectedText,
         $sensitiveQueryPattern,
-        '${Prefix}<REDACTED>'
+        $sensitiveQueryEvaluator
+    )
+}
+
+function Protect-WdtCommandLineSecrets {
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return $Text
+    }
+
+    $secretArgumentPattern = '(?i)(?<Option>(?<![A-Z0-9_-])(?:--?|/)(?:api[-_]?token|token|password|secret|key)(?![A-Z0-9_-]))(?:(?<Separator>[ \t]*[=:][ \t]*)(?<Value>"[^"\r\n]*"|''[^''\r\n]*''|[^\s"''`;&|]+)|(?<Separator>[ \t]+)(?<Value>"[^"\r\n]*"|''[^''\r\n]*''|[^\s"''`;&|]+))'
+    $secretArgumentEvaluator = [System.Text.RegularExpressions.MatchEvaluator]{
+        param([System.Text.RegularExpressions.Match]$Match)
+
+        $value = $Match.Groups['Value'].Value
+        $replacement = '<REDACTED>'
+        if ($value.Length -ge 2 -and (($value[0] -eq '"' -and $value[$value.Length - 1] -eq '"') -or ($value[0] -eq "'" -and $value[$value.Length - 1] -eq "'"))) {
+            $replacement = [string]$value[0] + '<REDACTED>' + [string]$value[$value.Length - 1]
+        }
+
+        return $Match.Groups['Option'].Value + $Match.Groups['Separator'].Value + $replacement
+    }
+
+    return [System.Text.RegularExpressions.Regex]::Replace(
+        $Text,
+        $secretArgumentPattern,
+        $secretArgumentEvaluator
     )
 }
 
@@ -274,7 +325,8 @@ function Protect-WdtText {
 
         return $Candidate
     }
-    $protectedText = Protect-WdtLiteralValue -Text $Text -Context $Context -Category USER -Value $Context.UserProfile -UsePathBoundary -TokenValueSelector $profileTokenValueSelector
+    $protectedText = Protect-WdtCommandLineSecrets -Text $Text
+    $protectedText = Protect-WdtLiteralValue -Text $protectedText -Context $Context -Category USER -Value $Context.UserProfile -UsePathBoundary -TokenValueSelector $profileTokenValueSelector
 
     $userProfilePattern = '(?:[A-Z]:)?[\\/](?:Users|Documents and Settings)[\\/](?<WdtValue>[^\\/\r\n:]+)(?=$|[\\/])'
     $userProfileRegex = New-Object System.Text.RegularExpressions.Regex(
@@ -425,17 +477,6 @@ function Protect-WdtText {
         [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
     )
     $protectedText = Protect-WdtRegexMatches -Text $protectedText -Context $Context -Category ID -Regex $volumeLabelRegex -CaptureGroupName 'WdtValue' -Validator $identifierValueValidator
-
-    $commandLinePattern = '(?i)\b(?:ParentCommandLine|Parent Command Line|ProcessCommandLine|Process Command Line|CommandLine|Command Line)\s*[:=]\s*(?<WdtValue>[^\r\n]+)'
-    $commandLineRegex = New-Object System.Text.RegularExpressions.Regex(
-        $commandLinePattern,
-        [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
-    )
-    $commandLineValidator = {
-        param([string]$Candidate)
-        return -not [string]::IsNullOrWhiteSpace($Candidate) -and $Candidate -notmatch '^\s*<ID-\d+>\s*$'
-    }
-    $protectedText = Protect-WdtRegexMatches -Text $protectedText -Context $Context -Category ID -Regex $commandLineRegex -CaptureGroupName 'WdtValue' -Validator $commandLineValidator
 
     $ipv6CandidatePattern = '(?<![0-9A-Z_.:%-])[0-9A-F:.]*:[0-9A-F:.]*[0-9A-F:](?:%[0-9A-Z_.-]+)?(?![0-9A-Z_:%-]|\.[0-9A-F])'
     $ipv6CandidateRegex = New-Object System.Text.RegularExpressions.Regex(
