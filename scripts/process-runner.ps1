@@ -6,11 +6,11 @@ $script:WdtProcessRunnerConfig = [ordered]@{
     ProcessPollIntervalMilliseconds = 25
     StreamDrainPollIntervalMilliseconds = 10
     StreamDrainTimeoutMilliseconds = 2000
-    CleanupTimeoutMilliseconds = 5000
-    PerProcessExitWaitMilliseconds = 500
+    CleanupTimeoutMilliseconds = 10000
+    PerProcessExitWaitMilliseconds = 1500
     # CIM CreationDate and Process.StartTime can differ at sub-second precision.
     ProcessCreationTimeToleranceSeconds = 1.0
-    CimOperationTimeoutSeconds = 1
+    CimOperationTimeoutSeconds = 2
 }
 
 $script:WdtRuntimeStatus = [ordered]@{

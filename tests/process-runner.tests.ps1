@@ -99,21 +99,22 @@ try {
     Assert-Equal 'Timeout' $timeout.Status 'Timeout classification failed.'
     Assert-True (@($timeout.Findings | Where-Object { $_.Code -eq 'MODULE_EXECUTION_TIMEOUT' }).Count -eq 1) 'Timeout finding is missing.'
     Assert-True ($null -ne $timeout.Cleanup) 'Timeout cleanup result is missing.'
-    Assert-Equal $true $timeout.Cleanup.Success 'Real process-tree cleanup must succeed.'
+    $timeoutChildLine = @($timeout.OutputLines | Where-Object { $_ -match '^CHILD_PID=\d+$' } | Select-Object -First 1)
+    if ($timeoutChildLine.Count -eq 1) { $timeoutChildPid = [int]($timeoutChildLine[0] -replace '^CHILD_PID=', '') }
+    $timeoutRootItem = @($timeout.Cleanup.Items | Where-Object { [int]$_.Depth -eq 0 } | Select-Object -First 1)
+    if ($timeoutRootItem.Count -eq 1) { $timeoutRootPid = [int]$timeoutRootItem[0].ProcessId }
+    $cleanupDetails = @($timeout.Cleanup.Errors) + @($timeout.Cleanup.Items | Where-Object { $_.Status -notin @('Terminated', 'AlreadyExited') } | ForEach-Object { 'PID {0} depth {1}: {2} - {3}' -f $_.ProcessId, $_.Depth, $_.Status, $_.Message })
+    Assert-Equal $true $timeout.Cleanup.Success ('Real process-tree cleanup must succeed. Details: ' + ($cleanupDetails -join '; '))
     Assert-True (@($timeout.Cleanup.Items | Where-Object { [int]$_.Depth -gt 0 }).Count -ge 1) 'Cleanup did not include a descendant process.'
     $cleanupDepths = @($timeout.Cleanup.Items | ForEach-Object { [int]$_.Depth })
     for ($index = 1; $index -lt $cleanupDepths.Count; $index++) {
         Assert-True ($cleanupDepths[$index - 1] -ge $cleanupDepths[$index]) 'Cleanup items are not ordered from greater depth to lesser depth.'
     }
-    $timeoutChildLine = @($timeout.OutputLines | Where-Object { $_ -match '^CHILD_PID=\d+$' } | Select-Object -First 1)
     Assert-Equal 1 $timeoutChildLine.Count 'Timeout fixture did not report exactly one child PID.'
-    $timeoutChildPid = [int]($timeoutChildLine[0] -replace '^CHILD_PID=', '')
-    $timeoutRootItem = @($timeout.Cleanup.Items | Where-Object { [int]$_.Depth -eq 0 } | Select-Object -First 1)
     Assert-Equal 1 $timeoutRootItem.Count 'Cleanup result does not contain the root process.'
-    $timeoutRootPid = [int]$timeoutRootItem[0].ProcessId
     Assert-True ($null -eq (Get-Process -Id $timeoutChildPid -ErrorAction SilentlyContinue)) 'Child process still exists after cleanup.'
     Assert-True ($null -eq (Get-Process -Id $timeoutRootPid -ErrorAction SilentlyContinue)) 'Root fixture process still exists after cleanup.'
-    Assert-True ($timeoutDuration -lt 15) 'Real process-tree timeout fixture exceeded its bounded runtime.'
+    Assert-True ($timeoutDuration -lt 20) 'Real process-tree timeout fixture exceeded its bounded runtime.'
 
     $unstarted = New-Object Diagnostics.Process
     $cleanupStarted = Get-Date
