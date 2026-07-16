@@ -331,7 +331,7 @@ $entrypointTokens = $null
 $entrypointErrors = $null
 $entrypointAst = [System.Management.Automation.Language.Parser]::ParseFile($entrypointPath, [ref]$entrypointTokens, [ref]$entrypointErrors)
 Assert-Equal -Expected 0 -Actual @($entrypointErrors).Count -Message 'Entrypoint did not parse for report hardening tests.'
-foreach ($functionName in @('Add-MarkdownSection')) {
+foreach ($functionName in @('Add-MarkdownSection', 'ConvertTo-MarkdownInlineText')) {
     $definition = $entrypointAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
     Assert-True -Condition ($null -ne $definition) -Message "Missing report hardening function: $functionName"
     . ([scriptblock]::Create($definition.Extent.Text))
@@ -365,5 +365,40 @@ Add-TextSection -Lines $textSerialization -Result $serializationResult
 Add-MarkdownSection -Lines $markdownSerialization -Result $serializationResult
 Assert-True -Condition (-not (($textSerialization -join "`n").Contains($findingNonce))) -Message 'TXT serialization disclosed the active finding nonce.'
 Assert-True -Condition (-not (($markdownSerialization -join "`n").Contains($findingNonce))) -Message 'Markdown serialization disclosed the active finding nonce.'
+
+$markdownFixtures = @(
+    [pscustomobject]@{ Name = 'triple backticks'; Command = 'fixture'; Output = @('```', '![outside](https://example.test/image.png)'); ExpectedOutputFence = '````' },
+    [pscustomobject]@{ Name = 'long backticks'; Command = 'fixture'; Output = @('prefix ``````` suffix'); ExpectedOutputFence = '````````' },
+    [pscustomobject]@{ Name = 'tildes'; Command = 'fixture'; Output = @('~~~~~~~', 'safe text'); ExpectedOutputFence = '```' },
+    [pscustomobject]@{ Name = 'multiline command'; Command = ('tool.exe --mode inspect' + [Environment]::NewLine + ('`' * 5) + ' injected' + [Environment]::NewLine + 'second line'); Output = @('safe output'); ExpectedOutputFence = '```'; ExpectedCommandFence = '``````' },
+    [pscustomobject]@{ Name = 'empty content'; Command = ''; Output = @(); ExpectedOutputFence = '```'; ExpectedCommandFence = '```' }
+)
+foreach ($fixture in $markdownFixtures) {
+    $markdownLines = New-Object System.Collections.Generic.List[string]
+    $markdownResult = [pscustomobject]@{
+        Title = 'Fixture'
+        Command = $fixture.Command
+        ExitCode = 0
+        Status = 'Success'
+        Duration = [timespan]::Zero
+        Completeness = 'Complete'
+        OutputLines = @($fixture.Output)
+        ErrorLines = @()
+    }
+    Add-MarkdownSection -Lines $markdownLines -Result $markdownResult
+
+    $expectedCommandFence = if ($fixture.PSObject.Properties.Name -contains 'ExpectedCommandFence') { $fixture.ExpectedCommandFence } else { '```' }
+    $commandOpeningIndex = $markdownLines.IndexOf($expectedCommandFence + 'text')
+    $commandClosingIndex = if ($commandOpeningIndex -ge 0) { $markdownLines.IndexOf($expectedCommandFence, $commandOpeningIndex + 1) } else { -1 }
+    Assert-True -Condition ($commandOpeningIndex -ge 0 -and $commandClosingIndex -gt $commandOpeningIndex) -Message ("Markdown command fence failed for fixture '{0}'." -f $fixture.Name)
+
+    $outputOpeningIndex = $markdownLines.IndexOf($fixture.ExpectedOutputFence + 'text', $commandClosingIndex + 1)
+    $outputClosingIndex = if ($outputOpeningIndex -ge 0) { $markdownLines.IndexOf($fixture.ExpectedOutputFence, $outputOpeningIndex + 1) } else { -1 }
+    Assert-True -Condition ($outputOpeningIndex -ge 0 -and $outputClosingIndex -gt $outputOpeningIndex) -Message ("Markdown output fence failed for fixture '{0}'." -f $fixture.Name)
+    foreach ($contentLine in @($fixture.Output)) {
+        $contentIndex = $markdownLines.IndexOf($contentLine, $outputOpeningIndex + 1)
+        Assert-True -Condition ($contentIndex -gt $outputOpeningIndex -and $contentIndex -lt $outputClosingIndex) -Message ("Markdown content escaped its fence for fixture '{0}'." -f $fixture.Name)
+    }
+}
 
 Write-Host 'Report common tests passed.'

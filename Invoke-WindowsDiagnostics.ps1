@@ -122,6 +122,19 @@ function Add-TextSection {
     }
 }
 
+function Get-WdtMarkdownFence {
+    param([string[]]$ContentLines)
+
+    $fenceLength = 3
+    foreach ($line in @($ContentLines)) {
+        foreach ($match in @([System.Text.RegularExpressions.Regex]::Matches([string]$line, '`+'))) {
+            if ($match.Length -ge $fenceLength) { $fenceLength = $match.Length + 1 }
+        }
+    }
+
+    return -join @(1..$fenceLength | ForEach-Object { '`' })
+}
+
 function Add-MarkdownSection {
     param(
         [System.Collections.Generic.List[string]]$Lines,
@@ -129,15 +142,31 @@ function Add-MarkdownSection {
     )
 
     $Lines.Add('')
-    $Lines.Add(('## {0}' -f $Result.Title))
+    $markdownTitle = (ConvertTo-MarkdownInlineText -Text ([string]$Result.Title)) -replace '[\r\n]+', ' '
+    $Lines.Add(('## {0}' -f $markdownTitle))
     $Lines.Add('')
-    $Lines.Add(('- Command: `{0}`' -f $Result.Command))
+    $Lines.Add('- Command:')
+    $Lines.Add('')
+    $commandLines = @([System.Text.RegularExpressions.Regex]::Split([string]$Result.Command, '\r?\n'))
+    $commandFence = Get-WdtMarkdownFence -ContentLines $commandLines
+    $Lines.Add($commandFence + 'text')
+    if ($commandLines.Count -eq 0 -or ($commandLines.Count -eq 1 -and $commandLines[0].Length -eq 0)) {
+        $Lines.Add('(empty command)')
+    }
+    else {
+        foreach ($commandLine in $commandLines) {
+            $Lines.Add($commandLine)
+        }
+    }
+    $Lines.Add($commandFence)
+    $Lines.Add('')
     $Lines.Add(('- Exit code: `{0}`' -f $Result.ExitCode))
     $Lines.Add(('- Execution: `{0}`' -f $Result.Status))
     $Lines.Add(('- Duration: `{0:N2} s`' -f $Result.Duration.TotalSeconds))
     $Lines.Add(('- Completeness: `{0}`' -f $Result.Completeness))
     $Lines.Add('')
-    $Lines.Add('```text')
+    $fence = Get-WdtMarkdownFence -ContentLines (@($Result.OutputLines) + @($Result.ErrorLines))
+    $Lines.Add($fence + 'text')
 
     if ($Result.OutputLines.Count -gt 0) {
         foreach ($line in $Result.OutputLines) {
@@ -156,7 +185,7 @@ function Add-MarkdownSection {
         }
     }
 
-    $Lines.Add('```')
+    $Lines.Add($fence)
 }
 
 function ConvertTo-MarkdownInlineText {
