@@ -31,7 +31,9 @@ $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $networkScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\network\diagnostic.ps1'
 $scriptSource = Get-Content -LiteralPath $networkScript -Raw
 
-Assert-True -Condition $scriptSource.Contains('& netsh.exe winhttp show proxy') -Message 'Network diagnostics must use the exact read-only WinHTTP proxy query.'
+Assert-True -Condition $scriptSource.Contains('& $netshPath winhttp show proxy') -Message 'Network diagnostics must use the exact read-only WinHTTP proxy query through the system executable path.'
+Assert-True -Condition $scriptSource.Contains("-ChildPath 'Sysnative'") -Message 'Network diagnostics must use Sysnative from a 32-bit process on 64-bit Windows.'
+Assert-True -Condition ($scriptSource -notmatch "Get-Command\s+-Name\s+'netsh\.exe'") -Message 'Network diagnostics must not fall back to resolving netsh.exe through PATH.'
 Assert-True -Condition (-not $scriptSource.Contains('Get-VpnConnection')) -Message 'Network diagnostics must not call VPN APIs.'
 Assert-True -Condition (-not $scriptSource.Contains('tunnel')) -Message 'Network diagnostics must not classify tunnel adapters.'
 
@@ -42,12 +44,15 @@ try {
                 [CmdletBinding()]
                 param([string]$Name)
 
-                if ($Name -eq 'netsh.exe') {
-                    return $null
-                }
-
                 return [pscustomobject]@{ Name = $Name }
             }
+            function Test-Path {
+                [CmdletBinding()]
+                param([string]$LiteralPath, [string]$PathType)
+
+                return $false
+            }
+
 
             function Get-NetAdapter {
                 [pscustomobject]@{
@@ -141,6 +146,13 @@ try {
                 param([Parameter(ValueFromRemainingArguments = $true)]$Arguments)
 
                 throw 'Fixture proxy source unavailable.'
+            }
+
+            function Test-Path {
+                [CmdletBinding()]
+                param([Parameter(ValueFromRemainingArguments = $true)]$Arguments)
+
+                return $false
             }
 
             $env:WDT_FINDING_PROTOCOL = '1'

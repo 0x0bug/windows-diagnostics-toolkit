@@ -34,6 +34,8 @@ $scriptSource = Get-Content -LiteralPath $timeScript -Raw
 Assert-True -Condition ($scriptSource.Contains("'/query /source'")) -Message 'Time diagnostics must query the configured time source.'
 Assert-True -Condition ($scriptSource.Contains("'/query /status /verbose'")) -Message 'Time diagnostics must query verbose W32Time status.'
 Assert-True -Condition ($scriptSource.Contains('System.Diagnostics.ProcessStartInfo')) -Message 'Time diagnostics must use ProcessStartInfo for w32tm.'
+Assert-True -Condition $scriptSource.Contains("-ChildPath 'Sysnative'") -Message 'Time diagnostics must use Sysnative from a 32-bit process on 64-bit Windows.'
+Assert-True -Condition ($scriptSource -notmatch "Get-Command\s+-Name\s+'w32tm\.exe'") -Message 'Time diagnostics must not fall back to resolving w32tm.exe through PATH.'
 Assert-True -Condition ($scriptSource.Contains('RedirectStandardOutput = $true') -and $scriptSource.Contains('RedirectStandardError = $true')) -Message 'w32tm output streams must be redirected.'
 Assert-True -Condition ($scriptSource.Contains('CurrentCulture.TextInfo.OEMCodePage')) -Message 'w32tm must use the current system OEM code page.'
 Assert-True -Condition ($scriptSource -notmatch '(?i)\b(?:cp)?866\b') -Message 'Time diagnostics must not hardcode code page 866.'
@@ -85,6 +87,13 @@ try {
 
                 return $null
             }
+            function Test-Path {
+                [CmdletBinding()]
+                param([string]$LiteralPath, [string]$PathType)
+
+                return $false
+            }
+
 
             function Get-CimInstance {
                 [CmdletBinding()]

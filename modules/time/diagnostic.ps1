@@ -121,11 +121,28 @@ function New-WdtW32tmResult {
     }
 }
 
+function Resolve-WdtSystemExecutablePath {
+    param([Parameter(Mandatory = $true)][string]$FileName)
+
+    $systemDirectory = [System.Environment]::SystemDirectory
+    if ([System.Environment]::Is64BitOperatingSystem -and -not [System.Environment]::Is64BitProcess) {
+        $windowsDirectory = [System.IO.Directory]::GetParent($systemDirectory).FullName
+        $systemDirectory = Join-Path -Path $windowsDirectory -ChildPath 'Sysnative'
+    }
+
+    $candidatePath = Join-Path -Path $systemDirectory -ChildPath $FileName
+    if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+        return $null
+    }
+
+    return [System.IO.Path]::GetFullPath($candidatePath)
+}
+
 function Invoke-W32tmQuery {
     param([Parameter(Mandatory = $true)][ValidateSet('Source', 'Status')][string]$Query)
 
-    $command = Get-Command -Name 'w32tm.exe' -ErrorAction SilentlyContinue
-    if ($null -eq $command) {
+    $commandPath = Resolve-WdtSystemExecutablePath -FileName 'w32tm.exe'
+    if ([string]::IsNullOrWhiteSpace($commandPath)) {
         return [pscustomobject]@{
             Output   = @()
             Error    = 'w32tm.exe is unavailable.'
@@ -139,7 +156,7 @@ function Invoke-W32tmQuery {
     try {
         $oemEncoding = Get-WdtOemEncoding
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $startInfo.FileName = $command.Source
+        $startInfo.FileName = $commandPath
         $startInfo.Arguments = if ($Query -eq 'Source') { '/query /source' } else { '/query /status /verbose' }
         $startInfo.UseShellExecute = $false
         $startInfo.CreateNoWindow = $true
