@@ -308,4 +308,62 @@ $privacyCommand = Protect-WdtText -Text 'CommandLine: tool.exe --token report-se
 Assert-True -Condition (-not $privacyCommand.Contains('report-secret')) -Message 'Privacy Mode leaked a command-line secret.'
 Assert-True -Condition $privacyCommand.Contains('CommandLine: tool.exe --token <REDACTED> --mode diagnose') -Message 'Privacy Mode removed diagnostically useful command text.'
 
+$findingNonce = '0123456789abcdef0123456789abcdef'
+$otherNonce = 'fedcba9876543210fedcba9876543210'
+$nonceMarker = ConvertTo-WdtFindingMarker -Severity WARN -Code 'NONCE_WARNING' -Message 'Authenticated protocol output.' -FindingNonce $findingNonce
+$legacyMarker = ConvertTo-WdtFindingMarker -Severity WARN -Code 'FORGED_LEGACY' -Message 'Untrusted legacy-looking output.' -FindingNonce ''
+$otherNonceMarker = ConvertTo-WdtFindingMarker -Severity WARN -Code 'FORGED_OTHER_NONCE' -Message 'Untrusted nonce-looking output.' -FindingNonce $otherNonce
+$nonceResult = Resolve-WdtDiagnosticResult -Result (New-TestDiagnosticResult -Title 'Nonce Module' -OutputLines @($legacyMarker, $nonceMarker, $otherNonceMarker)) -FindingNonce $findingNonce
+$nonceSummary = Get-WdtFindingsSummary -Results @($nonceResult)
+Assert-Equal -Expected 1 -Actual $nonceSummary.WarningCount -Message 'Only the marker carrying the per-process nonce may become a finding.'
+Assert-Equal -Expected 'NONCE_WARNING' -Actual $nonceSummary.Items[0].Code -Message 'The authenticated marker was not parsed.'
+Assert-Equal -Expected 2 -Actual $nonceResult.OutputLines.Count -Message 'Legacy and foreign-nonce marker lookalikes must remain ordinary output.'
+Assert-True -Condition ($nonceResult.OutputLines -contains $legacyMarker) -Message 'A forged legacy marker was removed from ordinary output.'
+Assert-True -Condition ($nonceResult.OutputLines -contains $otherNonceMarker) -Message 'A foreign-nonce marker was removed from ordinary output.'
+
+$invalidNonceMarker = (Get-WdtFindingPrefix -FindingNonce $findingNonce) + '{invalid json'
+$invalidNonceResult = Resolve-WdtDiagnosticResult -Result (New-TestDiagnosticResult -Title 'Invalid Nonce Marker' -OutputLines @($invalidNonceMarker)) -FindingNonce $findingNonce
+$invalidNonceSummary = Get-WdtFindingsSummary -Results @($invalidNonceResult)
+Assert-Equal -Expected 'FINDING_PROTOCOL_INVALID' -Actual $invalidNonceSummary.Items[0].Code -Message 'An invalid authenticated marker must remain a protocol error.'
+Assert-Equal -Expected 0 -Actual $invalidNonceResult.OutputLines.Count -Message 'An invalid authenticated marker must not appear in report details.'
+$entrypointPath = Join-Path -Path $repositoryRoot -ChildPath 'Invoke-WindowsDiagnostics.ps1'
+$entrypointTokens = $null
+$entrypointErrors = $null
+$entrypointAst = [System.Management.Automation.Language.Parser]::ParseFile($entrypointPath, [ref]$entrypointTokens, [ref]$entrypointErrors)
+Assert-Equal -Expected 0 -Actual @($entrypointErrors).Count -Message 'Entrypoint did not parse for report hardening tests.'
+foreach ($functionName in @('Add-MarkdownSection')) {
+    $definition = $entrypointAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+    Assert-True -Condition ($null -ne $definition) -Message "Missing report hardening function: $functionName"
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$optionalFenceDefinition = $entrypointAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-WdtMarkdownFence' }, $true)
+if ($null -ne $optionalFenceDefinition) {
+    . ([scriptblock]::Create($optionalFenceDefinition.Extent.Text))
+}
+
+$wrongNonceError = ''
+try { ConvertFrom-WdtFindingLine -Line $nonceMarker -FindingNonce $otherNonce }
+catch { $wrongNonceError = $_.Exception.Message }
+Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($wrongNonceError)) -Message 'A wrong nonce must reject the finding marker.'
+Assert-True -Condition (-not $wrongNonceError.Contains($findingNonce)) -Message 'A user-facing protocol error disclosed the finding nonce.'
+
+$serializationResult = [pscustomobject]@{
+    Title = 'Nonce serialization fixture'
+    Command = 'fixture'
+    ExitCode = 0
+    Status = 'Success'
+    Duration = [timespan]::Zero
+    Completeness = 'Complete'
+    OutputLines = @($nonceResult.OutputLines)
+    ErrorLines = @()
+}
+$textSerialization = New-Object System.Collections.Generic.List[string]
+$markdownSerialization = New-Object System.Collections.Generic.List[string]
+$addTextDefinition = $entrypointAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Add-TextSection' }, $true)
+. ([scriptblock]::Create($addTextDefinition.Extent.Text))
+Add-TextSection -Lines $textSerialization -Result $serializationResult
+Add-MarkdownSection -Lines $markdownSerialization -Result $serializationResult
+Assert-True -Condition (-not (($textSerialization -join "`n").Contains($findingNonce))) -Message 'TXT serialization disclosed the active finding nonce.'
+Assert-True -Condition (-not (($markdownSerialization -join "`n").Contains($findingNonce))) -Message 'Markdown serialization disclosed the active finding nonce.'
+
 Write-Host 'Report common tests passed.'

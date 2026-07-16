@@ -420,8 +420,10 @@ function Invoke-DiagnosticScript {
     $stdoutState = $null
     $stderrState = $null
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $findingNonce = $null
     try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+        $findingNonce = [System.Guid]::NewGuid().ToString('N')
         $escapedScriptPath = $ScriptPath.Replace("'", "''")
         $escapedArguments = @($ScriptArguments | ForEach-Object {
                 $argument = [string]$_
@@ -442,6 +444,7 @@ function Invoke-DiagnosticScript {
         $startInfo.StandardErrorEncoding = $utf8NoBom
         $startInfo.EnvironmentVariables['WDT_FINDING_PROTOCOL'] = '1'
 
+        $startInfo.EnvironmentVariables['WDT_FINDING_NONCE'] = $findingNonce
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $startInfo
 
@@ -535,7 +538,7 @@ function Invoke-DiagnosticScript {
         }
     }
 
-    $resolved = Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
+    $resolved = Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result) -FindingNonce $findingNonce
     $resolved.Completeness = Get-WdtExecutionCompleteness -Status $resolved.Status -OutputComplete $resolved.OutputComplete
     if ($resolved.Status -eq $script:WdtRuntimeStatus.Timeout) {
         $resolved.Findings = @($resolved.Findings | Where-Object { $_.Code -ne 'MODULE_EXECUTION_FAILED' }) + @(

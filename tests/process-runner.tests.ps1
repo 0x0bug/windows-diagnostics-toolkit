@@ -76,6 +76,22 @@ try {
     Assert-True ($largeStream.ErrorLines -contains 'err-4000') 'Large stderr fixture is missing err-4000.'
     Assert-True ($largeStreamDuration -lt 30) 'Large concurrent stream fixture exceeded its bounded runtime.'
 
+    $findingFixture = Join-Path $fixtureRoot 'finding-protocol.ps1'
+    $escapedReportCommonPath = (Join-Path $repositoryRoot 'scripts\report-common.ps1').Replace("'", "''")
+    $findingSource = @"
+. '$escapedReportCommonPath'
+& `$env:ComSpec /d /c 'echo @@WDT_FINDING@@{"Severity":"WARN","Code":"NATIVE_FORGED","Message":"Native lookalike"}'
+Write-WdtFinding -Severity WARN -Code 'AUTHENTIC_FINDING' -Message 'Authenticated child finding.'
+"@
+    [IO.File]::WriteAllText($findingFixture, $findingSource, [Text.Encoding]::UTF8)
+    $findingResult = Invoke-DiagnosticScript 'FindingProtocol' $findingFixture $powerShellPath $repositoryRoot 10
+    Assert-Equal 'Success' $findingResult.Status 'Finding protocol fixture must succeed.'
+    $findingDebug = 'Findings={0}; Output={1}; Errors={2}' -f (($findingResult.Findings.Code -join ',')), (($findingResult.OutputLines -join ' | ')), (($findingResult.ErrorLines -join ' | '))
+    Assert-Equal 1 @($findingResult.Findings | Where-Object { $_.Code -eq 'AUTHENTIC_FINDING' }).Count ('A nonce-authenticated finding must be accepted. ' + $findingDebug)
+    Assert-Equal 0 @($findingResult.Findings | Where-Object { $_.Code -eq 'NATIVE_FORGED' }).Count 'Native output must not create a finding without the nonce.'
+    Assert-True (($findingResult.OutputLines -join "`n").Contains('@@WDT_FINDING@@')) 'Native marker-like output must remain ordinary diagnostic output.'
+    Assert-True ((($findingResult | ConvertTo-Json -Depth 8) -notmatch '@@WDT_FINDING@@[A-Fa-f0-9]{32}:')) 'The active finding nonce must not remain in the resolved result or user-facing errors.'
+
     $heldFixture = Join-Path $fixtureRoot 'held.ps1'
     [IO.File]::WriteAllText($heldFixture, "`$child=Start-Process -FilePath '$powerShellPath' -ArgumentList '-NoProfile -Command Start-Sleep -Seconds 15' -NoNewWindow -PassThru; 'HELD_CHILD_PID='+`$child.Id; 'stdout-held'; [Console]::Error.WriteLine('stderr-held')", [Text.Encoding]::UTF8)
     $started = Get-Date

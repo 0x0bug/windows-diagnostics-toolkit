@@ -3,6 +3,20 @@ param()
 
 $script:WdtFindingPrefix = '@@WDT_FINDING@@'
 
+function Get-WdtFindingPrefix {
+    param([AllowEmptyString()][string]$FindingNonce = $env:WDT_FINDING_NONCE)
+
+    if ([string]::IsNullOrWhiteSpace($FindingNonce)) {
+        return $script:WdtFindingPrefix
+    }
+
+    if ($FindingNonce -notmatch '^[A-Fa-f0-9]{32}$') {
+        throw 'The finding protocol nonce must contain exactly 32 hexadecimal characters.'
+    }
+
+    return $script:WdtFindingPrefix + $FindingNonce + ':'
+}
+
 function Protect-WdtSensitiveUrlText {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
 
@@ -572,7 +586,8 @@ function ConvertTo-WdtFindingMarker {
         [string]$Code,
 
         [Parameter(Mandatory = $true)][string]$Message,
-        [string]$Evidence
+        [string]$Evidence,
+        [AllowEmptyString()][string]$FindingNonce = $env:WDT_FINDING_NONCE
     )
 
     $normalizedMessage = ConvertTo-WdtSingleLineText -Text $Message
@@ -587,7 +602,7 @@ function ConvertTo-WdtFindingMarker {
         $payload.Evidence = $normalizedEvidence
     }
 
-    return $script:WdtFindingPrefix + ($payload | ConvertTo-Json -Compress)
+    return (Get-WdtFindingPrefix -FindingNonce $FindingNonce) + ($payload | ConvertTo-Json -Compress)
 }
 
 function Write-WdtFinding {
@@ -608,7 +623,7 @@ function Write-WdtFinding {
     $normalizedEvidence = ConvertTo-WdtSingleLineText -Text $Evidence
 
     if ($env:WDT_FINDING_PROTOCOL -eq '1') {
-        Write-Host (ConvertTo-WdtFindingMarker -Severity $Severity -Code $Code -Message $normalizedMessage -Evidence $normalizedEvidence)
+        Write-Output (ConvertTo-WdtFindingMarker -Severity $Severity -Code $Code -Message $normalizedMessage -Evidence $normalizedEvidence -FindingNonce $env:WDT_FINDING_NONCE)
         return
     }
 
@@ -621,23 +636,31 @@ function Write-WdtFinding {
 }
 
 function Test-WdtFindingLine {
-    param([AllowEmptyString()][string]$Line)
+    param(
+        [AllowEmptyString()][string]$Line,
+        [AllowEmptyString()][string]$FindingNonce = $env:WDT_FINDING_NONCE
+    )
 
     if ($null -eq $Line) {
         return $false
     }
 
-    return $Line.StartsWith($script:WdtFindingPrefix, [System.StringComparison]::Ordinal)
+    $prefix = Get-WdtFindingPrefix -FindingNonce $FindingNonce
+    return $Line.StartsWith($prefix, [System.StringComparison]::Ordinal)
 }
 
 function ConvertFrom-WdtFindingLine {
-    param([Parameter(Mandatory = $true)][string]$Line)
+    param(
+        [Parameter(Mandatory = $true)][string]$Line,
+        [AllowEmptyString()][string]$FindingNonce = $env:WDT_FINDING_NONCE
+    )
 
-    if (-not (Test-WdtFindingLine -Line $Line)) {
+    if (-not (Test-WdtFindingLine -Line $Line -FindingNonce $FindingNonce)) {
         throw 'The line is not a Windows Diagnostics Toolkit finding marker.'
     }
 
-    $json = $Line.Substring($script:WdtFindingPrefix.Length)
+    $prefix = Get-WdtFindingPrefix -FindingNonce $FindingNonce
+    $json = $Line.Substring($prefix.Length)
     if ([string]::IsNullOrWhiteSpace($json)) {
         throw 'The finding marker payload is empty.'
     }
@@ -680,19 +703,22 @@ function ConvertFrom-WdtFindingLine {
 }
 
 function Resolve-WdtDiagnosticResult {
-    param([Parameter(Mandatory = $true)]$Result)
+    param(
+        [Parameter(Mandatory = $true)]$Result,
+        [AllowEmptyString()][string]$FindingNonce = $env:WDT_FINDING_NONCE
+    )
 
     $cleanOutputLines = New-Object System.Collections.Generic.List[string]
     $findings = New-Object System.Collections.Generic.List[object]
 
     foreach ($line in @($Result.OutputLines)) {
-        if (-not (Test-WdtFindingLine -Line $line)) {
+        if (-not (Test-WdtFindingLine -Line $line -FindingNonce $FindingNonce)) {
             $cleanOutputLines.Add([string]$line)
             continue
         }
 
         try {
-            $finding = ConvertFrom-WdtFindingLine -Line $line
+            $finding = ConvertFrom-WdtFindingLine -Line $line -FindingNonce $FindingNonce
             $findings.Add((New-WdtFindingObject -Module $Result.Title -Severity $finding.Severity -Code $finding.Code -Message $finding.Message -Evidence $finding.Evidence))
         }
         catch {
