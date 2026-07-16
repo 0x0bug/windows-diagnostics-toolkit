@@ -6,11 +6,11 @@ $script:WdtProcessRunnerConfig = [ordered]@{
     ProcessPollIntervalMilliseconds = 25
     StreamDrainPollIntervalMilliseconds = 10
     StreamDrainTimeoutMilliseconds = 2000
-    CleanupTimeoutMilliseconds = 5000
-    PerProcessExitWaitMilliseconds = 500
+    CleanupTimeoutMilliseconds = 10000
+    PerProcessExitWaitMilliseconds = 1500
     # CIM CreationDate and Process.StartTime can differ at sub-second precision.
     ProcessCreationTimeToleranceSeconds = 1.0
-    CimOperationTimeoutSeconds = 1
+    CimOperationTimeoutSeconds = 2
 }
 
 $script:WdtRuntimeStatus = [ordered]@{
@@ -75,12 +75,6 @@ function Convert-TextToLines {
     }
 
     return $lines
-}
-
-function ConvertTo-CommandArgument {
-    param([Parameter(Mandatory = $true)][string]$Value)
-
-    return '"' + $Value.Replace('"', '\"') + '"'
 }
 
 function Get-WdtExecutionCompleteness {
@@ -420,8 +414,10 @@ function Invoke-DiagnosticScript {
     $stdoutState = $null
     $stderrState = $null
     $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    $findingNonce = $null
     try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
+        $findingNonce = [System.Guid]::NewGuid().ToString('N')
         $escapedScriptPath = $ScriptPath.Replace("'", "''")
         $escapedArguments = @($ScriptArguments | ForEach-Object {
                 $argument = [string]$_
@@ -429,10 +425,11 @@ function Invoke-DiagnosticScript {
                 else { "'" + $argument.Replace("'", "''") + "'" }
             })
         $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath' $($escapedArguments -join ' ')"
+        $encodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($commandText))
 
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
         $startInfo.FileName = $PowerShellPath
-        $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -Command {0}' -f (ConvertTo-CommandArgument -Value $commandText)
+        $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand ' + $encodedCommand
         $startInfo.WorkingDirectory = $RepositoryRoot
         $startInfo.UseShellExecute = $false
         $startInfo.RedirectStandardOutput = $true
@@ -442,6 +439,7 @@ function Invoke-DiagnosticScript {
         $startInfo.StandardErrorEncoding = $utf8NoBom
         $startInfo.EnvironmentVariables['WDT_FINDING_PROTOCOL'] = '1'
 
+        $startInfo.EnvironmentVariables['WDT_FINDING_NONCE'] = $findingNonce
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $startInfo
 
@@ -535,7 +533,7 @@ function Invoke-DiagnosticScript {
         }
     }
 
-    $resolved = Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
+    $resolved = Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result) -FindingNonce $findingNonce
     $resolved.Completeness = Get-WdtExecutionCompleteness -Status $resolved.Status -OutputComplete $resolved.OutputComplete
     if ($resolved.Status -eq $script:WdtRuntimeStatus.Timeout) {
         $resolved.Findings = @($resolved.Findings | Where-Object { $_.Code -ne 'MODULE_EXECUTION_FAILED' }) + @(

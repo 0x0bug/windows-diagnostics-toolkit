@@ -98,6 +98,12 @@ Assert-Denied '& "$PSScriptRoot\..\modules\system\diagnostic.ps1" @PSBoundParame
 Assert-Denied '& "$PSScriptRoot\..\modules\system\diagnostic.ps1" @PSBoundParameters; Write-Output extra' '*Dynamic command invocation is not allowed*' 'scripts\system-info.ps1'
 Assert-Denied 'function Invoke-Legacy { & "$PSScriptRoot\..\modules\system\diagnostic.ps1" @PSBoundParameters }' '*Dynamic command invocation is not allowed*' 'scripts\system-info.ps1'
 Assert-Denied '. $PSScriptRoot\..\outside.ps1' '*not an approved repository helper*' 'modules\fixture\diagnostic.ps1'
+Assert-Denied 'Microsoft.PowerShell.Management\Remove-Item -LiteralPath .\owned.txt' '*Module-qualified PowerShell commands are not allowed*'
+Assert-Denied 'Microsoft.PowerShell.Utility\Invoke-Expression ''Get-Date''' '*Module-qualified PowerShell commands are not allowed*'
+Assert-Denied 'CimCmdlets\Invoke-CimMethod -InputObject $fixture -MethodName Delete' '*Module-qualified PowerShell commands are not allowed*'
+Assert-Denied '.\unreviewed.exe --version' '*Native executable is not in the read-only allowlist*'
+Assert-Allowed 'Get-Item -LiteralPath .\fixture.txt'
+Assert-Allowed 'Get-CimInstance -ClassName Win32_OperatingSystem'
 Assert-Allowed '[System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed 'function Invoke-DiagnosticScript { $process.Start() }' 'scripts\process-runner.ps1'
 Assert-Allowed 'function Wait-WdtTuiEvent { [System.Console]::ReadKey($true) }' 'scripts\tui.ps1'
@@ -121,7 +127,7 @@ $w32tmIssues = @(Get-WdtSafetyIssues -Ast $w32tmFunctions[0] -ScriptPath $timeSc
 Assert-True ($w32tmIssues.Count -eq 0) ("The exact production w32tm process shape was rejected: {0}" -f (($w32tmIssues | ForEach-Object Message) -join '; '))
 $maliciousProcessFixture = 'function Invoke-W32tmQuery { $startInfo = New-Object System.Diagnostics.ProcessStartInfo; $startInfo.FileName = ''cmd.exe''; $startInfo.Arguments = ''/c calc.exe''; $process = New-Object System.Diagnostics.Process; $process.StartInfo = $startInfo; [void]$process.Start(); $process.Dispose() }'
 Assert-Denied $maliciousProcessFixture '*safe-type allowlist*' 'modules\time\diagnostic.ps1'
-$changedExecutableFixture = $w32tmFunctions[0].Extent.Text.Replace('$startInfo.FileName = $command.Source', '$startInfo.FileName = ''cmd.exe''')
+$changedExecutableFixture = $w32tmFunctions[0].Extent.Text.Replace('$startInfo.FileName = $commandPath', '$startInfo.FileName = ''cmd.exe''')
 Assert-Denied $changedExecutableFixture '*safe-type allowlist*' 'modules\time\diagnostic.ps1'
 $pathPoisoningFixture = $w32tmFunctions[0].Extent.Text.Replace('try {', "try {`n        `$env:PATH = 'C:\attacker'")
 Assert-Denied $pathPoisoningFixture '*safe-type allowlist*' 'modules\time\diagnostic.ps1'

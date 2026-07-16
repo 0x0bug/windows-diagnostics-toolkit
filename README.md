@@ -144,7 +144,7 @@ WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
 | Storage | Windows-reported storage state, available reliability counters, and volume free space |
 | Crashes | Grouped Application Error, Application Hang, WER, BugCheck, Reliability Monitor, and dump-file context; findings account for recency and repetition |
 | Event Log | Grouped recent Critical and Error context from System and Application; only a small documented high-signal subset creates findings |
-| Services | Service states, startup entries, and scheduled tasks; stopped services and optional inventories remain context unless a stronger signal is present |
+| Services | Service states, startup entries with conservative `Enabled`/`Disabled`/`Unknown` state, and scheduled tasks; stopped services and optional inventories remain context unless a stronger signal is present |
 | Windows Update | Version, recent updates, reboot indicators, service context, and grouped installation or download failures |
 
 The report begins with a findings summary so the user can see what needs attention before reading every section.

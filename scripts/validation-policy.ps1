@@ -2,16 +2,36 @@
 param()
 
 function Test-WdtAllowedNetshCommand {
-    param([Parameter(Mandatory = $true)][System.Management.Automation.Language.CommandAst]$CommandAst)
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
 
-    if ((Split-Path -Leaf ($CommandAst.GetCommandName() -replace '/', '\\')) -ine 'netsh.exe') { return $false }
     $elements = @($CommandAst.CommandElements)
-    if ($elements.Count -ne 4) { return $false }
+    if ($elements.Count -ne 4 -or -not (Test-WdtAllowedNativeRedirection $CommandAst)) { return $false }
     foreach ($element in @($elements | Select-Object -Skip 1)) {
         if ($element -isnot [System.Management.Automation.Language.StringConstantExpressionAst]) { return $false }
     }
+    if ($elements[1].Value -ne 'winhttp' -or $elements[2].Value -ne 'show' -or $elements[3].Value -ne 'proxy') { return $false }
 
-    return $elements[1].Value -eq 'winhttp' -and $elements[2].Value -eq 'show' -and $elements[3].Value -eq 'proxy'
+    $rawName = $CommandAst.GetCommandName()
+    if (-not [string]::IsNullOrWhiteSpace($rawName)) {
+        return (Split-Path -Leaf ($rawName -replace '/', '\')) -ieq 'netsh.exe'
+    }
+
+    if ($CommandAst.InvocationOperator -ne [System.Management.Automation.Language.TokenKind]::Ampersand -or
+        -not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\network\diagnostic.ps1') -or
+        (Get-WdtEnclosingFunctionName $CommandAst) -cne 'Get-WinHttpProxy') { return $false }
+
+    $commandExpression = $elements[0]
+    if ($commandExpression -isnot [System.Management.Automation.Language.VariableExpressionAst] -or
+        $commandExpression.VariablePath.UserPath -cne 'netshPath') { return $false }
+
+    $functionAst = Get-WdtEnclosingFunctionAst -Ast $CommandAst
+    $assignments = @($functionAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                    $node.Left.Extent.Text -ceq '$netshPath'
+            }, $true))
+    return $assignments.Count -eq 1 -and
+        (ConvertTo-WdtNormalizedAstText -Ast $assignments[0]) -ceq '$netshPath = Resolve-WdtSystemExecutablePath -FileName ''netsh.exe'''
 }
 
 function New-WdtSafetyIssue {
@@ -287,13 +307,12 @@ function Test-WdtAllowedW32tmProcessShape {
     )
 
     if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1')) { return $false }
-    if ('Get-Command' -in @($LocalFunctionNames)) { return $false }
 
     $functionAst = Get-WdtEnclosingFunctionAst -Ast $Ast
     if ($null -eq $functionAst -or $functionAst.Name -cne 'Invoke-W32tmQuery') { return $false }
 
     $expectedCommands = @(
-        "Get-Command -Name 'w32tm.exe' -ErrorAction SilentlyContinue",
+        "Resolve-WdtSystemExecutablePath -FileName 'w32tm.exe'",
         'Get-WdtOemEncoding',
         'New-Object System.Diagnostics.Process',
         'New-Object System.Diagnostics.ProcessStartInfo',
@@ -307,7 +326,7 @@ function Test-WdtAllowedW32tmProcessShape {
     }
 
     $expectedAssignments = @(
-        '$command = Get-Command -Name ''w32tm.exe'' -ErrorAction SilentlyContinue',
+        '$commandPath = Resolve-WdtSystemExecutablePath -FileName ''w32tm.exe''',
         '$exitCode = $process.ExitCode',
         '$oemEncoding = Get-WdtOemEncoding',
         '$process = $null',
@@ -319,7 +338,7 @@ function Test-WdtAllowedW32tmProcessShape {
         '$startInfo = New-Object System.Diagnostics.ProcessStartInfo',
         '$startInfo.Arguments = if ($Query -eq ''Source'') { ''/query /source'' } else { ''/query /status /verbose'' }',
         '$startInfo.CreateNoWindow = $true',
-        '$startInfo.FileName = $command.Source',
+        '$startInfo.FileName = $commandPath',
         '$startInfo.RedirectStandardError = $true',
         '$startInfo.RedirectStandardOutput = $true',
         '$startInfo.StandardErrorEncoding = $oemEncoding',
@@ -337,6 +356,7 @@ function Test-WdtAllowedW32tmProcessShape {
     }
 
     $expectedMemberCalls = @(
+        '[string]::IsNullOrWhiteSpace($commandPath)',
         '$process.Dispose()',
         '$process.Start()',
         '$process.WaitForExit()',
@@ -632,12 +652,16 @@ function Get-WdtCommandSafetyIssue {
     }
     if (Test-WdtAllowedRegisteredScriptInvocation $CommandAst $ScriptPath $RepositoryRoot $RegistrySnapshot $ModuleDefinition) { return }
     $rawName = $CommandAst.GetCommandName()
+    if (Test-WdtAllowedNetshCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
     if ([string]::IsNullOrWhiteSpace($rawName)) {
         if (Test-WdtAllowedInternalCallbackInvocation $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts. Only approved internal callbacks are permitted.'
     }
-
     $leaf = Split-Path -Leaf ($rawName -replace '/', '\\')
+    if ($rawName -match '^[A-Za-z0-9_.-]+\\[A-Za-z][A-Za-z0-9]*-[A-Za-z][A-Za-z0-9]*$') {
+        return New-WdtSafetyIssue $CommandAst 'Module-qualified PowerShell commands are not allowed in production scripts.'
+    }
+
     if ($leaf -eq 'Invoke-DiagnosticScript' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return }
     if ($leaf -in @('Resolve-WdtDiagnosticResult', 'New-WdtFindingObject') -and (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot)) { return }
     if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Ampersand -and $leaf -ne 'netsh.exe') { return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts.' }
@@ -684,7 +708,7 @@ function Get-WdtCommandSafetyIssue {
 
     if ($leaf -eq 'netsh.exe') {
         if (-not (Test-WdtAllowedNativeRedirection $CommandAst)) { return New-WdtSafetyIssue $CommandAst 'PowerShell redirection is not permitted in production scripts.' }
-        if (Test-WdtAllowedNetshCommand $CommandAst) { return }
+        if (Test-WdtAllowedNetshCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'Native executable arguments are not an allowed read-only form.'
     }
 
@@ -796,8 +820,11 @@ function Get-WdtMemberSafetyIssue {
             'string::IsNullOrEmpty',
             'string::IsNullOrWhiteSpace',
             'System.Diagnostics.Process::GetCurrentProcess',
+            'System.Convert::ToBase64String',
+            'System.Guid::NewGuid',
             'System.Guid::TryParse',
             'System.Object::ReferenceEquals',
+            'System.IO.Directory::GetParent',
             'System.IO.Path::GetExtension',
             'System.IO.Path::GetFullPath',
             'System.IO.Path::GetPathRoot',
@@ -806,6 +833,7 @@ function Get-WdtMemberSafetyIssue {
             'System.Text.RegularExpressions.Regex::Escape',
             'System.Text.RegularExpressions.Regex::Matches',
             'System.Text.RegularExpressions.Regex::Replace',
+            'System.Text.RegularExpressions.Regex::Split',
             'System.Uri::UnescapeDataString'
         )
         if (("{0}::{1}" -f $typeName, $member) -in $safeStaticMethods) { return }
@@ -825,6 +853,16 @@ function Get-WdtMemberSafetyIssue {
     if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
         (Get-WdtEnclosingFunctionName $MemberAst) -in @('New-WdtStreamCaptureState', 'Read-WdtCompletedStreamChunks') -and
         $member -eq 'ReadAsync' -and $argumentCount -eq 3) { return }
+    if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and
+        $member -eq 'GetBytes' -and $argumentCount -eq 1 -and
+        $MemberAst.Expression.Extent.Text -ceq '[System.Text.Encoding]::Unicode' -and
+        $MemberAst.Arguments[0].Extent.Text -ceq '$commandText') { return }
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\report-common.ps1') -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Write-WdtFinding' -and
+        $member -eq 'WriteLine' -and $argumentCount -eq 1 -and
+        $MemberAst.Expression.Extent.Text -ceq '[System.Console]::Out' -and
+        $MemberAst.Arguments[0].Extent.Text -ceq '$marker') { return }
     if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\network\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Test-TcpEndpointConnection' -and
         $member -in @('ConnectAsync', 'Wait', 'Dispose')) { return }

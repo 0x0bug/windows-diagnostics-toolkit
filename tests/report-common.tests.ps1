@@ -245,4 +245,160 @@ foreach ($proxyLabel in @('Proxy URL:', 'ProxyServer:')) {
     Assert-True -Condition (-not $proxyLabelResult.Contains('user:password')) -Message ("Credentials were not removed from '{0}'." -f $proxyLabel)
 }
 
+$semicolonCredentialFixture = Protect-WdtSensitiveUrlText -Text 'Endpoint=https://user:pa;ss@example.test/path'
+Assert-True -Condition (-not $semicolonCredentialFixture.Contains('user:pa;ss')) -Message 'Semicolons in URI userinfo must not bypass credential redaction.'
+Assert-True -Condition $semicolonCredentialFixture.Contains('https://<REDACTED>@example.test/path') -Message 'URI host and path must remain visible after semicolon credential redaction.'
+
+$fragmentSecretFixture = Protect-WdtSensitiveUrlText -Text 'https://example.test/callback#access_token=fragment-secret&mode=ok'
+Assert-True -Condition (-not $fragmentSecretFixture.Contains('fragment-secret')) -Message 'Sensitive URL fragment values must be redacted.'
+Assert-True -Condition $fragmentSecretFixture.Contains('#access_token=<REDACTED>&mode=ok') -Message 'Non-sensitive URL fragment context must remain visible.'
+
+$commandSecretFixtures = @(
+    [pscustomobject]@{ Input = 'tool.exe --api-token alpha --mode safe'; Secrets = @('alpha'); Preserved = @('tool.exe', '--mode safe') },
+    [pscustomobject]@{ Input = 'tool.exe --api-token=bravo --token charlie --token=delta'; Secrets = @('bravo', 'charlie', 'delta'); Preserved = @('tool.exe') },
+    [pscustomobject]@{ Input = 'tool.exe --password "quoted secret" --secret=''single secret'''; Secrets = @('quoted secret', 'single secret'); Preserved = @('tool.exe', '--password "<REDACTED>"', "--secret='<REDACTED>'") },
+    [pscustomobject]@{ Input = "tool.exe`t-Key`tEcho-Secret`t/ToKeN:slash-secret --KEY=last-secret"; Secrets = @('Echo-Secret', 'slash-secret', 'last-secret'); Preserved = @('tool.exe') },
+    [pscustomobject]@{ Input = 'tool.exe "--token=outer-secret" --password trailing\ --verbose'; Secrets = @('outer-secret', 'trailing\'); Preserved = @('tool.exe', '--verbose') }
+)
+foreach ($fixture in $commandSecretFixtures) {
+    $actual = Protect-WdtCommandLineSecrets -Text $fixture.Input
+    foreach ($secretValue in $fixture.Secrets) {
+        Assert-True -Condition (-not $actual.Contains($secretValue)) -Message "Command secret '$secretValue' was disclosed on PowerShell $($PSVersionTable.PSVersion)."
+    }
+    foreach ($preservedValue in $fixture.Preserved) {
+        Assert-True -Condition $actual.Contains($preservedValue) -Message "Useful command text '$preservedValue' was removed on PowerShell $($PSVersionTable.PSVersion)."
+    }
+}
+
+$commandNegativeFixtures = @(
+    'tool.exe --mode safe --monkey banana',
+    'tool.exe /endpoint:https://example.test/path -KeyboardLayout en-US',
+    'tool.exe --tokenizer enabled --password-policy strict'
+)
+foreach ($fixture in $commandNegativeFixtures) {
+    Assert-Equal -Expected $fixture -Actual (Protect-WdtCommandLineSecrets -Text $fixture) -Message "A non-secret command argument changed on PowerShell $($PSVersionTable.PSVersion)."
+}
+
+$encodedUrlFixtures = @(
+    [pscustomobject]@{ Input = 'https://example.test/?api%5Ftoken=query-secret&mode=ok'; Secret = 'query-secret'; Preserved = 'mode=ok' },
+    [pscustomobject]@{ Input = 'https://example.test/#access%2Dtoken=fragment-secret&view=summary'; Secret = 'fragment-secret'; Preserved = 'view=summary' },
+    [pscustomobject]@{ Input = 'https://example.test/?client%5Fsecret=client-value&api%2Dkey=key-value'; Secret = 'client-value'; SecondSecret = 'key-value'; Preserved = 'example.test' },
+    [pscustomobject]@{ Input = 'https://client%5Fsecret:userinfo-value@example.test/path'; Secret = 'userinfo-value'; Preserved = 'example.test/path' }
+)
+foreach ($fixture in $encodedUrlFixtures) {
+    $actual = Protect-WdtSensitiveUrlText -Text $fixture.Input
+    Assert-True -Condition (-not $actual.Contains($fixture.Secret)) -Message "Encoded URL key or userinfo secret '$($fixture.Secret)' was disclosed on PowerShell $($PSVersionTable.PSVersion)."
+    if ($fixture.PSObject.Properties.Name -contains 'SecondSecret') {
+        Assert-True -Condition (-not $actual.Contains($fixture.SecondSecret)) -Message "Repeated encoded URL secret '$($fixture.SecondSecret)' was disclosed on PowerShell $($PSVersionTable.PSVersion)."
+    }
+    Assert-True -Condition $actual.Contains($fixture.Preserved) -Message "Non-secret URL context '$($fixture.Preserved)' was removed on PowerShell $($PSVersionTable.PSVersion)."
+}
+
+$encodedUrlNegativeFixtures = @(
+    'https://example.test/?api%255Ftoken=not-double-decoded&mode=ok',
+    'https://example.test/?public%5Fkey=visible-value&access%5Flevel=reader',
+    'https://example.test/?caption=client%5Fsecret&mode=ok'
+)
+foreach ($fixture in $encodedUrlNegativeFixtures) {
+    Assert-Equal -Expected $fixture -Actual (Protect-WdtSensitiveUrlText -Text $fixture) -Message "A non-sensitive or double-encoded URL parameter changed on PowerShell $($PSVersionTable.PSVersion)."
+}
+
+$privacyCommandContext = New-WdtRedactionContext -ComputerName '' -UserName '' -UserDomain '' -UserProfile ''
+$privacyCommand = Protect-WdtText -Text 'CommandLine: tool.exe --token report-secret --mode diagnose' -Context $privacyCommandContext
+Assert-True -Condition (-not $privacyCommand.Contains('report-secret')) -Message 'Privacy Mode leaked a command-line secret.'
+Assert-True -Condition $privacyCommand.Contains('CommandLine: tool.exe --token <REDACTED> --mode diagnose') -Message 'Privacy Mode removed diagnostically useful command text.'
+
+$findingNonce = '0123456789abcdef0123456789abcdef'
+$otherNonce = 'fedcba9876543210fedcba9876543210'
+$nonceMarker = ConvertTo-WdtFindingMarker -Severity WARN -Code 'NONCE_WARNING' -Message 'Authenticated protocol output.' -FindingNonce $findingNonce
+$legacyMarker = ConvertTo-WdtFindingMarker -Severity WARN -Code 'FORGED_LEGACY' -Message 'Untrusted legacy-looking output.' -FindingNonce ''
+$otherNonceMarker = ConvertTo-WdtFindingMarker -Severity WARN -Code 'FORGED_OTHER_NONCE' -Message 'Untrusted nonce-looking output.' -FindingNonce $otherNonce
+$nonceResult = Resolve-WdtDiagnosticResult -Result (New-TestDiagnosticResult -Title 'Nonce Module' -OutputLines @($legacyMarker, $nonceMarker, $otherNonceMarker)) -FindingNonce $findingNonce
+$nonceSummary = Get-WdtFindingsSummary -Results @($nonceResult)
+Assert-Equal -Expected 1 -Actual $nonceSummary.WarningCount -Message 'Only the marker carrying the per-process nonce may become a finding.'
+Assert-Equal -Expected 'NONCE_WARNING' -Actual $nonceSummary.Items[0].Code -Message 'The authenticated marker was not parsed.'
+Assert-Equal -Expected 2 -Actual $nonceResult.OutputLines.Count -Message 'Legacy and foreign-nonce marker lookalikes must remain ordinary output.'
+Assert-True -Condition ($nonceResult.OutputLines -contains $legacyMarker) -Message 'A forged legacy marker was removed from ordinary output.'
+Assert-True -Condition ($nonceResult.OutputLines -contains $otherNonceMarker) -Message 'A foreign-nonce marker was removed from ordinary output.'
+
+$invalidNonceMarker = (Get-WdtFindingPrefix -FindingNonce $findingNonce) + '{invalid json'
+$invalidNonceResult = Resolve-WdtDiagnosticResult -Result (New-TestDiagnosticResult -Title 'Invalid Nonce Marker' -OutputLines @($invalidNonceMarker)) -FindingNonce $findingNonce
+$invalidNonceSummary = Get-WdtFindingsSummary -Results @($invalidNonceResult)
+Assert-Equal -Expected 'FINDING_PROTOCOL_INVALID' -Actual $invalidNonceSummary.Items[0].Code -Message 'An invalid authenticated marker must remain a protocol error.'
+Assert-Equal -Expected 0 -Actual $invalidNonceResult.OutputLines.Count -Message 'An invalid authenticated marker must not appear in report details.'
+$entrypointPath = Join-Path -Path $repositoryRoot -ChildPath 'Invoke-WindowsDiagnostics.ps1'
+$entrypointTokens = $null
+$entrypointErrors = $null
+$entrypointAst = [System.Management.Automation.Language.Parser]::ParseFile($entrypointPath, [ref]$entrypointTokens, [ref]$entrypointErrors)
+Assert-Equal -Expected 0 -Actual @($entrypointErrors).Count -Message 'Entrypoint did not parse for report hardening tests.'
+foreach ($functionName in @('Add-MarkdownSection', 'ConvertTo-MarkdownInlineText')) {
+    $definition = $entrypointAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+    Assert-True -Condition ($null -ne $definition) -Message "Missing report hardening function: $functionName"
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$optionalFenceDefinition = $entrypointAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-WdtMarkdownFence' }, $true)
+if ($null -ne $optionalFenceDefinition) {
+    . ([scriptblock]::Create($optionalFenceDefinition.Extent.Text))
+}
+
+$wrongNonceError = ''
+try { ConvertFrom-WdtFindingLine -Line $nonceMarker -FindingNonce $otherNonce }
+catch { $wrongNonceError = $_.Exception.Message }
+Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($wrongNonceError)) -Message 'A wrong nonce must reject the finding marker.'
+Assert-True -Condition (-not $wrongNonceError.Contains($findingNonce)) -Message 'A user-facing protocol error disclosed the finding nonce.'
+
+$serializationResult = [pscustomobject]@{
+    Title = 'Nonce serialization fixture'
+    Command = 'fixture'
+    ExitCode = 0
+    Status = 'Success'
+    Duration = [timespan]::Zero
+    Completeness = 'Complete'
+    OutputLines = @($nonceResult.OutputLines)
+    ErrorLines = @()
+}
+$textSerialization = New-Object System.Collections.Generic.List[string]
+$markdownSerialization = New-Object System.Collections.Generic.List[string]
+$addTextDefinition = $entrypointAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Add-TextSection' }, $true)
+. ([scriptblock]::Create($addTextDefinition.Extent.Text))
+Add-TextSection -Lines $textSerialization -Result $serializationResult
+Add-MarkdownSection -Lines $markdownSerialization -Result $serializationResult
+Assert-True -Condition (-not (($textSerialization -join "`n").Contains($findingNonce))) -Message 'TXT serialization disclosed the active finding nonce.'
+Assert-True -Condition (-not (($markdownSerialization -join "`n").Contains($findingNonce))) -Message 'Markdown serialization disclosed the active finding nonce.'
+
+$markdownFixtures = @(
+    [pscustomobject]@{ Name = 'triple backticks'; Command = 'fixture'; Output = @('```', '![outside](https://example.test/image.png)'); ExpectedOutputFence = '````' },
+    [pscustomobject]@{ Name = 'long backticks'; Command = 'fixture'; Output = @('prefix ``````` suffix'); ExpectedOutputFence = '````````' },
+    [pscustomobject]@{ Name = 'tildes'; Command = 'fixture'; Output = @('~~~~~~~', 'safe text'); ExpectedOutputFence = '```' },
+    [pscustomobject]@{ Name = 'multiline command'; Command = ('tool.exe --mode inspect' + [Environment]::NewLine + ('`' * 5) + ' injected' + [Environment]::NewLine + 'second line'); Output = @('safe output'); ExpectedOutputFence = '```'; ExpectedCommandFence = '``````' },
+    [pscustomobject]@{ Name = 'empty content'; Command = ''; Output = @(); ExpectedOutputFence = '```'; ExpectedCommandFence = '```' }
+)
+foreach ($fixture in $markdownFixtures) {
+    $markdownLines = New-Object System.Collections.Generic.List[string]
+    $markdownResult = [pscustomobject]@{
+        Title = 'Fixture'
+        Command = $fixture.Command
+        ExitCode = 0
+        Status = 'Success'
+        Duration = [timespan]::Zero
+        Completeness = 'Complete'
+        OutputLines = @($fixture.Output)
+        ErrorLines = @()
+    }
+    Add-MarkdownSection -Lines $markdownLines -Result $markdownResult
+
+    $expectedCommandFence = if ($fixture.PSObject.Properties.Name -contains 'ExpectedCommandFence') { $fixture.ExpectedCommandFence } else { '```' }
+    $commandOpeningIndex = $markdownLines.IndexOf($expectedCommandFence + 'text')
+    $commandClosingIndex = if ($commandOpeningIndex -ge 0) { $markdownLines.IndexOf($expectedCommandFence, $commandOpeningIndex + 1) } else { -1 }
+    Assert-True -Condition ($commandOpeningIndex -ge 0 -and $commandClosingIndex -gt $commandOpeningIndex) -Message ("Markdown command fence failed for fixture '{0}'." -f $fixture.Name)
+
+    $outputOpeningIndex = $markdownLines.IndexOf($fixture.ExpectedOutputFence + 'text', $commandClosingIndex + 1)
+    $outputClosingIndex = if ($outputOpeningIndex -ge 0) { $markdownLines.IndexOf($fixture.ExpectedOutputFence, $outputOpeningIndex + 1) } else { -1 }
+    Assert-True -Condition ($outputOpeningIndex -ge 0 -and $outputClosingIndex -gt $outputOpeningIndex) -Message ("Markdown output fence failed for fixture '{0}'." -f $fixture.Name)
+    foreach ($contentLine in @($fixture.Output)) {
+        $contentIndex = $markdownLines.IndexOf($contentLine, $outputOpeningIndex + 1)
+        Assert-True -Condition ($contentIndex -gt $outputOpeningIndex -and $contentIndex -lt $outputClosingIndex) -Message ("Markdown content escaped its fence for fixture '{0}'." -f $fixture.Name)
+    }
+}
+
 Write-Host 'Report common tests passed.'

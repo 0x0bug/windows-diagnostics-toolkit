@@ -327,8 +327,26 @@ function Get-WinInetProxy {
     }
 }
 
+function Resolve-WdtSystemExecutablePath {
+    param([Parameter(Mandatory = $true)][string]$FileName)
+
+    $systemDirectory = [System.Environment]::SystemDirectory
+    if ([System.Environment]::Is64BitOperatingSystem -and -not [System.Environment]::Is64BitProcess) {
+        $windowsDirectory = [System.IO.Directory]::GetParent($systemDirectory).FullName
+        $systemDirectory = Join-Path -Path $windowsDirectory -ChildPath 'Sysnative'
+    }
+
+    $candidatePath = Join-Path -Path $systemDirectory -ChildPath $FileName
+    if (-not (Test-Path -LiteralPath $candidatePath -PathType Leaf)) {
+        return $null
+    }
+
+    return [System.IO.Path]::GetFullPath($candidatePath)
+}
+
 function Get-WinHttpProxy {
-    if ($null -eq (Get-Command -Name 'netsh.exe' -ErrorAction SilentlyContinue)) {
+    $netshPath = Resolve-WdtSystemExecutablePath -FileName 'netsh.exe'
+    if ([string]::IsNullOrWhiteSpace($netshPath)) {
         return [pscustomobject]@{
             Output = @()
             Error  = 'netsh.exe is unavailable.'
@@ -336,7 +354,7 @@ function Get-WinHttpProxy {
     }
 
     try {
-        $output = @(& netsh.exe winhttp show proxy 2>&1 | ForEach-Object { Protect-ProxyText -Text ([string]$_) })
+        $output = @(& $netshPath winhttp show proxy 2>&1 | ForEach-Object { Protect-ProxyText -Text ([string]$_) })
         if ($LASTEXITCODE -ne 0) {
             return [pscustomobject]@{
                 Output = @($output)
