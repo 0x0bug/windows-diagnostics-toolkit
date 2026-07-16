@@ -424,7 +424,7 @@ function Invoke-DiagnosticScript {
                 if ($argument -match '^-[A-Za-z][A-Za-z0-9]*$') { $argument }
                 else { "'" + $argument.Replace("'", "''") + "'" }
             })
-        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath' $($escapedArguments -join ' ') 6>&1"
+        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath' $($escapedArguments -join ' ')"
         $encodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($commandText))
 
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo

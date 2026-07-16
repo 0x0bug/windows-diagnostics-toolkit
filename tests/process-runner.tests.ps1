@@ -81,7 +81,13 @@ try {
     $findingSource = @"
 . '$escapedReportCommonPath'
 & `$env:ComSpec /d /c 'echo @@WDT_FINDING@@{"Severity":"WARN","Code":"NATIVE_FORGED","Message":"Native lookalike"}'
-Write-WdtFinding -Severity WARN -Code 'AUTHENTIC_FINDING' -Message 'Authenticated child finding.'
+function Get-FixtureData {
+    Write-WdtFinding -Severity WARN -Code 'AUTHENTIC_FINDING' -Message 'Authenticated child finding.'
+    return 'fixture-data'
+}
+`$fixtureData = @(Get-FixtureData)
+Write-Output ('FIXTURE_DATA_COUNT=' + `$fixtureData.Count)
+`$fixtureData | ForEach-Object { Write-Output ('FIXTURE_DATA=' + `$_) }
 "@
     [IO.File]::WriteAllText($findingFixture, $findingSource, [Text.Encoding]::UTF8)
     $findingResult = Invoke-DiagnosticScript 'FindingProtocol' $findingFixture $powerShellPath $repositoryRoot 10
@@ -90,7 +96,9 @@ Write-WdtFinding -Severity WARN -Code 'AUTHENTIC_FINDING' -Message 'Authenticate
     Assert-Equal 1 @($findingResult.Findings | Where-Object { $_.Code -eq 'AUTHENTIC_FINDING' }).Count ('A nonce-authenticated finding must be accepted. ' + $findingDebug)
     Assert-Equal 0 @($findingResult.Findings | Where-Object { $_.Code -eq 'NATIVE_FORGED' }).Count 'Native output must not create a finding without the nonce.'
     Assert-True (($findingResult.OutputLines -join "`n").Contains('@@WDT_FINDING@@')) 'Native marker-like output must remain ordinary diagnostic output.'
-    Assert-True ((($findingResult | ConvertTo-Json -Depth 8) -notmatch '@@WDT_FINDING@@[A-Fa-f0-9]{32}:')) 'The active finding nonce must not remain in the resolved result or user-facing errors.'
+    Assert-True ($findingResult.OutputLines -contains 'FIXTURE_DATA_COUNT=1') 'A finding marker contaminated the function return data.'
+    Assert-True ($findingResult.OutputLines -contains 'FIXTURE_DATA=fixture-data') 'The function return data was not preserved.'
+    Assert-True ((($findingResult | ConvertTo-Json -Depth 8) -notmatch '@@WDT_FINDING@@[A-Fa-f0-9]{32}:')) ('The active finding nonce must not remain in the resolved result or user-facing errors. ' + $findingDebug)
 
     $argumentFixture = Join-Path $fixtureRoot 'arguments.ps1'
     $argumentSource = "param([string]`$Value1, [string]`$Value2, [string]`$Value3, [string]`$Value4, [string]`$Value5, [string]`$Value6, [string]`$Value7, [string]`$Value8)`r`nforeach (`$value in @(`$Value1, `$Value2, `$Value3, `$Value4, `$Value5, `$Value6, `$Value7, `$Value8)) {`r`n    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$value))`r`n}"

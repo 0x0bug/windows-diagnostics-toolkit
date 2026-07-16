@@ -623,7 +623,13 @@ function Write-WdtFinding {
     $normalizedEvidence = ConvertTo-WdtSingleLineText -Text $Evidence
 
     if ($env:WDT_FINDING_PROTOCOL -eq '1') {
-        Write-Output (ConvertTo-WdtFindingMarker -Severity $Severity -Code $Code -Message $normalizedMessage -Evidence $normalizedEvidence -FindingNonce $env:WDT_FINDING_NONCE)
+        $marker = ConvertTo-WdtFindingMarker -Severity $Severity -Code $Code -Message $normalizedMessage -Evidence $normalizedEvidence -FindingNonce $env:WDT_FINDING_NONCE
+        if ([string]::IsNullOrWhiteSpace($env:WDT_FINDING_NONCE)) {
+            Write-Host $marker
+        }
+        else {
+            [System.Console]::Out.WriteLine($marker)
+        }
         return
     }
 
