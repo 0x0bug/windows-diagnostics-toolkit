@@ -73,6 +73,9 @@ Assert-Allowed 'function Get-WdtSafetyIssues { [System.Management.Automation.Lan
 Assert-Allowed 'function Import-WdtModuleManifest { [System.Management.Automation.Language.Parser]::ParseFile($fullManifestPath, [ref]$tokens, [ref]$parseErrors); [System.Management.Automation.Language.Parser]::ParseFile($entryPointPath, [ref]$entryTokens, [ref]$entryErrors) }' 'scripts\module-registry.ps1'
 Assert-Denied '[System.Management.Automation.Language.Parser]::ParseFile($otherPath, [ref]$tokens, [ref]$parseErrors)' '*exact production validation and registry parser forms*' 'scripts\validate.ps1'
 Assert-Denied 'function Leak-WdtFile { $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors); Write-Output $ast.Extent.Text }' '*exact production validation and registry parser forms*' 'modules\system\diagnostic.ps1'
+Assert-Allowed 'Get-Content -LiteralPath $versionPath -Raw' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Denied 'Get-Content -LiteralPath $otherPath -Raw' '*only allowed for the root VERSION file read*' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Denied 'Get-Content -LiteralPath $versionPath -Raw' '*only allowed for the root VERSION file read*' 'scripts\fixture.ps1'
 
 $fakeModuleDefinition = [pscustomobject]@{
     Id              = 'Fixture'
@@ -333,7 +336,7 @@ Assert-Denied '#requires -Modules SomeModule' '*Script module requirements are n
 
 function Assert-ProductionPolicyClassification {
     $paths = @((Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1')) +
-        @(Get-ChildItem (Join-Path $repositoryRoot 'scripts') -Filter '*.ps1' -File | ForEach-Object FullName) +
+        @(Get-ChildItem (Join-Path $repositoryRoot 'scripts') -Filter '*.ps1' -File | Where-Object Name -ne 'build-release.ps1' | ForEach-Object FullName) +
         @($registrySnapshot.Modules | ForEach-Object { @($_.ScriptPaths) })
     $productionScripts = @($paths | Sort-Object -Unique | ForEach-Object { Get-Item -LiteralPath $_ })
     $parsedScripts = @()

@@ -588,6 +588,23 @@ function Test-WdtAllowedPowerShellCommand {
     )
 }
 
+function Test-WdtAllowedVersionRead {
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
+
+    if (-not (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -or
+        $CommandAst.GetCommandName() -ine 'Get-Content' -or
+        $null -ne (Get-WdtEnclosingFunctionName $CommandAst) -or
+        $CommandAst.Redirections.Count -ne 0) { return $false }
+
+    $elements = @($CommandAst.CommandElements)
+    return $elements.Count -eq 4 -and
+        $elements[1] -is [System.Management.Automation.Language.CommandParameterAst] -and
+        $elements[1].ParameterName -ieq 'LiteralPath' -and
+        (Test-WdtSimpleVariable $elements[2] 'versionPath') -and
+        $elements[3] -is [System.Management.Automation.Language.CommandParameterAst] -and
+        $elements[3].ParameterName -ieq 'Raw'
+}
+
 function Test-WdtAllowedManifestImport {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
 
@@ -664,6 +681,10 @@ function Get-WdtCommandSafetyIssue {
 
     if ($leaf -eq 'Invoke-DiagnosticScript' -and (Test-WdtEntrypointPath $ScriptPath $RepositoryRoot)) { return }
     if ($leaf -in @('Resolve-WdtDiagnosticResult', 'New-WdtFindingObject') -and (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot)) { return }
+    if ($leaf -eq 'Get-Content') {
+        if (Test-WdtAllowedVersionRead $CommandAst $ScriptPath $RepositoryRoot) { return }
+        return New-WdtSafetyIssue $CommandAst 'Get-Content is only allowed for the root VERSION file read in the entrypoint.'
+    }
     if ($CommandAst.InvocationOperator -eq [System.Management.Automation.Language.TokenKind]::Ampersand -and $leaf -ne 'netsh.exe') { return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts.' }
 
     if ($leaf -eq 'Invoke-CimMethod') {

@@ -24,3 +24,4 @@ WindowsDiagnosticsReport-*.md
 # Test and coverage output
 coverage/
 TestResults/
+dist/
