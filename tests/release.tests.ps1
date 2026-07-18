@@ -147,6 +147,7 @@ try {
 
     $offlineDownloads = New-Object System.Collections.Generic.List[string]
     $originalLocation = (Get-Location).Path
+    $previousLastExitCode = $global:LASTEXITCODE
     $childExitError = $null
     try {
         Invoke-WdtBootstrap -DownloadFile {
@@ -164,6 +165,7 @@ try {
     Assert-Equal 2 $offlineDownloads.Count 'Offline bootstrap fixture did not handle both downloads locally.'
     Assert-True ($offlineDownloads -contains $script:WdtArchiveUri) 'Offline bootstrap fixture did not receive the release archive URL.'
     Assert-True ($offlineDownloads -contains $script:WdtChecksumUri) 'Offline bootstrap fixture did not receive the checksum URL.'
+    $global:LASTEXITCODE = $previousLastExitCode
 
     $cleanupDirectory = Join-Path -Path $temporaryRoot -ChildPath 'bootstrap-cleanup'
     $cleanupError = $null
