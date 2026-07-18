@@ -1,10 +1,11 @@
+& {
 $ErrorActionPreference = 'Stop'
 
-$script:WdtVersion = '0.1.0-beta'
-$script:WdtArchiveName = 'windows-diagnostics-toolkit-v0.1.0-beta.zip'
-$script:WdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.1.0-beta'
-$script:WdtArchiveUri = "$script:WdtReleaseBaseUri/$script:WdtArchiveName"
-$script:WdtChecksumUri = "$script:WdtArchiveUri.sha256"
+$wdtVersion = '0.1.0-beta'
+$wdtArchiveName = 'windows-diagnostics-toolkit-v0.1.0-beta.zip'
+$wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.1.0-beta'
+$wdtArchiveUri = "$wdtReleaseBaseUri/$wdtArchiveName"
+$wdtChecksumUri = "$wdtArchiveUri.sha256"
 
 function Get-WdtExpectedChecksum {
     param([Parameter(Mandatory = $true)][string]$ChecksumText)
@@ -39,7 +40,7 @@ function Invoke-WdtDownloadFile {
         [Parameter(Mandatory = $true)][string]$Destination
     )
 
-    if ($Uri -notin @($script:WdtArchiveUri, $script:WdtChecksumUri)) {
+    if ($Uri -notin @($wdtArchiveUri, $wdtChecksumUri)) {
         throw "Refusing unapproved download URL: $Uri"
     }
 
@@ -61,7 +62,7 @@ function Assert-WdtPackageLayout {
     }
 
     $packagedVersion = (Get-Content -LiteralPath (Join-Path -Path $PackageRoot -ChildPath 'VERSION') -Raw).Trim()
-    if ($packagedVersion -cne $script:WdtVersion) {
+    if ($packagedVersion -cne $wdtVersion) {
         throw "Unexpected packaged version: $packagedVersion"
     }
 }
@@ -88,13 +89,13 @@ function Invoke-WdtBootstrap {
         }
 
         $temporaryDirectory = & $NewTemporaryDirectory
-        $archivePath = Join-Path -Path $temporaryDirectory -ChildPath $script:WdtArchiveName
+        $archivePath = Join-Path -Path $temporaryDirectory -ChildPath $wdtArchiveName
         $checksumPath = "$archivePath.sha256"
         $packageRoot = Join-Path -Path $temporaryDirectory -ChildPath 'package'
 
         $ProgressPreference = 'SilentlyContinue'
-        & $DownloadFile $script:WdtArchiveUri $archivePath
-        & $DownloadFile $script:WdtChecksumUri $checksumPath
+        & $DownloadFile $wdtArchiveUri $archivePath
+        & $DownloadFile $wdtChecksumUri $checksumPath
         $ProgressPreference = $previousProgressPreference
 
         $expectedHash = Get-WdtExpectedChecksum -ChecksumText (Get-Content -LiteralPath $checksumPath -Raw)
@@ -123,3 +124,4 @@ function Invoke-WdtBootstrap {
 }
 
 Invoke-WdtBootstrap
+}
