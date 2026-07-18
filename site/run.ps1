@@ -108,9 +108,10 @@ function Invoke-WdtBootstrap {
 
         $entrypoint = Join-Path -Path $packageRoot -ChildPath 'Invoke-WindowsDiagnostics.ps1'
         $powerShellPath = Get-WdtCurrentPowerShellPath
-        $process = Start-Process -FilePath $powerShellPath -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $entrypoint)) -Wait -PassThru
-        if ($process.ExitCode -ne 0) {
-            throw "Windows Diagnostics Toolkit exited with code $($process.ExitCode)."
+        & $powerShellPath -NoProfile -ExecutionPolicy Bypass -File $entrypoint
+        $childExitCode = $LASTEXITCODE
+        if ($childExitCode -ne 0) {
+            throw "Windows Diagnostics Toolkit exited with code $childExitCode."
         }
     }
     finally {

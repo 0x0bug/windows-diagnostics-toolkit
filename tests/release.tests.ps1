@@ -95,7 +95,7 @@ try {
     $bootstrapErrors = $null
     $bootstrapAst = [System.Management.Automation.Language.Parser]::ParseFile($bootstrapScript, [ref]$bootstrapTokens, [ref]$bootstrapErrors)
     Assert-Equal 0 @($bootstrapErrors).Count 'Bootstrap AST parse failed.'
-    foreach ($functionName in @('Get-WdtExpectedChecksum', 'Test-WdtArchiveHash', 'Invoke-WdtBootstrap')) {
+    foreach ($functionName in @('Get-WdtExpectedChecksum', 'Test-WdtArchiveHash', 'New-WdtTemporaryDirectory', 'Assert-WdtPackageLayout', 'Get-WdtCurrentPowerShellPath', 'Invoke-WdtBootstrap')) {
         $definition = $bootstrapAst.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $functionName
@@ -126,6 +126,44 @@ try {
     Assert-Equal 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.1.0-beta' $downloadReferences[0] 'Bootstrap references an unapproved download host or path.'
     Assert-True ($bootstrapSource -notmatch '(?i)(/main/|/master/|raw\.githubusercontent\.com|gist\.github(?:usercontent)?\.com)') 'Bootstrap contains a forbidden branch, raw, or gist download reference.'
     Assert-True ($bootstrapSource -notmatch '(?m)^\s*exit\b') 'Bootstrap must not use exit.'
+    Assert-True ($bootstrapSource -notmatch '\bStart-Process\b') 'Bootstrap must launch the child PowerShell process in the current console.'
+
+    $offlinePackageRoot = Join-Path -Path $temporaryRoot -ChildPath 'offline-bootstrap-package'
+    $offlineArchive = Join-Path -Path $temporaryRoot -ChildPath 'offline-bootstrap.zip'
+    $offlineChecksum = "$offlineArchive.sha256"
+    New-Item -ItemType Directory -Path (Join-Path $offlinePackageRoot 'scripts') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $offlinePackageRoot 'modules') -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $offlinePackageRoot 'VERSION'), $version, [System.Text.Encoding]::UTF8)
+    [System.IO.File]::WriteAllText((Join-Path $offlinePackageRoot 'scripts\fixture.txt'), 'fixture', [System.Text.Encoding]::UTF8)
+    [System.IO.File]::WriteAllText((Join-Path $offlinePackageRoot 'modules\fixture.txt'), 'fixture', [System.Text.Encoding]::UTF8)
+    [System.IO.File]::WriteAllText(
+        (Join-Path $offlinePackageRoot 'Invoke-WindowsDiagnostics.ps1'),
+        "Set-Location -LiteralPath ([System.IO.Path]::GetTempPath())`r`nexit 23`r`n",
+        [System.Text.Encoding]::UTF8
+    )
+    Compress-Archive -Path (Join-Path $offlinePackageRoot '*') -DestinationPath $offlineArchive
+    $offlineHash = (Get-FileHash -LiteralPath $offlineArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+    [System.IO.File]::WriteAllText($offlineChecksum, ($offlineHash + "  $archiveName`r`n"), [System.Text.Encoding]::UTF8)
+
+    $offlineDownloads = New-Object System.Collections.Generic.List[string]
+    $originalLocation = (Get-Location).Path
+    $childExitError = $null
+    try {
+        Invoke-WdtBootstrap -DownloadFile {
+            param($Uri, $Destination)
+            [void]$offlineDownloads.Add($Uri)
+            $source = if ($Destination.EndsWith('.sha256')) { $offlineChecksum } else { $offlineArchive }
+            Copy-Item -LiteralPath $source -Destination $Destination
+        }
+    }
+    catch {
+        $childExitError = $_.Exception.Message
+    }
+    Assert-Equal 'Windows Diagnostics Toolkit exited with code 23.' $childExitError 'Bootstrap did not propagate the child process exit code.'
+    Assert-Equal $originalLocation (Get-Location).Path 'Bootstrap changed the caller working directory.'
+    Assert-Equal 2 $offlineDownloads.Count 'Offline bootstrap fixture did not handle both downloads locally.'
+    Assert-True ($offlineDownloads -contains $script:WdtArchiveUri) 'Offline bootstrap fixture did not receive the release archive URL.'
+    Assert-True ($offlineDownloads -contains $script:WdtChecksumUri) 'Offline bootstrap fixture did not receive the checksum URL.'
 
     $cleanupDirectory = Join-Path -Path $temporaryRoot -ChildPath 'bootstrap-cleanup'
     $cleanupError = $null
