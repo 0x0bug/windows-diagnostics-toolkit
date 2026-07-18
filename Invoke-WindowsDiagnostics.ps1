@@ -30,6 +30,15 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $repositoryRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$toolkitVersion = 'development'
+$versionPath = Join-Path -Path $repositoryRoot -ChildPath 'VERSION'
+if (Test-Path -LiteralPath $versionPath -PathType Leaf) {
+    $versionText = Get-Content -LiteralPath $versionPath -Raw
+    if (-not [string]::IsNullOrWhiteSpace($versionText)) {
+        $toolkitVersion = $versionText.Trim()
+    }
+}
+
 $reportCommonPath = Join-Path -Path $repositoryRoot -ChildPath 'scripts\report-common.ps1'
 if (-not (Test-Path -LiteralPath $reportCommonPath -PathType Leaf)) {
     throw "Missing report helper: $reportCommonPath"
@@ -361,6 +370,7 @@ function Invoke-WdtReport {
 
     $textLines = New-Object System.Collections.Generic.List[string]
     $textLines.Add('Windows Diagnostics Toolkit - Support Report')
+    $textLines.Add(('Toolkit version : {0}' -f $toolkitVersion))
     $textLines.Add(('Created at    : {0}' -f $createdAt))
     $textLines.Add(('Computer name : {0}' -f $displayComputerName))
     $textLines.Add(('Mode          : read-only'))
@@ -384,6 +394,7 @@ function Invoke-WdtReport {
         $markdownLines = New-Object System.Collections.Generic.List[string]
         $markdownLines.Add('# Windows Diagnostics Toolkit - Support Report')
         $markdownLines.Add('')
+        $markdownLines.Add(('- Toolkit version : {0}' -f $toolkitVersion))
         $markdownLines.Add(('- Created at: `{0}`' -f $createdAt))
         $markdownLines.Add(('- Computer name: `{0}`' -f $displayComputerName))
         $markdownLines.Add(('- Mode: `read-only`'))

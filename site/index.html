@@ -247,6 +247,7 @@
           <li><span class="ok">[OK]</span> Recommended checks preselected</li>
           <li><span class="ok">[OK]</span> Privacy Mode enabled by default</li>
         </ul>
+        <p class="section-intro">The planned <code>v0.1.0-beta</code> publication will add a one-line bootstrap that downloads a fixed GitHub Release ZIP and verifies its SHA-256 checksum before execution. Until publication, use the clone workflow. The bootstrap still requires trust in the file delivered through GitHub Pages.</p>
       </div>
       <div class="terminal command-terminal" aria-label="PowerShell quick start command">
         <div class="terminal-bar"><span>PowerShell</span><button class="copy-button" type="button" data-copy-target="quick-command">COPY</button></div>
@@ -254,6 +255,20 @@
 <span class="ps-prompt">PS&gt;</span> cd windows-diagnostics-toolkit
 <span class="ps-prompt">PS&gt;</span> .\Invoke-WindowsDiagnostics.ps1</code></pre>
         <div class="terminal-footer"><span class="ok">READY</span><span>Execution policy unchanged</span></div>
+      </div>
+    </div>
+    <div class="wrap command-layout">
+      <div>
+        <h3>Beta release command</h3>
+        <p>Available when <code>v0.1.0-beta</code> is published. Review every report before publication; Privacy Mode cannot guarantee removal of arbitrary sensitive text in Windows Event Log messages.</p>
+      </div>
+      <div class="terminal command-terminal" aria-label="Planned beta bootstrap commands">
+        <pre><code><span class="ps-prompt">PS&gt;</span> irm https://0x0bug.github.io/windows-diagnostics-toolkit/run.ps1 | iex
+
+<span class="ps-prompt">PS&gt;</span> irm https://0x0bug.github.io/windows-diagnostics-toolkit/run.ps1 -OutFile .\wdt-run.ps1
+<span class="ps-prompt">PS&gt;</span> notepad .\wdt-run.ps1
+<span class="ps-prompt">PS&gt;</span> .\wdt-run.ps1</code></pre>
+        <div class="terminal-footer"><span class="warn">PLANNED BETA</span><span>Review-before-run option shown</span></div>
       </div>
     </div>
   </section>

@@ -22,7 +22,23 @@ git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
 cd windows-diagnostics-toolkit
 ```
 
-No installation step is required.
+No installation step is required. Cloning is also the recommended method for development and source inspection.
+
+When the planned `v0.1.0-beta` release is published, this one-line bootstrap will become available:
+
+```powershell
+irm https://0x0bug.github.io/windows-diagnostics-toolkit/run.ps1 | iex
+```
+
+The bootstrap downloads the fixed `v0.1.0-beta` ZIP from GitHub Releases, verifies the ZIP against its SHA-256 checksum, and only then extracts and launches it in a child PowerShell process. It does not install files permanently. To review the bootstrap before running it:
+
+```powershell
+irm https://0x0bug.github.io/windows-diagnostics-toolkit/run.ps1 -OutFile .\wdt-run.ps1
+notepad .\wdt-run.ps1
+.\wdt-run.ps1
+```
+
+SHA-256 verification covers the release ZIP. The `irm | iex` form still requires trust in the bootstrap delivered through GitHub Pages. Until the beta is published, use the clone workflow above.
 
 ## Interactive TUI
 
@@ -173,7 +189,7 @@ Privacy Mode centrally redacts captured module output, findings, headers, and re
 - `<MAC-1>` for a MAC address
 - `<ID-1>` for a SID, GUID, or device identifier
 
-The token map resets for each report. Process names, application names, and dump-file names remain visible for diagnostic context.
+The token map resets for each report. Process names, application names, and dump-file names remain visible for diagnostic context. Privacy Mode cannot guarantee removal of arbitrary sensitive text embedded in Windows Event Log messages. Review every report before publishing it.
 
 Combined reports always replace proxy URL credentials and sensitive query values with `<REDACTED>`, including when Privacy Mode is disabled.
 
