@@ -336,7 +336,7 @@ Assert-Denied '#requires -Modules SomeModule' '*Script module requirements are n
 
 function Assert-ProductionPolicyClassification {
     $paths = @((Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1')) +
-        @(Get-ChildItem (Join-Path $repositoryRoot 'scripts') -Filter '*.ps1' -File | Where-Object Name -ne 'build-release.ps1' | ForEach-Object FullName) +
+        @(Get-ChildItem (Join-Path $repositoryRoot 'scripts') -Filter '*.ps1' -File | Where-Object Name -notin @('build-release.ps1', 'Sync-WdtSiteBootstrap.ps1') | ForEach-Object FullName) +
         @($registrySnapshot.Modules | ForEach-Object { @($_.ScriptPaths) })
     $productionScripts = @($paths | Sort-Object -Unique | ForEach-Object { Get-Item -LiteralPath $_ })
     $parsedScripts = @()

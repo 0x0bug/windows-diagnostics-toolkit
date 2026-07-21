@@ -21,7 +21,7 @@ Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 
 - Optional Privacy Mode for reports that will be shared
 - Compatible with Windows PowerShell 5.1 and PowerShell 7
 
-[Project website](https://0x0bug.github.io/windows-diagnostics-toolkit/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
+[Project website](https://wdt.digital/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
 
 ## Quick start
 
@@ -36,13 +36,13 @@ cd windows-diagnostics-toolkit
 The planned `v0.1.0-beta` publication will also make this fixed-release bootstrap available:
 
 ```powershell
-irm https://0x0bug.github.io/windows-diagnostics-toolkit/run.ps1 | iex
+irm https://wdt.digital/run.ps1 | iex
 ```
 
 Until that beta is published, use the clone command above. The bootstrap downloads only the `v0.1.0-beta` GitHub Release ZIP and verifies its published SHA-256 checksum before extraction or execution. To inspect the bootstrap first:
 
 ```powershell
-irm https://0x0bug.github.io/windows-diagnostics-toolkit/run.ps1 -OutFile .\wdt-run.ps1
+irm https://wdt.digital/run.ps1 -OutFile .\wdt-run.ps1
 notepad .\wdt-run.ps1
 .\wdt-run.ps1
 ```

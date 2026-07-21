@@ -16,7 +16,7 @@ function Assert-Equal {
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $versionPath = Join-Path -Path $repositoryRoot -ChildPath 'VERSION'
 $buildScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\build-release.ps1'
-$bootstrapScript = Join-Path -Path $repositoryRoot -ChildPath 'site\run.ps1'
+$bootstrapScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\bootstrap\run.ps1'
 $entrypoint = Join-Path -Path $repositoryRoot -ChildPath 'Invoke-WindowsDiagnostics.ps1'
 $powerShellPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
 $temporaryRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('wdt-release-tests-' + [System.Guid]::NewGuid().ToString('N'))

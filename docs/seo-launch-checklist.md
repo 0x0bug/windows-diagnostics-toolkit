@@ -4,10 +4,10 @@ This checklist covers the manual steps that cannot be completed from the static-
 
 ## Published URLs
 
-- Site: `https://0x0bug.github.io/windows-diagnostics-toolkit/`
-- Troubleshooting guides: `https://0x0bug.github.io/windows-diagnostics-toolkit/cases/`
-- Sitemap: `https://0x0bug.github.io/windows-diagnostics-toolkit/sitemap.xml`
-- Robots file: `https://0x0bug.github.io/windows-diagnostics-toolkit/robots.txt`
+- Site: `https://wdt.digital/`
+- Troubleshooting guides: `https://wdt.digital/cases/`
+- Sitemap: `https://wdt.digital/sitemap.xml`
+- Robots file: `https://wdt.digital/robots.txt`
 
 ## After merging a site change
 
@@ -41,7 +41,7 @@ Do not commit a placeholder verification value. Wait for the exact value supplie
 Set the repository website to:
 
 ```text
-https://0x0bug.github.io/windows-diagnostics-toolkit/
+https://wdt.digital/
 ```
 
 Recommended repository description:

@@ -27,13 +27,13 @@ No installation step is required. Cloning is also the recommended method for dev
 When the planned `v0.1.0-beta` release is published, this one-line bootstrap will become available:
 
 ```powershell
-irm https://0x0bug.github.io/windows-diagnostics-toolkit/run.ps1 | iex
+irm https://wdt.digital/run.ps1 | iex
 ```
 
 The bootstrap downloads the fixed `v0.1.0-beta` ZIP from GitHub Releases, verifies the ZIP against its SHA-256 checksum, and only then extracts and launches it in a child PowerShell process. It does not install files permanently. To review the bootstrap before running it:
 
 ```powershell
-irm https://0x0bug.github.io/windows-diagnostics-toolkit/run.ps1 -OutFile .\wdt-run.ps1
+irm https://wdt.digital/run.ps1 -OutFile .\wdt-run.ps1
 notepad .\wdt-run.ps1
 .\wdt-run.ps1
 ```
