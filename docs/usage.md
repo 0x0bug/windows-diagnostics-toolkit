@@ -49,7 +49,7 @@ Run the entry point without module switches:
 ```
 
 <p align="center">
-  <img src="../site/assets/tui-wide-real.png" alt="Windows Diagnostics Toolkit interactive Wide dashboard" width="100%">
+  <img src="https://wdt.digital/assets/tui-wide-real.png" alt="Windows Diagnostics Toolkit interactive Wide dashboard" width="100%">
 </p>
 
 The initial state enables the recommended diagnostics, Privacy Mode, and Markdown export. The interface lets you:
@@ -125,7 +125,7 @@ After collection completes, the result screen displays:
 - controls for returning to the menu or exiting.
 
 <p align="center">
-  <img src="../site/assets/tui-result-real.png" alt="Windows Diagnostics Toolkit result screen after collection" width="100%">
+  <img src="https://wdt.digital/assets/tui-result-real.png" alt="Windows Diagnostics Toolkit result screen after collection" width="100%">
 </p>
 
 `WARN` represents diagnostic state that deserves review. It does not change the process exit code. A non-zero exit code means a module failed to execute.

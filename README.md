@@ -6,7 +6,7 @@
 [![No telemetry](https://img.shields.io/badge/telemetry-none-2ea44f)](SECURITY.md)
 
 <p align="center">
-  <img src="site/assets/tui-wide-real.png" alt="Windows Diagnostics Toolkit interactive Wide dashboard" width="100%">
+  <img src="https://wdt.digital/assets/tui-wide-real.png" alt="Windows Diagnostics Toolkit interactive Wide dashboard" width="100%">
 </p>
 
 **Generate a local Windows support report with diagnostics that are read-only by design and guarded by automated safety checks.**
@@ -110,7 +110,7 @@ Remove-Item Env:WDT_TUI_LOGO -ErrorAction SilentlyContinue
 After collection completes, the TUI shows the elapsed time, report paths, and the number of `WARN` and `ERROR` findings. `Enter` returns to the menu and `Esc` exits.
 
 <p align="center">
-  <img src="site/assets/tui-result-real.png" alt="Windows Diagnostics Toolkit completed diagnostics screen" width="100%">
+  <img src="https://wdt.digital/assets/tui-result-real.png" alt="Windows Diagnostics Toolkit completed diagnostics screen" width="100%">
 </p>
 
 A `WARN` means the toolkit found a condition worth reviewing. It does not mean the collection failed. A non-zero module exit code is reported separately as an execution failure.
@@ -266,7 +266,7 @@ The GitHub Actions workflow runs validation, dependency-free tests, and a report
 - [Detailed usage](docs/usage.md)
 - [Built-in module authoring](docs/module-authoring.md)
 - [Anonymized TXT and Markdown report](docs/report-example.md)
-- [Project website and troubleshooting cases](site/index.html)
+- [Project website and troubleshooting cases](https://wdt.digital/)
 - [Contributing](CONTRIBUTING.md)
 - [Security policy](SECURITY.md)
 

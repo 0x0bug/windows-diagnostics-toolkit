@@ -8,29 +8,34 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
-function Get-NormalizedText {
-    param([Parameter(Mandatory = $true)][string]$Path)
-    return (Get-Content -LiteralPath $Path -Raw).Replace("`r`n", "`n").Replace("`r", "`n")
-}
-
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $canonicalBootstrap = Join-Path -Path $repositoryRoot -ChildPath 'scripts\bootstrap\run.ps1'
-$publishedBootstrap = Join-Path -Path $repositoryRoot -ChildPath 'site\run.ps1'
 $syncScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\Sync-WdtSiteBootstrap.ps1'
 $powerShellPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
 $temporaryRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('wdt-bootstrap-sync-tests-' + [System.Guid]::NewGuid().ToString('N'))
 $previousLastExitCode = $global:LASTEXITCODE
 
-foreach ($requiredFile in @($canonicalBootstrap, $publishedBootstrap, $syncScript)) {
+foreach ($requiredFile in @($canonicalBootstrap, $syncScript)) {
     Assert-True (Test-Path -LiteralPath $requiredFile -PathType Leaf) "Required file is missing: $requiredFile"
 }
 
 $canonicalHash = (Get-FileHash -LiteralPath $canonicalBootstrap -Algorithm SHA256).Hash
-$publishedHash = (Get-FileHash -LiteralPath $publishedBootstrap -Algorithm SHA256).Hash
-$byteEqual = [string]::Equals($canonicalHash, $publishedHash, [System.StringComparison]::OrdinalIgnoreCase)
-if (-not $byteEqual) {
-    Assert-True ((Get-NormalizedText -Path $canonicalBootstrap) -ceq (Get-NormalizedText -Path $publishedBootstrap)) 'Canonical and published bootstrap differ beyond CRLF/LF line endings.'
+$tokens = $null
+$parseErrors = $null
+$syncAst = [System.Management.Automation.Language.Parser]::ParseFile($syncScript, [ref]$tokens, [ref]$parseErrors)
+Assert-True ($parseErrors.Count -eq 0) 'Sync script contains PowerShell parser errors.'
+
+$forbiddenCommands = @('git', 'gh', 'Invoke-RestMethod', 'Invoke-WebRequest', 'curl', 'curl.exe')
+$commandAsts = @($syncAst.FindAll({
+    param($node)
+    $node -is [System.Management.Automation.Language.CommandAst]
+}, $true))
+foreach ($commandAst in $commandAsts) {
+    $commandName = $commandAst.GetCommandName()
+    Assert-True ($commandName -notin $forbiddenCommands) "Sync script contains a forbidden external or network command: $commandName"
 }
+$syncScriptText = Get-Content -LiteralPath $syncScript -Raw
+Assert-True ($syncScriptText -notmatch '(?i)api\.github\.com') 'Sync script contains a GitHub API endpoint.'
 
 New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 try {

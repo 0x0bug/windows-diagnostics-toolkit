@@ -161,14 +161,6 @@ jobs:
         shell: powershell
         run: .\tests\startup-inventory.tests.ps1
 
-      - name: Validate static site SEO with PowerShell 7
-        shell: pwsh
-        run: .\tests\site-seo.tests.ps1
-
-      - name: Validate static site SEO with Windows PowerShell 5.1
-        shell: powershell
-        run: .\tests\site-seo.tests.ps1
-
       - name: Test bootstrap synchronization with PowerShell 7
         shell: pwsh
         run: .\tests\bootstrap-sync.tests.ps1

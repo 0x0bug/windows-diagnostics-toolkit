@@ -1,6 +1,7 @@
 # SEO launch checklist
 
-This checklist covers the manual steps that cannot be completed from the static-site source alone.
+The canonical static-site source and deployment workflow live in
+[`0x0bug/wdt-site`](https://github.com/0x0bug/wdt-site). This checklist covers the manual steps that cannot be completed from that source alone.
 
 ## Published URLs
 
@@ -11,16 +12,16 @@ This checklist covers the manual steps that cannot be completed from the static-
 
 ## After merging a site change
 
-1. Confirm the GitHub Pages workflow completes successfully.
+1. Confirm the GitHub Pages workflow in `0x0bug/wdt-site` completes successfully.
 2. Open the homepage, guide index, one article, `robots.txt`, and `sitemap.xml` in a private browser window.
 3. Confirm each page returns the expected content over HTTPS.
-4. Check that canonical URLs use the published GitHub Pages domain and repository path.
+4. Check that canonical URLs use `https://wdt.digital/`.
 5. Check the social card in at least one Open Graph or social-preview debugger.
 6. Update sitemap `lastmod` only for pages whose primary content changed.
 
 ## Google Search Console
 
-1. Add the GitHub Pages URL as a URL-prefix property.
+1. Add `https://wdt.digital/` as a URL-prefix property.
 2. Choose an available verification method.
 3. Add the provided verification token or verification file in a separate focused pull request.
 4. Submit `sitemap.xml` after verification.
@@ -69,7 +70,7 @@ tech-support
 read-only
 ```
 
-Upload a raster 1280×640 version of `site/assets/social-preview.svg` as the repository social preview when available.
+Upload the raster 1280×640 social preview maintained in `0x0bug/wdt-site` as the repository social preview when available.
 
 ## Content maintenance
 
