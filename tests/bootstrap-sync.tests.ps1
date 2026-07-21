@@ -19,6 +19,7 @@ $publishedBootstrap = Join-Path -Path $repositoryRoot -ChildPath 'site\run.ps1'
 $syncScript = Join-Path -Path $repositoryRoot -ChildPath 'scripts\Sync-WdtSiteBootstrap.ps1'
 $powerShellPath = [System.Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
 $temporaryRoot = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('wdt-bootstrap-sync-tests-' + [System.Guid]::NewGuid().ToString('N'))
+$previousLastExitCode = $global:LASTEXITCODE
 
 foreach ($requiredFile in @($canonicalBootstrap, $publishedBootstrap, $syncScript)) {
     Assert-True (Test-Path -LiteralPath $requiredFile -PathType Leaf) "Required file is missing: $requiredFile"
@@ -58,6 +59,7 @@ try {
     Assert-True ($missingCheckoutExitCode -ne 0) 'Sync script returned success for a missing site checkout.'
 }
 finally {
+    $global:LASTEXITCODE = $previousLastExitCode
     if (Test-Path -LiteralPath $temporaryRoot) {
         Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
     }
