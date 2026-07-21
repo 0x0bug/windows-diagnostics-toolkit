@@ -50,19 +50,14 @@ Assert-True (-not $readme.Contains('The interface is ASCII-first')) 'README stil
 Assert-True (-not $readme.Contains('Set-ExecutionPolicy Unrestricted')) 'README recommends a persistent unsafe Execution Policy change.'
 Assert-True (-not $readme.Contains('C:\Users\')) 'README contains an absolute user profile path.'
 
-$requiredAssets = @(
-    'site\assets\tui-wide-real.png',
-    'site\assets\tui-result-real.png'
-)
-foreach ($relativeAsset in $requiredAssets) {
-    $assetPath = Join-Path -Path $repositoryRoot -ChildPath $relativeAsset
-    Assert-True (Test-Path -LiteralPath $assetPath -PathType Leaf) ("Documentation asset is missing: {0}" -f $relativeAsset)
-}
-
-Assert-True ($readme.Contains('site/assets/tui-wide-real.png')) 'README does not reference the real Wide TUI visual.'
-Assert-True ($readme.Contains('site/assets/tui-result-real.png')) 'README does not reference the real result visual.'
-Assert-True ($usage.Contains('../site/assets/tui-wide-real.png')) 'Usage guide does not reference the real Wide TUI visual.'
-Assert-True ($usage.Contains('../site/assets/tui-result-real.png')) 'Usage guide does not reference the real result visual.'
+$wideTuiImage = 'https://wdt.digital/assets/tui-wide-real.png'
+$resultTuiImage = 'https://wdt.digital/assets/tui-result-real.png'
+Assert-True ($readme.Contains($wideTuiImage)) 'README does not reference the published Wide TUI visual.'
+Assert-True ($readme.Contains($resultTuiImage)) 'README does not reference the published result visual.'
+Assert-True ($usage.Contains($wideTuiImage)) 'Usage guide does not reference the published Wide TUI visual.'
+Assert-True ($usage.Contains($resultTuiImage)) 'Usage guide does not reference the published result visual.'
+Assert-True (-not $readme.Contains('site/assets/')) 'README still references legacy local site assets.'
+Assert-True (-not $usage.Contains('site/assets/')) 'Usage guide still references legacy local site assets.'
 Assert-True ($usage.Contains('ASCII appears instead of the Unicode logo')) 'Usage guide is missing Unicode fallback troubleshooting.'
 Assert-True (-not $usage.Contains('## Real Co-Authored Commit')) 'Usage guide still contains contributor workflow content.'
 
