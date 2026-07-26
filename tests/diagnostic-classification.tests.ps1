@@ -21,7 +21,7 @@ $now = Get-Date
 # Event Log fixtures: severity alone is context; exact rules, grouping, cutoff,
 # provider identity, and partial source availability are deterministic.
 $eventsScript = Join-Path $repositoryRoot 'modules\events\diagnostic.ps1'
-Import-TestFunctions $eventsScript @('Get-EventSignalRule','Group-EventLogEvents','Read-EventLog')
+Import-TestFunctions $eventsScript @('ConvertTo-OneLineMessage','Get-EventSignalRule','Group-EventLogEvents','Read-EventLog')
 Assert-True ($null -eq (Get-EventSignalRule 'Application' 'Fixture-Provider' 1000 2)) 'A generic Error event must remain context.'
 Assert-True ($null -eq (Get-EventSignalRule 'System' 'Microsoft-Windows-DistributedCOM' 10016 2)) 'Expected DCOM 10016 noise must remain context.'
 Assert-True ($null -eq (Get-EventSignalRule 'System' 'Fixture-Kernel-Power' 41 1)) 'Event ID 41 from another provider must not match.'

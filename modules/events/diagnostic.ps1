@@ -115,16 +115,7 @@ function Group-EventLogEvents {
             $levelDisplayName = [string]$level
         }
 
-        $representativeMessage = [string]$representativeEvent.Message
-        if ([string]::IsNullOrWhiteSpace($representativeMessage)) {
-            $representativeMessage = 'No message'
-        }
-        else {
-            $representativeMessage = (($representativeMessage -replace '\s+', ' ').Trim())
-            if ($representativeMessage.Length -gt 240) {
-                $representativeMessage = $representativeMessage.Substring(0, 237) + '...'
-            }
-        }
+        $representativeMessage = ConvertTo-OneLineMessage -Message ([string]$representativeEvent.Message)
 
         $logNames = @(
             $orderedEvents |
