@@ -1,0 +1,2 @@
+# Keep PowerShell files byte-stable across platforms.
+*.ps1 text eol=lf
