@@ -309,7 +309,7 @@ function Invoke-PerformanceSnapshot {
     else {
         Write-Host 'Method         : average of 3 short samples'
         Write-Host ('Total CPU load : {0:N1}%' -f $cpu.Percent)
-        Write-Host ('Samples         : {0}' -f (($cpu.Samples | ForEach-Object { '{0:N1}%' -f $_ }) -join ', '))
+        Write-Host ('Samples        : {0}' -f (($cpu.Samples | ForEach-Object { '{0:N1}%' -f $_ }) -join ', '))
     }
 
     Write-Section 'Pagefile Usage'
