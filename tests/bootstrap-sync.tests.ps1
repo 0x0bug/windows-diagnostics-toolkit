@@ -20,6 +20,18 @@ foreach ($requiredFile in @($canonicalBootstrap, $syncScript)) {
 }
 
 $canonicalHash = (Get-FileHash -LiteralPath $canonicalBootstrap -Algorithm SHA256).Hash
+
+# The byte-for-byte bootstrap guarantee requires a repository-owned EOL policy:
+# without it, core.autocrlf=true checkouts produce CRLF and a different SHA-256.
+$expectedCanonicalBootstrapSha256 = 'fd1f9bc55fe8665c4a2d4706728eff16723a4c62fffd57baeb9c697b35a77bc6'
+$gitAttributesPath = Join-Path -Path $repositoryRoot -ChildPath '.gitattributes'
+Assert-True (Test-Path -LiteralPath $gitAttributesPath -PathType Leaf) 'Repository root is missing .gitattributes; the PowerShell LF policy must be repository-owned.'
+$gitAttributesLines = @(Get-Content -LiteralPath $gitAttributesPath)
+Assert-True (@($gitAttributesLines | Where-Object { $_ -match '^\s*\*\.ps1\s+text\s+eol=lf\s*$' }).Count -ge 1) '.gitattributes does not contain the active rule: *.ps1 text eol=lf'
+$canonicalBootstrapBytes = [System.IO.File]::ReadAllBytes($canonicalBootstrap)
+Assert-True ([System.Array]::IndexOf($canonicalBootstrapBytes, [byte]13) -lt 0) 'Canonical bootstrap checkout contains CR bytes. Re-checkout PowerShell files after the LF policy (for example: git checkout -- .) or fix .gitattributes.'
+Assert-True ([string]::Equals($canonicalHash, $expectedCanonicalBootstrapSha256, [System.StringComparison]::OrdinalIgnoreCase)) "Canonical bootstrap SHA-256 changed. Expected $expectedCanonicalBootstrapSha256 but found $($canonicalHash.ToLowerInvariant()). Update the pinned value only for a deliberate, reviewed bootstrap change."
+
 $tokens = $null
 $parseErrors = $null
 $syncAst = [System.Management.Automation.Language.Parser]::ParseFile($syncScript, [ref]$tokens, [ref]$parseErrors)
