@@ -253,8 +253,9 @@ function Test-WdtSnapshotMembership {
         }
         if ($identity.Status -ne $script:WdtCleanupStatus.Match) { return $identity }
         if ($cursor.IsRoot) { return New-WdtStatusResult -Status $script:WdtCleanupStatus.Match }
-        if (-not $SnapshotById.ContainsKey([int]$cursor.ParentProcessId)) { return New-WdtStatusResult -Status $script:WdtCleanupStatus.SnapshotParentMissing -Message 'Expected parent is absent from the cleanup snapshot.' }
-        $cursor = $SnapshotById[[int]$cursor.ParentProcessId]
+        $parentId = [int]$cursor.ParentProcessId
+        if (-not $SnapshotById.ContainsKey($parentId) -or $null -eq $SnapshotById[$parentId]) { return New-WdtStatusResult -Status $script:WdtCleanupStatus.SnapshotParentMissing -Message 'Expected parent is absent from the cleanup snapshot.' }
+        $cursor = $SnapshotById[$parentId]
         $isTarget = $false
     }
 }
