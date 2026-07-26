@@ -35,7 +35,8 @@ $childEntry = [pscustomobject]@{ ProcessId=200; ParentProcessId=100; Depth=1; Is
 $watch = [Diagnostics.Stopwatch]::StartNew()
 $membership = & { function Get-CimInstance { param($ClassName,$Filter,$OperationTimeoutSec) @() }; Test-WdtSnapshotMembership $childEntry @{100=$rootEntry;200=$childEntry} $watch 500 }
 Assert-Equal 'TargetNotFound' $membership.Status 'An exited descendant must be safe.'
-$nullParentMembership = & { function Get-CimInstance { param($ClassName,$Filter,$OperationTimeoutSec) [pscustomobject]@{ ProcessId=200; ParentProcessId=100; CreationDate=[datetime]'2024-01-01T00:00:01' } }; Test-WdtSnapshotMembership $childEntry @{100=$null;200=$childEntry} $watch 500 }
+$nullParentWatch = [Diagnostics.Stopwatch]::StartNew()
+$nullParentMembership = & { function Get-CimInstance { param($ClassName,$Filter,$OperationTimeoutSec) [pscustomobject]@{ ProcessId=200; ParentProcessId=100; CreationDate=[datetime]'2024-01-01T00:00:01' } }; Test-WdtSnapshotMembership $childEntry @{100=$null;200=$childEntry} $nullParentWatch 500 }
 Assert-True ($null -ne $nullParentMembership) 'A null parent snapshot value must still produce a structured result.'
 Assert-Equal 'SnapshotParentMissing' $nullParentMembership.Status 'A null parent snapshot value must be structured as SnapshotParentMissing.'
 $failedSummary = Get-WdtProcessCleanupSummary @([pscustomobject]@{Status='TerminationFailed'}) @('fixture') $false
