@@ -235,15 +235,15 @@ function Get-StartupRegistrySourceInventory {
     if ($null -eq $ApprovalInventory) {
         $ApprovalInventory = Get-StartupApprovalInventory -Path $Definition.ApprovalLocation
     }
-    if (-not [string]::IsNullOrWhiteSpace([string]$approvalInventory.Error)) {
-        $errors.Add([pscustomobject]@{ Path = $approvalInventory.Path; Error = $approvalInventory.Error })
+    if (-not [string]::IsNullOrWhiteSpace([string]$ApprovalInventory.Error)) {
+        $errors.Add([pscustomobject]@{ Path = $ApprovalInventory.Path; Error = $ApprovalInventory.Error })
     }
 
     try {
         if (Test-Path -LiteralPath $Definition.Location) {
             $item = Get-ItemProperty -LiteralPath $Definition.Location -ErrorAction Stop
             foreach ($property in @($item.PSObject.Properties | Where-Object { $_.Name -notin @('PSPath', 'PSParentPath', 'PSChildName', 'PSDrive', 'PSProvider') })) {
-                $state = Resolve-StartupEntryState -Name $property.Name -ApprovalInventory $approvalInventory
+                $state = Resolve-StartupEntryState -Name $property.Name -ApprovalInventory $ApprovalInventory
                 $entries.Add([pscustomobject]@{
                     State       = $state.State
                     StateSource = $state.StateSource
@@ -273,14 +273,14 @@ function Get-StartupFolderSourceInventory {
     if ($null -eq $ApprovalInventory) {
         $ApprovalInventory = Get-StartupApprovalInventory -Path $Definition.ApprovalLocation
     }
-    if (-not [string]::IsNullOrWhiteSpace([string]$approvalInventory.Error)) {
-        $errors.Add([pscustomobject]@{ Path = $approvalInventory.Path; Error = $approvalInventory.Error })
+    if (-not [string]::IsNullOrWhiteSpace([string]$ApprovalInventory.Error)) {
+        $errors.Add([pscustomobject]@{ Path = $ApprovalInventory.Path; Error = $ApprovalInventory.Error })
     }
 
     try {
         if (Test-Path -LiteralPath $Definition.Location -PathType Container) {
             foreach ($file in @(Get-ChildItem -LiteralPath $Definition.Location -Force -File -ErrorAction Stop)) {
-                $state = Resolve-StartupEntryState -Name $file.Name -ApprovalInventory $approvalInventory
+                $state = Resolve-StartupEntryState -Name $file.Name -ApprovalInventory $ApprovalInventory
                 $entries.Add([pscustomobject]@{
                     State       = $state.State
                     StateSource = $state.StateSource
@@ -536,7 +536,7 @@ else {
     Write-Host ('Total services                 : {0}' -f $services.Count)
     Write-Host ('Running services               : {0}' -f $runningServices.Count)
     Write-Host ('Auto + Stopped (Indeterminate) : {0}' -f $automaticNotRunning.Count)
-    Write-Host ('Pending states (Suspicious)     : {0}' -f $suspiciousServiceStates.Count)
+    Write-Host ('Pending states (Suspicious)    : {0}' -f $suspiciousServiceStates.Count)
     Write-Host ('Confirmed service problems     : {0}' -f $confirmedServiceProblems.Count)
 }
 

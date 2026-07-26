@@ -249,4 +249,11 @@ try { ConvertTo-WdtReportParameters -State $state -RegistrySnapshot $otherSnapsh
 catch { $snapshotMismatchBlocked = $true }
 Assert-True $snapshotMismatchBlocked 'Report conversion must reject a different registry snapshot.'
 
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -OutputEncodingWebName 'utf-8' -Override 'ascii') 'The ascii override must force the ASCII logo.'
+Assert-Equal 'Unicode' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -OutputEncodingWebName 'ibm866' -Override 'unicode') 'The unicode override must apply in an interactive host.'
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $true -OutputEncodingWebName 'utf-8' -Override 'unicode') 'The unicode override must stay ASCII for redirected output.'
+Assert-Equal 'Unicode' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -OutputEncodingWebName 'utf-8' -Override '') 'Interactive UTF-8 output must select the Unicode logo.'
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $true -OutputEncodingWebName 'utf-8' -Override '') 'Redirected output must select the ASCII logo.'
+Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -OutputEncodingWebName 'ibm866' -Override '') 'An OEM encoding must select the ASCII logo.'
+
 Write-Host 'TUI snapshot, dynamic viewport, layout, and parameter conversion tests passed.'

@@ -21,7 +21,7 @@ $now = Get-Date
 # Event Log fixtures: severity alone is context; exact rules, grouping, cutoff,
 # provider identity, and partial source availability are deterministic.
 $eventsScript = Join-Path $repositoryRoot 'modules\events\diagnostic.ps1'
-Import-TestFunctions $eventsScript @('Get-EventSignalRule','Group-EventLogEvents','Read-EventLog')
+Import-TestFunctions $eventsScript @('ConvertTo-OneLineMessage','Get-EventSignalRule','Group-EventLogEvents','Read-EventLog')
 Assert-True ($null -eq (Get-EventSignalRule 'Application' 'Fixture-Provider' 1000 2)) 'A generic Error event must remain context.'
 Assert-True ($null -eq (Get-EventSignalRule 'System' 'Microsoft-Windows-DistributedCOM' 10016 2)) 'Expected DCOM 10016 noise must remain context.'
 Assert-True ($null -eq (Get-EventSignalRule 'System' 'Fixture-Kernel-Power' 41 1)) 'Event ID 41 from another provider must not match.'
@@ -43,6 +43,18 @@ $repeatedEventGroup = @($eventGroups | Where-Object { $_.ProviderName -eq 'Fixtu
 Assert-Equal 3 $repeatedEventGroup.Count 'Repeated events must be grouped.'
 Assert-Equal 'representative' $repeatedEventGroup.RepresentativeMessage 'The latest event must provide the representative message.'
 Assert-True (-not $repeatedEventGroup.IsSignal) 'A grouped generic Error event must not become a finding.'
+
+$messageFixtures = @(
+    [pscustomobject]@{ ProviderName='Fixture-Whitespace'; Id=7100; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-1); Message="   `r`n`t "; RecordId=6 },
+    [pscustomobject]@{ ProviderName='Fixture-LongMessage'; Id=7101; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-1); Message=("line1`r`nline2 " + ('x' * 300)); RecordId=7 }
+)
+$messageGroups = @(Group-EventLogEvents $messageFixtures $eventCutoff)
+$whitespaceGroup = @($messageGroups | Where-Object { $_.ProviderName -eq 'Fixture-Whitespace' })[0]
+Assert-Equal 'No message' $whitespaceGroup.RepresentativeMessage 'A whitespace-only message must normalize to No message.'
+$longGroup = @($messageGroups | Where-Object { $_.ProviderName -eq 'Fixture-LongMessage' })[0]
+Assert-Equal 240 $longGroup.RepresentativeMessage.Length 'A long message must be truncated to 240 characters.'
+Assert-True ($longGroup.RepresentativeMessage.EndsWith('...')) 'A truncated message must end with an ellipsis.'
+Assert-True ($longGroup.RepresentativeMessage.StartsWith('line1 line2 ')) 'Message whitespace runs must collapse to single spaces.'
 
 function script:Get-WinEvent {
     [CmdletBinding()]

@@ -153,15 +153,15 @@ function Protect-WdtRegexMatches {
         [scriptblock]$TokenValueSelector
     )
 
-    $matches = $Regex.Matches($Text)
-    if ($matches.Count -eq 0) {
+    $regexMatches = $Regex.Matches($Text)
+    if ($regexMatches.Count -eq 0) {
         return $Text
     }
 
     $builder = New-Object System.Text.StringBuilder
     $nextIndex = 0
 
-    foreach ($match in $matches) {
+    foreach ($match in $regexMatches) {
         $valueMatch = $match
         if (-not [string]::IsNullOrWhiteSpace($CaptureGroupName)) {
             $valueMatch = $match.Groups[$CaptureGroupName]
@@ -784,9 +784,9 @@ function Get-WdtFindingsSummary {
 
     return [pscustomobject][ordered]@{
         OverallStatus = $overallStatus
-        ErrorCount     = $errors.Count
-        WarningCount   = $warnings.Count
-        OkModuleCount  = $okItems.Count
-        Items          = @($errors + $warnings + $okItems)
+        ErrorCount    = $errors.Count
+        WarningCount  = $warnings.Count
+        OkModuleCount = $okItems.Count
+        Items         = @($errors + $warnings + $okItems)
     }
 }
