@@ -302,8 +302,7 @@ function Test-WdtAllowedW32tmProcessShape {
     param(
         [Parameter(Mandatory = $true)][System.Management.Automation.Language.Ast]$Ast,
         [string]$ScriptPath,
-        [string]$RepositoryRoot,
-        [string[]]$LocalFunctionNames
+        [string]$RepositoryRoot
     )
 
     if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1')) { return $false }
@@ -468,7 +467,7 @@ function Get-WdtNewObjectTypeName {
 }
 
 function Test-WdtAllowedNewObjectCommand {
-    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot, [string[]]$LocalFunctionNames)
+    param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
 
     if ($CommandAst.Redirections.Count -ne 0) { return $false }
     $elements = @($CommandAst.CommandElements)
@@ -528,7 +527,7 @@ function Test-WdtAllowedNewObjectCommand {
         (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-W32tmQuery' -and
         $CommandAst.CommandElements.Count -eq 2 -and
-        (Test-WdtAllowedW32tmProcessShape -Ast $CommandAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot -LocalFunctionNames $LocalFunctionNames)) {
+        (Test-WdtAllowedW32tmProcessShape -Ast $CommandAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot)) {
         return $true
     }
 
@@ -723,7 +722,7 @@ function Get-WdtCommandSafetyIssue {
     }
 
     if ($leaf -eq 'New-Object') {
-        if (Test-WdtAllowedNewObjectCommand $CommandAst $ScriptPath $RepositoryRoot $LocalFunctionNames) { return }
+        if (Test-WdtAllowedNewObjectCommand $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'New-Object type is not in the reviewed safe-type allowlist.'
     }
 
@@ -752,7 +751,7 @@ function Get-WdtCommandSafetyIssue {
 }
 
 function Get-WdtMemberSafetyIssue {
-    param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot, [string[]]$LocalFunctionNames)
+    param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot)
     $member = [string]$MemberAst.Member.Value
     $argumentCount = $MemberAst.Arguments.Count
     $isStatic = $MemberAst.Expression -is [System.Management.Automation.Language.TypeExpressionAst]
@@ -889,7 +888,7 @@ function Get-WdtMemberSafetyIssue {
         $member -in @('ConnectAsync', 'Wait', 'Dispose')) { return }
     if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-W32tmQuery' -and
-        (Test-WdtAllowedW32tmProcessShape -Ast $MemberAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot -LocalFunctionNames $LocalFunctionNames) -and
+        (Test-WdtAllowedW32tmProcessShape -Ast $MemberAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot) -and
         (($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0) -or
             ($member -eq 'Dispose' -and $receiver -in @('process', 'stdoutReader', 'stderrReader') -and $argumentCount -eq 0))) {
         return
@@ -986,7 +985,7 @@ function Get-WdtSafetyIssues {
     }
     $localFunctionNames = @($localFunctionNames | Sort-Object -Unique)
     foreach ($command in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.CommandAst] }, $true))) { Get-WdtCommandSafetyIssue $command $ScriptPath $RepositoryRoot $localFunctionNames $RegistrySnapshot $ModuleDefinition }
-    foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtMemberSafetyIssue $member $ScriptPath $RepositoryRoot $localFunctionNames }
+    foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtMemberSafetyIssue $member $ScriptPath $RepositoryRoot }
     foreach ($member in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.MemberExpressionAst] -and $n -isnot [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true))) { Get-WdtConsolePropertySafetyIssue $member $ScriptPath $RepositoryRoot }
     foreach ($variable in @($Ast.FindAll({ param($n) $n -is [System.Management.Automation.Language.VariableExpressionAst] -and $n.VariablePath.UserPath -like 'function:*' }, $true))) {
         New-WdtSafetyIssue $variable 'Dynamic function provider access is not allowed in production scripts.'

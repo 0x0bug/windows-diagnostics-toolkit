@@ -257,7 +257,6 @@ function Test-WdtSnapshotMembership {
         $cursor = $SnapshotById[[int]$cursor.ParentProcessId]
         $isTarget = $false
     }
-    return New-WdtStatusResult -Status $script:WdtCleanupStatus.SnapshotParentMissing -Message 'Expected parent is absent from the cleanup snapshot.'
 }
 
 function Get-WdtProcessCleanupSummary {
