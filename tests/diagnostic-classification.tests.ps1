@@ -44,6 +44,18 @@ Assert-Equal 3 $repeatedEventGroup.Count 'Repeated events must be grouped.'
 Assert-Equal 'representative' $repeatedEventGroup.RepresentativeMessage 'The latest event must provide the representative message.'
 Assert-True (-not $repeatedEventGroup.IsSignal) 'A grouped generic Error event must not become a finding.'
 
+$messageFixtures = @(
+    [pscustomobject]@{ ProviderName='Fixture-Whitespace'; Id=7100; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-1); Message="   `r`n`t "; RecordId=6 },
+    [pscustomobject]@{ ProviderName='Fixture-LongMessage'; Id=7101; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-1); Message=("line1`r`nline2 " + ('x' * 300)); RecordId=7 }
+)
+$messageGroups = @(Group-EventLogEvents $messageFixtures $eventCutoff)
+$whitespaceGroup = @($messageGroups | Where-Object { $_.ProviderName -eq 'Fixture-Whitespace' })[0]
+Assert-Equal 'No message' $whitespaceGroup.RepresentativeMessage 'A whitespace-only message must normalize to No message.'
+$longGroup = @($messageGroups | Where-Object { $_.ProviderName -eq 'Fixture-LongMessage' })[0]
+Assert-Equal 240 $longGroup.RepresentativeMessage.Length 'A long message must be truncated to 240 characters.'
+Assert-True ($longGroup.RepresentativeMessage.EndsWith('...')) 'A truncated message must end with an ellipsis.'
+Assert-True ($longGroup.RepresentativeMessage.StartsWith('line1 line2 ')) 'Message whitespace runs must collapse to single spaces.'
+
 function script:Get-WinEvent {
     [CmdletBinding()]
     param([hashtable]$FilterHashtable, [int]$MaxEvents)
