@@ -15,22 +15,15 @@ Administrator rights are optional. Some Windows data sources expose less detail 
 
 ## Installation
 
-Clone the repository:
-
-```powershell
-git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
-cd windows-diagnostics-toolkit
-```
-
-No installation step is required. Cloning is also the recommended method for development and source inspection.
-
-When the planned `v0.1.0-beta` release is published, this one-line bootstrap will become available:
+The public `v0.1.0-beta` prerelease is available through the fixed-release bootstrap:
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The bootstrap downloads the fixed `v0.1.0-beta` ZIP from GitHub Releases, verifies the ZIP against its SHA-256 checksum, and only then extracts and launches it in a child PowerShell process. It does not install files permanently. To review the bootstrap before running it:
+The bootstrap downloads the `v0.1.0-beta` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
+
+To inspect the bootstrap before running it:
 
 ```powershell
 irm https://wdt.digital/run.ps1 -OutFile .\wdt-run.ps1
@@ -38,7 +31,16 @@ notepad .\wdt-run.ps1
 .\wdt-run.ps1
 ```
 
-SHA-256 verification covers the release ZIP. The `irm | iex` form still requires trust in the bootstrap delivered through GitHub Pages. Until the beta is published, use the clone workflow above.
+SHA-256 verification protects the downloaded release ZIP, not `run.ps1`. The `irm | iex` form still requires trust in the bootstrap served by GitHub Pages. Inspect it first on sensitive systems.
+
+Clone the repository for development and complete source inspection:
+
+```powershell
+git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
+cd windows-diagnostics-toolkit
+```
+
+No installation step is required.
 
 ## Interactive TUI
 

@@ -25,21 +25,15 @@ Windows Diagnostics Toolkit is an open-source PowerShell toolkit for Windows 10 
 
 ## Quick start
 
-Clone the repository and run the entry point without switches:
-
-```powershell
-git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
-cd windows-diagnostics-toolkit
-.\Invoke-WindowsDiagnostics.ps1
-```
-
-The planned `v0.1.0-beta` publication will also make this fixed-release bootstrap available:
+`v0.1.0-beta` is available as a public prerelease. Run the fixed-release bootstrap:
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-Until that beta is published, use the clone command above. The bootstrap downloads only the `v0.1.0-beta` GitHub Release ZIP and verifies its published SHA-256 checksum before extraction or execution. To inspect the bootstrap first:
+The bootstrap downloads only the `v0.1.0-beta` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta). It verifies the ZIP before extraction; if the hash does not match, nothing is extracted or executed.
+
+To inspect the bootstrap before running it:
 
 ```powershell
 irm https://wdt.digital/run.ps1 -OutFile .\wdt-run.ps1
@@ -47,7 +41,15 @@ notepad .\wdt-run.ps1
 .\wdt-run.ps1
 ```
 
-The checksum protects the release ZIP after download, but `irm | iex` still requires trust in the bootstrap delivered through GitHub Pages. Cloning remains the development and source-inspection method.
+SHA-256 verification protects the downloaded release ZIP, not `run.ps1`. The `irm | iex` form still requires trust in the bootstrap served by GitHub Pages. Inspect it first on sensitive systems.
+
+Cloning remains the recommended method for development and complete source inspection:
+
+```powershell
+git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
+cd windows-diagnostics-toolkit
+.\Invoke-WindowsDiagnostics.ps1
+```
 
 Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default.
 
