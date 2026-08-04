@@ -18,6 +18,13 @@ $readmePath = Join-Path -Path $repositoryRoot -ChildPath 'README.md'
 $usagePath = Join-Path -Path $repositoryRoot -ChildPath 'docs\usage.md'
 $readme = Normalize-LineEndings -Text (Get-Content -LiteralPath $readmePath -Raw)
 $usage = Normalize-LineEndings -Text (Get-Content -LiteralPath $usagePath -Raw)
+$bootstrapCommand = 'irm https://wdt.digital/run.ps1 | iex'
+$releaseUrl = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta'
+$inspectionCommand = Normalize-LineEndings -Text @'
+irm https://wdt.digital/run.ps1 -OutFile .\wdt-run.ps1
+notepad .\wdt-run.ps1
+.\wdt-run.ps1
+'@
 
 $interactiveWindowsPowerShellCommand = Normalize-LineEndings -Text @'
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
@@ -31,6 +38,18 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 Assert-True ($readme.Contains($interactiveWindowsPowerShellCommand)) 'README is missing the Windows PowerShell 5.1 interactive launch command.'
 Assert-True ($readme.Contains($commandLineWindowsPowerShellCommand)) 'README is missing the Windows PowerShell 5.1 command-line example.'
+Assert-True ($readme.Contains($bootstrapCommand)) 'README is missing the public beta bootstrap command.'
+Assert-True ($usage.Contains($bootstrapCommand)) 'Usage guide is missing the public beta bootstrap command.'
+Assert-True ($readme.Contains($inspectionCommand)) 'README is missing the bootstrap inspection workflow.'
+Assert-True ($usage.Contains($inspectionCommand)) 'Usage guide is missing the bootstrap inspection workflow.'
+Assert-True ($readme.Contains($releaseUrl)) 'README is missing the v0.1.0-beta prerelease link.'
+Assert-True ($usage.Contains($releaseUrl)) 'Usage guide is missing the v0.1.0-beta prerelease link.'
+Assert-True ($readme.Contains('SHA-256 verification protects the downloaded release ZIP, not `run.ps1`.')) 'README misstates the checksum trust boundary.'
+Assert-True ($usage.Contains('SHA-256 verification protects the downloaded release ZIP, not `run.ps1`.')) 'Usage guide misstates the checksum trust boundary.'
+foreach ($staleCopy in @('planned `v0.1.0-beta`', 'until that beta is published', 'until the beta is published', 'no beta release ZIP is published yet', 'bootstrap is prepared')) {
+    Assert-True ($readme.IndexOf($staleCopy, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) "README contains stale prerelease copy: $staleCopy"
+    Assert-True ($usage.IndexOf($staleCopy, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) "Usage guide contains stale prerelease copy: $staleCopy"
+}
 Assert-True ($readme.Contains('Running without switches opens the interactive TUI.')) 'README does not document the TUI-first default.'
 Assert-True ($readme.Contains('With `-All`, `-Module`, or one or more legacy module switches it runs directly in command-line mode.')) 'README does not distinguish TUI and command-line routing.'
 Assert-True ($readme.Contains('.\Invoke-WindowsDiagnostics.ps1 -Module System,Network')) 'README is missing the generic module selector example.'
