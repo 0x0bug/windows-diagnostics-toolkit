@@ -13,10 +13,29 @@ function Normalize-LineEndings {
     return ($Text -replace "`r`n", "`n").Trim()
 }
 
+function Get-MarkdownHeadings {
+    param([Parameter(Mandatory = $true)][string]$Text)
+
+    $insideFence = $false
+    foreach ($line in @($Text -split "`n")) {
+        if ($line -match '^```') {
+            $insideFence = -not $insideFence
+            continue
+        }
+        if (-not $insideFence -and $line -match '^(#{1,6})[ ]+(.+?)\s*$') {
+            [pscustomobject]@{
+                Level = $matches[1].Length
+                Text  = $matches[2].Trim()
+            }
+        }
+    }
+}
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $readmePath = Join-Path -Path $repositoryRoot -ChildPath 'README.md'
 $usagePath = Join-Path -Path $repositoryRoot -ChildPath 'docs\usage.md'
-$readme = Normalize-LineEndings -Text (Get-Content -LiteralPath $readmePath -Raw)
+$readmeRaw = Get-Content -LiteralPath $readmePath -Raw
+$readme = Normalize-LineEndings -Text $readmeRaw
 $usage = Normalize-LineEndings -Text (Get-Content -LiteralPath $usagePath -Raw)
 $bootstrapCommand = 'irm https://wdt.digital/run.ps1 | iex'
 $releaseUrl = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta'
@@ -59,6 +78,10 @@ Assert-True ($readme.Contains('script execution is disabled')) 'README is missin
 Assert-True ($readme.Contains('does not change the machine-wide or current-user execution policy')) 'README does not explain the process-only Execution Policy bypass.'
 Assert-True ($readme.Contains('If PowerShell reports that `pwsh` is not recognized')) 'README is missing pwsh troubleshooting guidance.'
 Assert-True ($readme.Contains('installing PowerShell 7 is optional')) 'README does not explain that PowerShell 7 is optional.'
+Assert-True ($readme.Contains('| Interactive TUI | `.\WindowsDiagnosticsReports` |')) 'README does not document the interactive default report directory.'
+Assert-True ($readme.Contains('| Command-line mode | Current working directory |')) 'README does not document the command-line default report directory.'
+Assert-True (-not $readme.Contains('Reports are written to the current directory unless `-OutputDirectory` is provided')) 'README incorrectly applies the command-line output default to the interactive TUI.'
+Assert-True (-not $readme.Contains('[Latest beta]')) 'README uses a temporal release label instead of the pinned beta version.'
 Assert-True ($readme.Contains('| Wide | `110x28`')) 'README does not document the Wide TUI threshold.'
 Assert-True ($readme.Contains('| WideShort | `110x22`')) 'README does not document the WideShort layout.'
 Assert-True ($readme.Contains('| Compact | `40x18`')) 'README does not document the Compact layout.'
@@ -68,6 +91,65 @@ Assert-True ($readme.Contains('OEM encoding such as `cp866`')) 'README does not 
 Assert-True (-not $readme.Contains('The interface is ASCII-first')) 'README still contains the obsolete ASCII-first description.'
 Assert-True (-not $readme.Contains('Set-ExecutionPolicy Unrestricted')) 'README recommends a persistent unsafe Execution Policy change.'
 Assert-True (-not $readme.Contains('C:\Users\')) 'README contains an absolute user profile path.'
+
+$headings = @(Get-MarkdownHeadings -Text $readme)
+Assert-True ($headings.Count -gt 0) 'README has no Markdown headings.'
+Assert-True ($headings[0].Level -eq 1) 'README must begin with a level-one title.'
+Assert-True (@($headings | Where-Object { $_.Level -eq 1 }).Count -eq 1) 'README must contain exactly one level-one title.'
+$seenHeadings = @{}
+for ($index = 0; $index -lt $headings.Count; $index++) {
+    $heading = $headings[$index]
+    $headingKey = $heading.Text.ToLowerInvariant()
+    Assert-True (-not $seenHeadings.ContainsKey($headingKey)) "README contains a duplicate heading: $($heading.Text)"
+    $seenHeadings[$headingKey] = $true
+    if ($index -gt 0) {
+        Assert-True ($heading.Level -le ($headings[$index - 1].Level + 1)) "README skips a heading level before: $($heading.Text)"
+    }
+}
+
+$insideFence = $false
+foreach ($line in @($readme -split "`n")) {
+    if ($line -match '^```(?<language>.*)$') {
+        if (-not $insideFence) {
+            Assert-True (-not [string]::IsNullOrWhiteSpace($matches['language'])) 'README contains a fenced code block without a language identifier.'
+        }
+        else {
+            Assert-True ([string]::IsNullOrWhiteSpace($matches['language'])) 'README closing code fence contains unexpected text.'
+        }
+        $insideFence = -not $insideFence
+    }
+}
+Assert-True (-not $insideFence) 'README contains an unclosed fenced code block.'
+
+foreach ($imageMatch in @([System.Text.RegularExpressions.Regex]::Matches($readme, '!\[(?<alt>[^\]\r\n]*)\]\([^)]+\)'))) {
+    Assert-True (-not [string]::IsNullOrWhiteSpace($imageMatch.Groups['alt'].Value)) 'README contains a Markdown image without alt text.'
+}
+foreach ($imageTagMatch in @([System.Text.RegularExpressions.Regex]::Matches($readme, '(?is)<img\b[^>]*>'))) {
+    $altMatch = [System.Text.RegularExpressions.Regex]::Match($imageTagMatch.Value, '\balt="(?<alt>[^"]+)"')
+    Assert-True ($altMatch.Success -and -not [string]::IsNullOrWhiteSpace($altMatch.Groups['alt'].Value)) 'README contains an HTML image without meaningful alt text.'
+}
+
+$genericLinkTexts = @('here', 'click here', 'learn more', 'read more')
+foreach ($linkMatch in @([System.Text.RegularExpressions.Regex]::Matches($readme, '(?<!\!)\[(?<text>[^\]\r\n]+)\]\((?<target>[^)\r\n]+)\)'))) {
+    $linkText = $linkMatch.Groups['text'].Value.Trim().ToLowerInvariant()
+    Assert-True ($linkText -notin $genericLinkTexts) "README contains generic link text: $linkText"
+
+    $target = $linkMatch.Groups['target'].Value.Trim()
+    if ($target -match '^(https?://|mailto:|#)') {
+        continue
+    }
+    $relativePath = ($target -split '#', 2)[0]
+    $resolvedPath = Join-Path -Path $repositoryRoot -ChildPath $relativePath
+    Assert-True (Test-Path -LiteralPath $resolvedPath) "README contains a broken relative link: $target"
+}
+
+$rawLines = @($readmeRaw -split "`r?`n")
+for ($lineIndex = 0; $lineIndex -lt $rawLines.Count; $lineIndex++) {
+    Assert-True (-not $rawLines[$lineIndex].Contains("`t")) "README contains a tab on line $($lineIndex + 1)."
+    Assert-True (-not ($rawLines[$lineIndex] -match '[ ]+$')) "README contains trailing spaces on line $($lineIndex + 1)."
+}
+Assert-True ($readmeRaw.EndsWith("`n")) 'README must end with a newline.'
+Assert-True ((Get-Item -LiteralPath $readmePath).Length -lt 512000) 'README exceeds the GitHub rendering limit of 500 KiB.'
 
 $wideTuiImage = 'https://wdt.digital/assets/tui-wide-real.png'
 $resultTuiImage = 'https://wdt.digital/assets/tui-result-real.png'
