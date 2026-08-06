@@ -23,7 +23,7 @@ WDT is useful when you need to:
 - gather evidence without installing an agent or changing system settings;
 - share a redacted report through Privacy Mode.
 
-[Project website](https://wdt.digital/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [Latest beta](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
+[Project website](https://wdt.digital/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [`v0.1.0-beta` release](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
 
 ## Why WDT
 
@@ -33,7 +33,7 @@ WDT is useful when you need to:
 | Local-first | Reports stay on the machine unless you choose to share them |
 | Actionable summary | Findings are grouped as `OK`, `WARN`, or `ERROR` before the detailed evidence |
 | No installation | No installer, service, agent, or third-party PowerShell module is required |
-| Shareable output | TXT is always generated; Markdown and Privacy Mode are available |
+| Shareable output | TXT output is built in; Markdown and Privacy Mode are available |
 | Broad compatibility | Windows PowerShell 5.1 and PowerShell 7 are supported |
 
 ## Quick start
@@ -84,14 +84,23 @@ If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not install
 3. Results are normalized into a combined findings summary and detailed evidence sections.
 4. WDT writes the report locally and displays its path and completion status.
 
-Reports are written to the current directory unless `-OutputDirectory` is provided:
+Default output depends on launch mode:
+
+| Mode | Default report directory |
+| --- | --- |
+| Interactive TUI | `.\WindowsDiagnosticsReports` |
+| Command-line mode | Current working directory |
+
+Use `-OutputDirectory` to override the default in either mode.
+
+Generated filenames:
 
 ```text
 WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.txt
 WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
 ```
 
-The TXT report is always available. Markdown export is optional in command-line mode and enabled by default in the interactive TUI.
+When report generation succeeds, WDT writes TXT even if some selected modules are partial or unavailable. Markdown export is optional in command-line mode and enabled by default in the interactive TUI.
 
 ## What it checks
 
