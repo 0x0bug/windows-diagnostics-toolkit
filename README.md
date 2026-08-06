@@ -31,7 +31,7 @@ WDT is useful when you need to:
 | --- | --- |
 | Read-only by design | Production diagnostics collect state; they do not repair or reconfigure Windows |
 | Local-first | Reports stay on the machine unless you choose to share them |
-| Actionable summary | Findings are grouped as `OK`, `WARN`, or `ERROR` before the detailed evidence |
+| Findings summary | Results are grouped as `OK`, `WARN`, or `ERROR` before the detailed evidence |
 | No installation | No installer, service, agent, or third-party PowerShell module is required |
 | Shareable output | TXT output is built in; Markdown and Privacy Mode are available |
 | Broad compatibility | Windows PowerShell 5.1 and PowerShell 7 are supported |
@@ -80,7 +80,7 @@ If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not install
 ## What happens during a run
 
 1. WDT discovers the reviewed built-in diagnostic modules.
-2. Each selected module runs in an isolated child PowerShell process with an independent timeout.
+2. Each selected module runs in a separate child PowerShell process with an independent timeout.
 3. Results are normalized into a combined findings summary and detailed evidence sections.
 4. WDT writes the report locally and displays its path and completion status.
 
@@ -230,7 +230,7 @@ Review every report before publishing it. Privacy Mode cannot guarantee removal 
 
 ## Safety and trust model
 
-Production diagnostics do not change network, disk, registry, services, scheduled tasks, Windows Update, firewall, DNS, routing, power, or system configuration.
+Diagnostic modules do not modify Windows configuration: network settings, disks or volumes, registry, services, scheduled tasks, Windows Update, firewall, DNS, routing, or power settings. WDT does write report files to the selected output directory. The bootstrap also creates a temporary package directory and removes it through its cleanup path after the child process exits.
 
 Repository validation includes:
 
