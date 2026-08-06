@@ -11,7 +11,7 @@
   <img src="https://wdt.digital/assets/tui-wide-real.png" alt="Windows Diagnostics Toolkit interactive Wide dashboard" width="100%">
 </p>
 
-**One command. One local Windows support report. No automatic fixes, uploads, or configuration changes.**
+**One command. One local Windows support report. No automatic fixes, telemetry, or report uploads.**
 
 Windows Diagnostics Toolkit (WDT) is an open-source PowerShell toolkit for the first-pass diagnosis of Windows 10 and Windows 11 systems. It collects high-signal system, security, performance, network, storage, crash, service, Event Log, time-sync, and Windows Update context into a readable local report.
 
@@ -107,7 +107,7 @@ When report generation succeeds, WDT writes TXT even if some selected modules ar
 | Area | Diagnostic context |
 | --- | --- |
 | System | Windows version, CPU, memory, GPU, uptime, and system drive |
-| Security | Microsoft Defender, Firewall, Secure Boot, TPM, and BitLocker status |
+| Security | Microsoft Defender, Windows Firewall, Secure Boot, TPM, and BitLocker status |
 | Performance | Memory, short CPU samples, pagefile, and process activity snapshots |
 | Network | Adapters, routes, gateway, DNS, proxy context, TCP reachability, and optional ICMP |
 | Time | Windows Time service, timezone, clock, source, status, and optional events |
@@ -116,6 +116,8 @@ When report generation succeeds, WDT writes TXT even if some selected modules ar
 | Event Log | Grouped recent high-signal System and Application events |
 | Services | Services, startup entries, and scheduled tasks with conservative classification |
 | Windows Update | Installed updates, reboot indicators, services, and grouped failures |
+
+The Network module can perform external DNS, TCP, and ICMP probes against the configured targets. It does not upload the report or send an HTTP request. Use `-NoExternalNetworkTests` to disable external probes while retaining local adapter, route, gateway, and proxy collection.
 
 WDT does not treat every stopped service or every Critical/Error event as proof of a fault. Findings are created only where the available evidence meets the module's documented classification rules.
 
@@ -230,7 +232,7 @@ Review every report before publishing it. Privacy Mode cannot guarantee removal 
 
 ## Safety and trust model
 
-Diagnostic modules do not modify Windows configuration: network settings, disks or volumes, registry, services, scheduled tasks, Windows Update, firewall, DNS, routing, or power settings. WDT does write report files to the selected output directory. The bootstrap also creates a temporary package directory and removes it through its cleanup path after the child process exits.
+Diagnostic modules do not modify Windows configuration: network settings, disks or volumes, registry, services, scheduled tasks, Windows Update, firewall, DNS, routing, or power settings. WDT does write report files to the selected output directory. The bootstrap also creates a temporary package directory and removes it through a `finally` cleanup path when the bootstrap finishes.
 
 Repository validation includes:
 
