@@ -102,9 +102,8 @@ function Get-EventDesignation {
 
         $designationSource = if ($firstLine.Count -gt 0) { [string]$firstLine[0] } else { $Message }
         $normalized = ConvertTo-OneLineMessage -Message $designationSource -MaxLength 160
-        $sentenceMatch = [System.Text.RegularExpressions.Regex]::Match($normalized, '^.+?[.!?](?=\s|$)')
-        if ($sentenceMatch.Success) {
-            return $sentenceMatch.Value.Trim()
+        if ($normalized -match '^.+?[.!?](?=\s|$)') {
+            return $Matches[0].Trim()
         }
 
         return $normalized
