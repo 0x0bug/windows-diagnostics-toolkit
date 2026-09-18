@@ -49,7 +49,7 @@ function Get-EventErrorCodes {
     # Event messages often contain many hexadecimal values that are not error
     # codes (timestamps, fault offsets, handles, identifiers). Only accept
     # values explicitly labelled as an error/status/exception code.
-    $labelPattern = '(?:HRESULT|NTSTATUS|(?:error|exception|failure|status|return)\s+code|status|код\s+(?:ошибки|исключения|состояния|сбоя|возврата))'
+    $labelPattern = '(?:HRESULT|NTSTATUS|(?:error|exception|failure|status|return)\s+code|status|\u043A\u043E\u0434\s+(?:\u043E\u0448\u0438\u0431\u043A\u0438|\u0438\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F|\u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F|\u0441\u0431\u043E\u044F|\u0432\u043E\u0437\u0432\u0440\u0430\u0442\u0430))'
     $valuePattern = '(?<Code>0x[0-9A-F]{1,16}|-?\d+)'
     $regex = New-Object System.Text.RegularExpressions.Regex(
         ('(?i){0}\s*[:=]?\s*{1}' -f $labelPattern, $valuePattern)
