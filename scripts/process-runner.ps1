@@ -62,12 +62,25 @@ function Get-RelativeDisplayPath {
     return [System.Uri]::UnescapeDataString($relativePath).Replace('/', '\')
 }
 
+function Remove-WdtAnsiEscapeSequences {
+    param([AllowEmptyString()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return $Text
+    }
+
+    $escape = [char]27
+    return [System.Text.RegularExpressions.Regex]::Replace($Text, "$escape\[[0-?]*[ -/]*[@-~]", '')
+}
+
 function Convert-TextToLines {
     param([string]$Text)
 
     if ([string]::IsNullOrEmpty($Text)) {
         return @()
     }
+
+    $Text = Remove-WdtAnsiEscapeSequences -Text $Text
 
     $lines = @($Text -split "`r?`n")
     if ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') {
