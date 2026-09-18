@@ -38,6 +38,55 @@ function ConvertTo-OneLineMessage {
     return ($singleLine.Substring(0, $MaxLength - 3) + '...')
 }
 
+
+function Get-EventErrorCodes {
+    param([AllowEmptyString()][string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return @()
+    }
+
+    $seen = @{}
+    $codes = New-Object System.Collections.Generic.List[string]
+    foreach ($match in [System.Text.RegularExpressions.Regex]::Matches($Message, '(?i)(?<![0-9A-F])0x[0-9A-F]{1,16}(?![0-9A-F])')) {
+        $normalized = '0x' + $match.Value.Substring(2).ToUpperInvariant()
+        if ($seen.ContainsKey($normalized)) {
+            continue
+        }
+
+        $seen[$normalized] = $true
+        $codes.Add($normalized)
+    }
+
+    return @($codes.ToArray())
+}
+
+function Get-EventDesignation {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$ProviderName,
+        [Parameter(Mandatory = $true)][int]$Id,
+        [AllowEmptyString()][string]$Message,
+        $SignalRule
+    )
+
+    if ($null -ne $SignalRule -and -not [string]::IsNullOrWhiteSpace([string]$SignalRule.Message)) {
+        return ([string]$SignalRule.Message).Trim().TrimEnd('.')
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        $normalized = ConvertTo-OneLineMessage -Message $Message -MaxLength 160
+        $sentenceMatch = [System.Text.RegularExpressions.Regex]::Match($normalized, '^.+?[.!?](?=\s|$)')
+        if ($sentenceMatch.Success) {
+            return $sentenceMatch.Value.Trim()
+        }
+
+        return $normalized
+    }
+
+    $providerLabel = if ([string]::IsNullOrWhiteSpace($ProviderName)) { 'Unknown provider' } else { $ProviderName }
+    return ('{0} event {1}' -f $providerLabel, $Id)
+}
+
 function Get-EventSignalRule {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$LogName,
@@ -132,9 +181,21 @@ function Group-EventLogEvents {
             }
         }
 
+        $eventIdentifier = if ([string]::IsNullOrWhiteSpace($providerName)) {
+            'UnknownProvider/{0}' -f $eventId
+        }
+        else {
+            '{0}/{1}' -f $providerName, $eventId
+        }
+        $designation = Get-EventDesignation -ProviderName $providerName -Id $eventId -Message ([string]$representativeEvent.Message) -SignalRule $signalRule
+        $errorCodes = @(Get-EventErrorCodes -Message ([string]$representativeEvent.Message))
+
         [pscustomobject][ordered]@{
             ProviderName          = $providerName
             Id                    = $eventId
+            EventIdentifier       = $eventIdentifier
+            Designation           = $designation
+            ErrorCodes            = @($errorCodes)
             Level                 = $level
             LevelDisplayName      = $levelDisplayName
             Count                 = $orderedEvents.Count
@@ -373,8 +434,13 @@ if ($displayedGroups.Count -eq 0) {
 }
 else {
     foreach ($group in $displayedGroups) {
+        $errorCodeText = if (@($group.ErrorCodes).Count -eq 0) { 'None detected in event text' } else { @($group.ErrorCodes) -join ', ' }
+
         Write-Host ('ProviderName          : {0}' -f $group.ProviderName)
         Write-Host ('Id                    : {0}' -f $group.Id)
+        Write-Host ('Event identifier      : {0}' -f $group.EventIdentifier)
+        Write-Host ('Designation           : {0}' -f $group.Designation)
+        Write-Host ('Error code(s)         : {0}' -f $errorCodeText)
         Write-Host ('Level                 : {0}' -f $group.LevelDisplayName)
         Write-Host ('LogNames              : {0}' -f ($group.LogNames -join ', '))
         Write-Host ('Count                 : {0}' -f $group.Count)
