@@ -58,6 +58,18 @@ try {
     Assert-True (($launch.ErrorLines -join "`n").Contains('Failed to run script:')) 'Original launch message is missing.'
     Assert-True (-not (($launch.ErrorLines -join "`n").Contains('No process is associated'))) 'Secondary process error masked launch error.'
 
+    $progressFixture = Join-Path $fixtureRoot 'progress-stream.ps1'
+    $progressSource = @'
+Write-Progress -Activity 'WDT fixture progress' -Status 'Collecting' -PercentComplete 50
+Write-Output 'progress-output-ok'
+'@
+    [IO.File]::WriteAllText($progressFixture, $progressSource, [Text.Encoding]::UTF8)
+    $progressResult = Invoke-DiagnosticScript 'ProgressStream' $progressFixture $powerShellPath $repositoryRoot 10
+    Assert-Equal 'Success' $progressResult.Status 'Progress fixture must succeed.'
+    Assert-True ($progressResult.OutputLines -contains 'progress-output-ok') 'Progress fixture stdout was lost.'
+    Assert-Equal 0 @($progressResult.ErrorLines).Count 'PowerShell progress records must not leak into stderr/report errors.'
+    Assert-True (-not (($progressResult.ErrorLines -join "`n") -match '#< CLIXML|<Objs\b')) 'Serialized CLIXML progress must not appear in report errors.'
+
     $largeStreamFixture = Join-Path $fixtureRoot 'large-streams.ps1'
     $largeStreamSource = @'
 1..4000 | ForEach-Object {
