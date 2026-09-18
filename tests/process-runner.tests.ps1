@@ -58,6 +58,20 @@ try {
     Assert-True (($launch.ErrorLines -join "`n").Contains('Failed to run script:')) 'Original launch message is missing.'
     Assert-True (-not (($launch.ErrorLines -join "`n").Contains('No process is associated'))) 'Secondary process error masked launch error.'
 
+    $ansiFixture = Join-Path $fixtureRoot 'ansi-stream.ps1'
+    $ansiSource = @'
+$esc = [char]27
+Write-Output ("${esc}[32mstdout-colored${esc}[0m")
+[Console]::Error.WriteLine(("${esc}[33;1mWARNING: colored warning${esc}[0m"))
+'@
+    [IO.File]::WriteAllText($ansiFixture, $ansiSource, [Text.Encoding]::UTF8)
+    $ansiResult = Invoke-DiagnosticScript 'AnsiStream' $ansiFixture $powerShellPath $repositoryRoot 10
+    Assert-Equal 'Success' $ansiResult.Status 'ANSI fixture must succeed.'
+    Assert-True ($ansiResult.OutputLines -contains 'stdout-colored') 'ANSI stripping changed stdout content.'
+    Assert-True ($ansiResult.ErrorLines -contains 'WARNING: colored warning') 'ANSI stripping changed stderr warning content.'
+    Assert-True (-not (($ansiResult.OutputLines -join "`n").Contains([string][char]27))) 'ANSI escape codes must not remain in stdout.'
+    Assert-True (-not (($ansiResult.ErrorLines -join "`n").Contains([string][char]27))) 'ANSI escape codes must not remain in stderr/report errors.'
+
     $progressFixture = Join-Path $fixtureRoot 'progress-stream.ps1'
     $progressSource = @'
 Write-Progress -Activity 'WDT fixture progress' -Status 'Collecting' -PercentComplete 50
