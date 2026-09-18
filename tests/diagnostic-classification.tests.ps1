@@ -21,7 +21,7 @@ $now = Get-Date
 # Event Log fixtures: severity alone is context; exact rules, grouping, cutoff,
 # provider identity, and partial source availability are deterministic.
 $eventsScript = Join-Path $repositoryRoot 'modules\events\diagnostic.ps1'
-Import-TestFunctions $eventsScript @('ConvertTo-OneLineMessage','Get-EventSignalRule','Group-EventLogEvents','Read-EventLog')
+Import-TestFunctions $eventsScript @('ConvertTo-OneLineMessage','Get-EventErrorCodes','Get-EventDesignation','Get-EventSignalRule','Group-EventLogEvents','Read-EventLog')
 Assert-True ($null -eq (Get-EventSignalRule 'Application' 'Fixture-Provider' 1000 2)) 'A generic Error event must remain context.'
 Assert-True ($null -eq (Get-EventSignalRule 'System' 'Microsoft-Windows-DistributedCOM' 10016 2)) 'Expected DCOM 10016 noise must remain context.'
 Assert-True ($null -eq (Get-EventSignalRule 'System' 'Fixture-Kernel-Power' 41 1)) 'Event ID 41 from another provider must not match.'
@@ -29,11 +29,20 @@ Assert-True ($null -eq (Get-EventSignalRule 'System' 'Microsoft-Windows-Kernel-P
 Assert-Equal 'EVENT_UNEXPECTED_SHUTDOWN' (Get-EventSignalRule 'System' 'Microsoft-Windows-Kernel-Power' 41 1).Code 'Kernel-Power 41 must be a documented signal.'
 Assert-Equal 'EVENT_FILE_SYSTEM_CORRUPTION' (Get-EventSignalRule 'System' 'Ntfs' 55 2).Code 'NTFS 55 must be a documented signal.'
 
+$errorCodeFixture = 'Failure HRESULT 0x80070005; status 0xc0000005; duplicate 0X80070005.'
+$errorCodeValues = @(Get-EventErrorCodes $errorCodeFixture)
+Assert-Equal 2 $errorCodeValues.Count 'Event error-code extraction must deduplicate codes case-insensitively.'
+Assert-Equal '0x80070005' $errorCodeValues[0] 'HRESULT normalization failed.'
+Assert-Equal '0xC0000005' $errorCodeValues[1] 'NTSTATUS-style code normalization failed.'
+Assert-Equal 0 @(Get-EventErrorCodes 'No hexadecimal error code here.').Count 'Events without hexadecimal codes must not invent one.'
+Assert-Equal 'Service failed to start.' (Get-EventDesignation 'Fixture-Service' 7000 'Service failed to start. Extra diagnostic text follows.' $null) 'Generic event designation must use the first concise sentence from the event message.'
+Assert-Equal 'Windows recorded an unexpected shutdown or restart' (Get-EventDesignation 'Microsoft-Windows-Kernel-Power' 41 'fixture' (Get-EventSignalRule 'System' 'Microsoft-Windows-Kernel-Power' 41 1)) 'Documented signal designation must take precedence over raw event text.'
+
 $eventCutoff = $now.AddHours(-24)
 $eventFixtures = @(
     [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-3); Message='first'; RecordId=1 },
     [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-2); Message='second'; RecordId=2 },
-    [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-1); Message='representative'; RecordId=3 },
+    [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-1); Message='representative error 0x80070005'; RecordId=3 },
     [pscustomobject]@{ ProviderName='Other-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddMinutes(-30); Message='other provider'; RecordId=4 },
     [pscustomobject]@{ ProviderName='Microsoft-Windows-Kernel-Power'; Id=41; Level=1; LevelDisplayName='Critical'; LogName='System'; TimeCreated=$now.AddDays(-2); Message='old signal'; RecordId=5 }
 )
@@ -41,7 +50,11 @@ $eventGroups = @(Group-EventLogEvents $eventFixtures $eventCutoff)
 Assert-Equal 2 $eventGroups.Count 'Different providers with the same Event ID must remain separate, and old events must be excluded.'
 $repeatedEventGroup = @($eventGroups | Where-Object { $_.ProviderName -eq 'Fixture-Provider' })[0]
 Assert-Equal 3 $repeatedEventGroup.Count 'Repeated events must be grouped.'
-Assert-Equal 'representative' $repeatedEventGroup.RepresentativeMessage 'The latest event must provide the representative message.'
+Assert-Equal 'representative error 0x80070005' $repeatedEventGroup.RepresentativeMessage 'The latest event must provide the representative message.'
+Assert-Equal 'Fixture-Provider/7000' $repeatedEventGroup.EventIdentifier 'Grouped events must expose a stable provider/Event ID identifier.'
+Assert-Equal 'representative error 0x80070005' $repeatedEventGroup.Designation 'Generic grouped events must expose a concise human-readable designation.'
+Assert-Equal 1 @($repeatedEventGroup.ErrorCodes).Count 'Grouped events must expose error codes from the representative event text.'
+Assert-Equal '0x80070005' $repeatedEventGroup.ErrorCodes[0] 'Grouped event error code was not normalized.'
 Assert-True (-not $repeatedEventGroup.IsSignal) 'A grouped generic Error event must not become a finding.'
 
 $messageFixtures = @(
@@ -83,7 +96,7 @@ try {
                     return [pscustomobject]@{ ProviderName='Microsoft-Windows-Kernel-Power'; Id=41; Level=1; LevelDisplayName='Critical'; LogName='System'; TimeCreated=$recent; Message='fixture unexpected restart'; RecordId=42 }
                 }
                 return @(
-                    [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=1000; Level=2; LevelDisplayName='Error'; LogName='System'; TimeCreated=$recent; Message='generic error'; RecordId=41 },
+                    [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=1000; Level=2; LevelDisplayName='Error'; LogName='System'; TimeCreated=$recent; Message='Generic failure. HRESULT 0x80070005.'; RecordId=41 },
                     [pscustomobject]@{ ProviderName='Microsoft-Windows-Kernel-Power'; Id=41; Level=1; LevelDisplayName='Critical'; LogName='System'; TimeCreated=$recent; Message='fixture unexpected restart'; RecordId=42 }
                 )
             }
@@ -109,6 +122,9 @@ finally {
 }
 $eventModuleText = $eventModuleOutput -join "`n"
 Assert-True ($eventModuleText.Contains('EVENT_UNEXPECTED_SHUTDOWN')) 'A documented high-signal event must emit a finding.'
+Assert-True ($eventModuleText.Contains('Event identifier      : Fixture-Provider/1000')) 'Event output must include provider/Event ID identifier.'
+Assert-True ($eventModuleText.Contains('Designation           : Generic failure.')) 'Event output must include a concise designation.'
+Assert-True ($eventModuleText.Contains('Error code(s)         : 0x80070005')) 'Event output must include hexadecimal Windows error codes found in the event message.'
 Assert-True (-not $eventModuleText.Contains('RECENT_ERROR_EVENTS')) 'A generic Error event must not emit the legacy blanket finding.'
 Assert-True (-not $eventModuleText.Contains('EVENT_LOG_SOURCE_UNAVAILABLE')) 'Partial event-log access must remain context.'
 Assert-True (-not $eventModuleText.Contains('EVENT_LOG_ASSESSMENT_UNAVAILABLE')) 'One unavailable Event Log source with working fallbacks must remain context.'
