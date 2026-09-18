@@ -38,7 +38,9 @@ Assert-Equal 0 @(Get-EventErrorCodes 'No hexadecimal error code here.').Count 'E
 $applicationErrorCodes = @(Get-EventErrorCodes 'Faulting app timestamp: 0x5c157f86; faulting module timestamp: 0x5c157efa; Exception code: 0xc0000005; Fault offset: 0x00001581; process id: 0x9adc.')
 Assert-Equal 1 $applicationErrorCodes.Count 'Unlabelled hexadecimal metadata must not be reported as error codes.'
 Assert-Equal '0xC0000005' $applicationErrorCodes[0] 'The labelled exception code must be retained.'
-Assert-Equal '-2147024891' (Get-EventErrorCodes 'Код ошибки: -2147024891')[0] 'Labelled decimal Windows error codes must be retained.'
+$decimalErrorCodes = @(Get-EventErrorCodes 'Код ошибки: -2147024891')
+Assert-Equal 1 $decimalErrorCodes.Count 'A labelled decimal Windows error code must produce exactly one code.'
+Assert-Equal '-2147024891' $decimalErrorCodes[0] 'Labelled decimal Windows error codes must be retained.'
 Assert-Equal 'Service failed to start.' (Get-EventDesignation 'Fixture-Service' 7000 'Service failed to start. Extra diagnostic text follows.' $null) 'Generic event designation must use the first concise sentence from the event message.'
 Assert-Equal 'Faulting application: app.exe' (Get-EventDesignation 'Application Error' 1000 "Faulting application: app.exe`r`nFaulting module: module.dll`r`nException code: 0xc0000005" $null) 'Multiline event designations must use only the first meaningful line.'
 Assert-Equal 'Windows recorded an unexpected shutdown or restart' (Get-EventDesignation 'Microsoft-Windows-Kernel-Power' 41 'fixture' (Get-EventSignalRule 'System' 'Microsoft-Windows-Kernel-Power' 41 1)) 'Documented signal designation must take precedence over raw event text.'
