@@ -62,12 +62,25 @@ function Get-RelativeDisplayPath {
     return [System.Uri]::UnescapeDataString($relativePath).Replace('/', '\')
 }
 
+function Remove-WdtAnsiEscapeSequences {
+    param([AllowEmptyString()][string]$Text)
+
+    if ([string]::IsNullOrEmpty($Text)) {
+        return $Text
+    }
+
+    $escape = [char]27
+    return [System.Text.RegularExpressions.Regex]::Replace($Text, "$escape\[[0-?]*[ -/]*[@-~]", '')
+}
+
 function Convert-TextToLines {
     param([string]$Text)
 
     if ([string]::IsNullOrEmpty($Text)) {
         return @()
     }
+
+    $Text = Remove-WdtAnsiEscapeSequences -Text $Text
 
     $lines = @($Text -split "`r?`n")
     if ($lines.Count -gt 0 -and $lines[$lines.Count - 1] -eq '') {
@@ -424,7 +437,7 @@ function Invoke-DiagnosticScript {
                 if ($argument -match '^-[A-Za-z][A-Za-z0-9]*$') { $argument }
                 else { "'" + $argument.Replace("'", "''") + "'" }
             })
-        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; & '$escapedScriptPath' $($escapedArguments -join ' ')"
+        $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; `$ProgressPreference = 'SilentlyContinue'; & '$escapedScriptPath' $($escapedArguments -join ' ')"
         $encodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($commandText))
 
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
