@@ -46,10 +46,26 @@ function Get-EventErrorCodes {
         return @()
     }
 
+    # Event messages often contain many hexadecimal values that are not error
+    # codes (timestamps, fault offsets, handles, identifiers). Only accept
+    # values explicitly labelled as an error/status/exception code.
+    $labelPattern = '(?:HRESULT|NTSTATUS|(?:error|exception|failure|status|return)\s+code|status|код\s+(?:ошибки|исключения|состояния|сбоя|возврата))'
+    $valuePattern = '(?<Code>0x[0-9A-F]{1,16}|-?\d+)'
+    $regex = New-Object System.Text.RegularExpressions.Regex(
+        ('(?i){0}\s*[:=]?\s*{1}' -f $labelPattern, $valuePattern)
+    )
+
     $seen = @{}
     $codes = New-Object System.Collections.Generic.List[string]
-    foreach ($match in [System.Text.RegularExpressions.Regex]::Matches($Message, '(?i)(?<![0-9A-F])0x[0-9A-F]{1,16}(?![0-9A-F])')) {
-        $normalized = '0x' + $match.Value.Substring(2).ToUpperInvariant()
+    foreach ($match in $regex.Matches($Message)) {
+        $value = [string]$match.Groups['Code'].Value
+        if ($value -match '^(?i)0x') {
+            $normalized = '0x' + $value.Substring(2).ToUpperInvariant()
+        }
+        else {
+            $normalized = $value
+        }
+
         if ($seen.ContainsKey($normalized)) {
             continue
         }
@@ -74,7 +90,18 @@ function Get-EventDesignation {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($Message)) {
-        $normalized = ConvertTo-OneLineMessage -Message $Message -MaxLength 160
+        # Preserve the first meaningful line before collapsing the full event
+        # text. Many Windows events are multiline key/value records; joining
+        # them first makes the designation unreadable.
+        $firstLine = @(
+            [System.Text.RegularExpressions.Regex]::Split($Message, '\r?\n') |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Select-Object -First 1
+        )
+
+        $designationSource = if ($firstLine.Count -gt 0) { [string]$firstLine[0] } else { $Message }
+        $normalized = ConvertTo-OneLineMessage -Message $designationSource -MaxLength 160
         $sentenceMatch = [System.Text.RegularExpressions.Regex]::Match($normalized, '^.+?[.!?](?=\s|$)')
         if ($sentenceMatch.Success) {
             return $sentenceMatch.Value.Trim()
