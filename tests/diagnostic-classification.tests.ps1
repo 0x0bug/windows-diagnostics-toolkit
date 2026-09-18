@@ -29,20 +29,25 @@ Assert-True ($null -eq (Get-EventSignalRule 'System' 'Microsoft-Windows-Kernel-P
 Assert-Equal 'EVENT_UNEXPECTED_SHUTDOWN' (Get-EventSignalRule 'System' 'Microsoft-Windows-Kernel-Power' 41 1).Code 'Kernel-Power 41 must be a documented signal.'
 Assert-Equal 'EVENT_FILE_SYSTEM_CORRUPTION' (Get-EventSignalRule 'System' 'Ntfs' 55 2).Code 'NTFS 55 must be a documented signal.'
 
-$errorCodeFixture = 'Failure HRESULT 0x80070005; status 0xc0000005; duplicate 0X80070005.'
+$errorCodeFixture = 'Failure HRESULT 0x80070005; status 0xc0000005; duplicate HRESULT 0X80070005.'
 $errorCodeValues = @(Get-EventErrorCodes $errorCodeFixture)
 Assert-Equal 2 $errorCodeValues.Count 'Event error-code extraction must deduplicate codes case-insensitively.'
 Assert-Equal '0x80070005' $errorCodeValues[0] 'HRESULT normalization failed.'
 Assert-Equal '0xC0000005' $errorCodeValues[1] 'NTSTATUS-style code normalization failed.'
 Assert-Equal 0 @(Get-EventErrorCodes 'No hexadecimal error code here.').Count 'Events without hexadecimal codes must not invent one.'
+$applicationErrorCodes = @(Get-EventErrorCodes 'Faulting app timestamp: 0x5c157f86; faulting module timestamp: 0x5c157efa; Exception code: 0xc0000005; Fault offset: 0x00001581; process id: 0x9adc.')
+Assert-Equal 1 $applicationErrorCodes.Count 'Unlabelled hexadecimal metadata must not be reported as error codes.'
+Assert-Equal '0xC0000005' $applicationErrorCodes[0] 'The labelled exception code must be retained.'
+Assert-Equal '-2147024891' (Get-EventErrorCodes 'Код ошибки: -2147024891')[0] 'Labelled decimal Windows error codes must be retained.'
 Assert-Equal 'Service failed to start.' (Get-EventDesignation 'Fixture-Service' 7000 'Service failed to start. Extra diagnostic text follows.' $null) 'Generic event designation must use the first concise sentence from the event message.'
+Assert-Equal 'Faulting application: app.exe' (Get-EventDesignation 'Application Error' 1000 "Faulting application: app.exe`r`nFaulting module: module.dll`r`nException code: 0xc0000005" $null) 'Multiline event designations must use only the first meaningful line.'
 Assert-Equal 'Windows recorded an unexpected shutdown or restart' (Get-EventDesignation 'Microsoft-Windows-Kernel-Power' 41 'fixture' (Get-EventSignalRule 'System' 'Microsoft-Windows-Kernel-Power' 41 1)) 'Documented signal designation must take precedence over raw event text.'
 
 $eventCutoff = $now.AddHours(-24)
 $eventFixtures = @(
     [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-3); Message='first'; RecordId=1 },
     [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-2); Message='second'; RecordId=2 },
-    [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-1); Message='representative error 0x80070005'; RecordId=3 },
+    [pscustomobject]@{ ProviderName='Fixture-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddHours(-1); Message='Representative failure. Error code: 0x80070005'; RecordId=3 },
     [pscustomobject]@{ ProviderName='Other-Provider'; Id=7000; Level=2; LevelDisplayName='Error'; LogName='Application'; TimeCreated=$now.AddMinutes(-30); Message='other provider'; RecordId=4 },
     [pscustomobject]@{ ProviderName='Microsoft-Windows-Kernel-Power'; Id=41; Level=1; LevelDisplayName='Critical'; LogName='System'; TimeCreated=$now.AddDays(-2); Message='old signal'; RecordId=5 }
 )
@@ -50,9 +55,9 @@ $eventGroups = @(Group-EventLogEvents $eventFixtures $eventCutoff)
 Assert-Equal 2 $eventGroups.Count 'Different providers with the same Event ID must remain separate, and old events must be excluded.'
 $repeatedEventGroup = @($eventGroups | Where-Object { $_.ProviderName -eq 'Fixture-Provider' })[0]
 Assert-Equal 3 $repeatedEventGroup.Count 'Repeated events must be grouped.'
-Assert-Equal 'representative error 0x80070005' $repeatedEventGroup.RepresentativeMessage 'The latest event must provide the representative message.'
+Assert-Equal 'Representative failure. Error code: 0x80070005' $repeatedEventGroup.RepresentativeMessage 'The latest event must provide the representative message.'
 Assert-Equal 'Fixture-Provider/7000' $repeatedEventGroup.EventIdentifier 'Grouped events must expose a stable provider/Event ID identifier.'
-Assert-Equal 'representative error 0x80070005' $repeatedEventGroup.Designation 'Generic grouped events must expose a concise human-readable designation.'
+Assert-Equal 'Representative failure.' $repeatedEventGroup.Designation 'Generic grouped events must expose a concise human-readable designation.'
 Assert-Equal 1 @($repeatedEventGroup.ErrorCodes).Count 'Grouped events must expose error codes from the representative event text.'
 Assert-Equal '0x80070005' $repeatedEventGroup.ErrorCodes[0] 'Grouped event error code was not normalized.'
 Assert-True (-not $repeatedEventGroup.IsSignal) 'A grouped generic Error event must not become a finding.'
