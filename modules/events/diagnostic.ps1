@@ -38,6 +38,81 @@ function ConvertTo-OneLineMessage {
     return ($singleLine.Substring(0, $MaxLength - 3) + '...')
 }
 
+
+function Get-EventErrorCodes {
+    param([AllowEmptyString()][string]$Message)
+
+    if ([string]::IsNullOrWhiteSpace($Message)) {
+        return @()
+    }
+
+    # Event messages often contain many hexadecimal values that are not error
+    # codes (timestamps, fault offsets, handles, identifiers). Only accept
+    # values explicitly labelled as an error/status/exception code.
+    $labelPattern = '(?:HRESULT|NTSTATUS|(?:error|exception|failure|status|return)\s+code|status|\u043A\u043E\u0434\s+(?:\u043E\u0448\u0438\u0431\u043A\u0438|\u0438\u0441\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F|\u0441\u043E\u0441\u0442\u043E\u044F\u043D\u0438\u044F|\u0441\u0431\u043E\u044F|\u0432\u043E\u0437\u0432\u0440\u0430\u0442\u0430))'
+    $valuePattern = '(?<Code>0x[0-9A-F]{1,16}|-?\d+)'
+    $regex = New-Object System.Text.RegularExpressions.Regex(
+        ('(?i){0}\s*[:=]?\s*{1}' -f $labelPattern, $valuePattern)
+    )
+
+    $seen = @{}
+    $codes = New-Object System.Collections.Generic.List[string]
+    foreach ($match in $regex.Matches($Message)) {
+        $value = [string]$match.Groups['Code'].Value
+        if ($value -match '^(?i)0x') {
+            $normalized = '0x' + $value.Substring(2).ToUpperInvariant()
+        }
+        else {
+            $normalized = $value
+        }
+
+        if ($seen.ContainsKey($normalized)) {
+            continue
+        }
+
+        $seen[$normalized] = $true
+        $codes.Add($normalized)
+    }
+
+    return @($codes.ToArray())
+}
+
+function Get-EventDesignation {
+    param(
+        [Parameter(Mandatory = $true)][AllowEmptyString()][string]$ProviderName,
+        [Parameter(Mandatory = $true)][int]$Id,
+        [AllowEmptyString()][string]$Message,
+        $SignalRule
+    )
+
+    if ($null -ne $SignalRule -and -not [string]::IsNullOrWhiteSpace([string]$SignalRule.Message)) {
+        return ([string]$SignalRule.Message).Trim().TrimEnd('.')
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($Message)) {
+        # Preserve the first meaningful line before collapsing the full event
+        # text. Many Windows events are multiline key/value records; joining
+        # them first makes the designation unreadable.
+        $firstLine = @(
+            [System.Text.RegularExpressions.Regex]::Split($Message, '\r?\n') |
+                ForEach-Object { $_.Trim() } |
+                Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Select-Object -First 1
+        )
+
+        $designationSource = if ($firstLine.Count -gt 0) { [string]$firstLine[0] } else { $Message }
+        $normalized = ConvertTo-OneLineMessage -Message $designationSource -MaxLength 160
+        if ($normalized -match '^.+?[.!?](?=\s|$)') {
+            return $Matches[0].Trim()
+        }
+
+        return $normalized
+    }
+
+    $providerLabel = if ([string]::IsNullOrWhiteSpace($ProviderName)) { 'Unknown provider' } else { $ProviderName }
+    return ('{0} event {1}' -f $providerLabel, $Id)
+}
+
 function Get-EventSignalRule {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyString()][string]$LogName,
@@ -132,9 +207,21 @@ function Group-EventLogEvents {
             }
         }
 
+        $eventIdentifier = if ([string]::IsNullOrWhiteSpace($providerName)) {
+            'UnknownProvider/{0}' -f $eventId
+        }
+        else {
+            '{0}/{1}' -f $providerName, $eventId
+        }
+        $designation = Get-EventDesignation -ProviderName $providerName -Id $eventId -Message ([string]$representativeEvent.Message) -SignalRule $signalRule
+        $errorCodes = @(Get-EventErrorCodes -Message ([string]$representativeEvent.Message))
+
         [pscustomobject][ordered]@{
             ProviderName          = $providerName
             Id                    = $eventId
+            EventIdentifier       = $eventIdentifier
+            Designation           = $designation
+            ErrorCodes            = @($errorCodes)
             Level                 = $level
             LevelDisplayName      = $levelDisplayName
             Count                 = $orderedEvents.Count
@@ -373,8 +460,13 @@ if ($displayedGroups.Count -eq 0) {
 }
 else {
     foreach ($group in $displayedGroups) {
+        $errorCodeText = if (@($group.ErrorCodes).Count -eq 0) { 'None detected in event text' } else { @($group.ErrorCodes) -join ', ' }
+
         Write-Host ('ProviderName          : {0}' -f $group.ProviderName)
         Write-Host ('Id                    : {0}' -f $group.Id)
+        Write-Host ('Event identifier      : {0}' -f $group.EventIdentifier)
+        Write-Host ('Designation           : {0}' -f $group.Designation)
+        Write-Host ('Error code(s)         : {0}' -f $errorCodeText)
         Write-Host ('Level                 : {0}' -f $group.LevelDisplayName)
         Write-Host ('LogNames              : {0}' -f ($group.LogNames -join ', '))
         Write-Host ('Count                 : {0}' -f $group.Count)
