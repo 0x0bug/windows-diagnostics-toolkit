@@ -24,7 +24,15 @@ param(
     [string]$NetworkHttpsEndpoint = 'https://www.microsoft.com/',
     [ValidateNotNullOrEmpty()]
     [string]$NetworkIcmpTarget = '1.1.1.1',
-    [string[]]$Module
+    [string[]]$Module,
+    [switch]$SaveSnapshot,
+    [string]$BeforeSnapshot,
+    [string]$AfterSnapshot,
+    [ValidateSet('AppFailure','UnexpectedRestart')]
+    [string]$IncidentSymptom,
+    [string]$IncidentAt,
+    [int]$IncidentBeforeMinutes = 30,
+    [int]$IncidentAfterMinutes = 30
 )
 
 $ErrorActionPreference = 'Stop'
@@ -87,6 +95,10 @@ if (-not (Test-Path -LiteralPath $processRunnerPath -PathType Leaf)) {
 }
 
 . $PSScriptRoot\scripts\process-runner.ps1
+. $PSScriptRoot\scripts\diagnostic-data.ps1
+. $PSScriptRoot\scripts\snapshot.ps1
+. $PSScriptRoot\scripts\snapshot-compare.ps1
+. $PSScriptRoot\scripts\incident.ps1
 
 function Get-WdtCollectionCompleteness {
     param([Parameter(Mandatory = $true)][object[]]$Results)
@@ -309,12 +321,13 @@ function Protect-WdtDiagnosticResults {
 function Get-WdtUniqueReportPaths {
     param(
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
-        [bool]$ExportMarkdown
+        [bool]$ExportMarkdown,
+        [string]$Prefix = 'WindowsDiagnosticsReport'
     )
 
     for ($attempt = 0; $attempt -lt 10; $attempt++) {
         $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-        $reportBaseName = 'WindowsDiagnosticsReport-{0}-{1}' -f $timestamp, [System.Guid]::NewGuid().ToString('N')
+        $reportBaseName = '{0}-{1}-{2}' -f $Prefix, $timestamp, [System.Guid]::NewGuid().ToString('N')
         $textPath = Join-Path -Path $OutputDirectory -ChildPath ($reportBaseName + '.txt')
         $markdownPath = Join-Path -Path $OutputDirectory -ChildPath ($reportBaseName + '.md')
         if (Test-Path -LiteralPath $textPath) { continue }
@@ -333,13 +346,21 @@ function Invoke-WdtReport {
         [bool]$ExportMarkdown,
         [bool]$PrivacyMode,
         [bool]$SuppressConsoleOutput,
-        [int]$ModuleTimeoutSeconds = 180
+        [int]$ModuleTimeoutSeconds = 180,
+        [bool]$SaveSnapshot = $false
     )
 
     $startedAt = Get-Date
     $selectedChecks = @($ModuleDefinitions)
     if ($selectedChecks.Count -eq 0) {
         throw 'At least one diagnostic module must be selected.'
+    }
+
+    $windowStart=$null; $windowEnd=$null
+    if ($SaveSnapshot) {
+        Assert-WdtSnapshotModules @($selectedChecks | ForEach-Object { [string]$_.Id })
+        $windowEnd=ConvertTo-WdtDataUtcText ([datetime]::UtcNow)
+        $windowStart=ConvertTo-WdtDataUtcText (([datetimeoffset]$windowEnd).AddDays(-7))
     }
 
     $resolvedOutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
@@ -356,8 +377,11 @@ function Invoke-WdtReport {
     $results = New-Object System.Collections.Generic.List[object]
     foreach ($check in $selectedChecks) {
         $scriptArguments = @(Get-WdtModuleInvocationArguments -Definition $check -CoreOptions $CoreOptions)
-        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.EntryPoint -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot -TimeoutSeconds $ModuleTimeoutSeconds -ScriptArguments $scriptArguments))
+        $dataParameters=@{}
+        if ($SaveSnapshot) { $dataParameters=@{CollectData=$true;ModuleId=$check.Id;DataStartUtc=$windowStart;DataEndUtc=$windowEnd} }
+        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.EntryPoint -PowerShellPath $powerShellPath -RepositoryRoot $repositoryRoot -TimeoutSeconds $ModuleTimeoutSeconds -ScriptArguments $scriptArguments @dataParameters))
     }
+    $collectionFinishedUtc=ConvertTo-WdtDataUtcText ([datetime]::UtcNow)
 
     $privacyModeLabel = if ($PrivacyMode) { 'enabled' } else { 'disabled' }
     $isElevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -379,6 +403,14 @@ function Invoke-WdtReport {
 
     Protect-WdtDiagnosticResults -Results @($results.ToArray()) -Context $redactionContext
     $findingsSummary = Get-WdtFindingsSummary -Results @($results.ToArray())
+    $snapshotPath=$null
+    $snapshotActionFailed=$false
+    if ($SaveSnapshot) {
+        $snapshot=New-WdtSnapshot -ToolkitVersion $toolkitVersion -ModuleIds @($selectedChecks | ForEach-Object { [string]$_.Id }) -Results @($results.ToArray()) -CollectionStartedUtc $startedAt -CollectionFinishedUtc $collectionFinishedUtc -WindowStartUtc $windowStart -WindowEndUtc $windowEnd -PrivacyMode $PrivacyMode
+        $snapshotPath=Write-WdtSnapshot -Snapshot $snapshot -OutputDirectory $resolvedOutputDirectory -Context $redactionContext
+        $snapshotActionFailed=@($results | Where-Object { $null -eq $_.Data -or $_.DataStatus -eq 'NotCollected' -or $_.DataErrors.Count -gt 0 }).Count -gt 0
+        if (-not $SuppressConsoleOutput) { Write-Host ('JSON snapshot written: {0}' -f (Protect-WdtDataString $snapshotPath $redactionContext)) }
+    }
 
     $textLines = New-Object System.Collections.Generic.List[string]
     $textLines.Add('Windows Diagnostics Toolkit - Support Report')
@@ -391,6 +423,12 @@ function Invoke-WdtReport {
     $textLines.Add(('Collection completeness: {0}' -f $collectionCompleteness))
     $textLines.Add(('Output        : {0}' -f $displayTextReportPath))
     $textLines.Add(('Selected      : {0}' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
+    if ($SaveSnapshot) {
+        $textLines.Add(('Snapshot      : {0}' -f (Protect-WdtDataString $snapshotPath $redactionContext)))
+        $textLines.Add(('History window [UTC start,end): {0} / {1}' -f $windowStart,$windowEnd))
+        $textLines.Add('Current configuration/inventory describes collection time. History retention may be unknown.')
+        $textLines.Add(('Structured data status: {0}' -f (($selectedChecks | ForEach-Object -Begin { $dataIndex=0 } -Process { $label='{0}={1}' -f $_.Id,$results[$dataIndex].DataStatus; $dataIndex++; $label }) -join ', ')))
+    }
     Add-TextFindingsSummary -Lines $textLines -Summary $findingsSummary
     foreach ($result in $results) {
         Add-TextSection -Lines $textLines -Result $result
@@ -415,6 +453,12 @@ function Invoke-WdtReport {
         $markdownLines.Add(('- Collection completeness: `{0}`' -f $collectionCompleteness))
         $markdownLines.Add(('- TXT report: `{0}`' -f $displayTextReportPath))
         $markdownLines.Add(('- Selected: `{0}`' -f (($selectedChecks | ForEach-Object { $_.Title }) -join ', ')))
+        if ($SaveSnapshot) {
+            $markdownLines.Add(('- Snapshot: `{0}`' -f (Protect-WdtDataString $snapshotPath $redactionContext)))
+            $markdownLines.Add(('- History window [UTC start,end): `{0}` / `{1}`' -f $windowStart,$windowEnd))
+            $markdownLines.Add('- Current configuration/inventory describes collection time. History retention may be unknown.')
+            $markdownLines.Add(('- Structured data status: {0}' -f (($selectedChecks | ForEach-Object -Begin { $dataIndex=0 } -Process { $label='{0}={1}' -f $_.Id,$results[$dataIndex].DataStatus; $dataIndex++; $label }) -join ', ')))
+        }
         Add-MarkdownFindingsSummary -Lines $markdownLines -Summary $findingsSummary
         foreach ($result in $results) {
             Add-MarkdownSection -Lines $markdownLines -Result $result
@@ -427,7 +471,8 @@ function Invoke-WdtReport {
         $writtenMarkdownPath = $markdownReportPath
     }
 
-    $exitCode = if (($results | Where-Object { $_.ExitCode -ne 0 }).Count -gt 0) { 1 } else { 0 }
+    $exitCode = if (($results | Where-Object { $_.ExitCode -ne 0 }).Count -gt 0 -or $snapshotActionFailed) { 1 } else { 0 }
+    if ($snapshotActionFailed -and -not $SuppressConsoleOutput) { Write-Warning 'Snapshot collection did not receive a complete valid data protocol. See structured data status and source limitations.' }
     if ($exitCode -ne 0 -and -not $SuppressConsoleOutput) {
         Write-Warning 'One or more diagnostics completed with a non-zero exit code. See the report for details.'
     }
@@ -436,11 +481,88 @@ function Invoke-WdtReport {
         ExitCode           = $exitCode
         TextReportPath     = $textReportPath
         MarkdownReportPath = $writtenMarkdownPath
+        SnapshotPath       = $snapshotPath
         WarningCount       = $findingsSummary.WarningCount
         ErrorCount         = $findingsSummary.ErrorCount
         SelectedCount      = $selectedChecks.Count
         ElapsedTime        = ((Get-Date) - $startedAt)
     }
+}
+
+function Invoke-WdtSnapshotComparison {
+    param([string]$BeforePath,[string]$AfterPath,[string]$OutputDirectory,[bool]$PrivacyMode,[bool]$ExportMarkdown)
+    $before=Read-WdtSnapshot -LiteralPath $BeforePath
+    $after=Read-WdtSnapshot -LiteralPath $AfterPath
+    $context=$null
+    if ($PrivacyMode -or $before.PrivacyMode -or $after.PrivacyMode) { $context=New-WdtRedactionContext }
+    $comparison=Compare-WdtSnapshots -Before $before -After $after -PrivacyMode $PrivacyMode -Context $context
+    $resolvedOutputDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
+    if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) { New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null }
+    $paths=Get-WdtUniqueReportPaths -OutputDirectory $resolvedOutputDirectory -ExportMarkdown $ExportMarkdown -Prefix 'WindowsDiagnosticsComparison'
+    $textReportPath=$paths.TextPath; $markdownReportPath=$paths.MarkdownPath
+    $textLines=@(Get-WdtSnapshotComparisonLines -Comparison $comparison)
+    [System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)
+    Write-Host ('TXT comparison written: {0}' -f (Protect-WdtDataString $textReportPath $context))
+    if ($ExportMarkdown) {
+        $markdownLines=@(Get-WdtSnapshotComparisonLines -Comparison $comparison -Markdown)
+        [System.IO.File]::WriteAllLines($markdownReportPath, $markdownLines, [System.Text.Encoding]::UTF8)
+        Write-Host ('Markdown comparison written: {0}' -f (Protect-WdtDataString $markdownReportPath $context))
+    }
+}
+
+function Invoke-WdtIncident {
+    param($Window,[string]$OutputDirectory,[bool]$PrivacyMode,[bool]$ExportMarkdown,[int]$ModuleTimeoutSeconds=180)
+    $window=Assert-WdtIncidentWindow $Window
+    $checks=@(Resolve-WdtModuleSelection -Registry $registrySnapshot -ModuleIds @('Crashes','Events','Updates'))
+    $started=ConvertTo-WdtDataUtcText ([datetime]::UtcNow)
+    $results=New-Object System.Collections.Generic.List[object]
+    foreach ($check in $checks) {
+        $arguments=@(Get-WdtModuleInvocationArguments -Definition $check -CoreOptions $coreOptions)
+        $results.Add((Invoke-DiagnosticScript -Title $check.Title -ScriptPath $check.EntryPoint -PowerShellPath (Get-CurrentPowerShellPath) -RepositoryRoot $repositoryRoot -TimeoutSeconds $ModuleTimeoutSeconds -ScriptArguments $arguments -CollectData -ModuleId $check.Id -DataStartUtc $window.StartUtc -DataEndUtc $window.EndUtc))
+    }
+    $finished=ConvertTo-WdtDataUtcText ([datetime]::UtcNow)
+    $context=$null
+    if ($PrivacyMode) { $context=New-WdtRedactionContext }
+    $incident=New-WdtIncident -Window $window -Results @($results.ToArray()) -ToolkitVersion $toolkitVersion -CollectionStartedUtc $started -CollectionFinishedUtc $finished -PrivacyMode $PrivacyMode -Context $context
+    $textLines=@(Get-WdtIncidentLines -Incident $incident)
+    # Only projected diagnostic text reaches disk; captured legacy output stays
+    # in memory and is not a source of incident facts or a second report.
+    try {
+        $resolvedOutputDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
+        if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) { New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null }
+        $paths=Get-WdtUniqueReportPaths -OutputDirectory $resolvedOutputDirectory -ExportMarkdown $ExportMarkdown -Prefix 'WindowsDiagnosticsIncident'
+        $textReportPath=$paths.TextPath; $markdownReportPath=$paths.MarkdownPath
+        [System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)
+        if ($ExportMarkdown) {
+            $fence=Get-WdtMarkdownFence -ContentLines $textLines
+            $markdownLines=@('# Incident Investigation','',($fence+'text'))+$textLines+@($fence)
+            [System.IO.File]::WriteAllLines($markdownReportPath, $markdownLines, [System.Text.Encoding]::UTF8)
+        }
+    } catch { throw 'Could not write WDT incident report.' }
+    Write-Host ('TXT incident written: {0}' -f (Protect-WdtDataString $textReportPath $context))
+    if ($ExportMarkdown) { Write-Host ('Markdown incident written: {0}' -f (Protect-WdtDataString $markdownReportPath $context)) }
+    if ($incident.ExitCode -ne 0) { Write-Warning 'Incident collection had an execution or machine-data protocol failure. Review source coverage and limitations.' }
+    return [pscustomobject]@{ExitCode=$incident.ExitCode;TextReportPath=$textReportPath;MarkdownReportPath=$(if ($ExportMarkdown) { $markdownReportPath } else { $null });Incident=$incident}
+}
+
+$hasIncidentRequest=@('IncidentSymptom','IncidentAt','IncidentBeforeMinutes','IncidentAfterMinutes' | Where-Object { $PSBoundParameters.ContainsKey($_) }).Count -gt 0
+if ($hasIncidentRequest) {
+    $incidentAllowed=@('IncidentSymptom','IncidentAt','IncidentBeforeMinutes','IncidentAfterMinutes','OutputDirectory','ExportMarkdown','PrivacyMode','ModuleTimeoutSeconds','Verbose','Debug','ErrorAction','WarningAction','InformationAction','ErrorVariable','WarningVariable','InformationVariable','OutVariable','OutBuffer','PipelineVariable')
+    foreach ($parameterName in $PSBoundParameters.Keys) { if ($parameterName -notin $incidentAllowed) { throw 'Incident investigation cannot be combined with module selection, snapshots, interactive or network options.' } }
+    if (-not $PSBoundParameters.ContainsKey('IncidentSymptom') -or -not $PSBoundParameters.ContainsKey('IncidentAt')) { throw 'IncidentSymptom and IncidentAt are required together.' }
+    $incidentWindow=Resolve-WdtIncidentWindow -Symptom $IncidentSymptom -At $IncidentAt -BeforeMinutes $IncidentBeforeMinutes -AfterMinutes $IncidentAfterMinutes
+    $incidentResult=Invoke-WdtIncident -Window $incidentWindow -OutputDirectory $OutputDirectory -PrivacyMode ([bool]$PrivacyMode) -ExportMarkdown ([bool]$ExportMarkdown) -ModuleTimeoutSeconds $ModuleTimeoutSeconds
+    if ($incidentResult.ExitCode -ne 0) { exit $incidentResult.ExitCode }
+    return
+}
+
+$hasSnapshotPair=$PSBoundParameters.ContainsKey('BeforeSnapshot') -or $PSBoundParameters.ContainsKey('AfterSnapshot')
+if ($hasSnapshotPair) {
+    if ([string]::IsNullOrWhiteSpace($BeforeSnapshot) -or [string]::IsNullOrWhiteSpace($AfterSnapshot)) { throw 'BeforeSnapshot and AfterSnapshot are required together.' }
+    $offlineAllowed=@('BeforeSnapshot','AfterSnapshot','OutputDirectory','ExportMarkdown','PrivacyMode','Verbose','Debug','ErrorAction','WarningAction','InformationAction','ErrorVariable','WarningVariable','InformationVariable','OutVariable','OutBuffer','PipelineVariable')
+    foreach ($parameterName in $PSBoundParameters.Keys) { if ($parameterName -notin $offlineAllowed) { throw 'Snapshot comparison cannot be combined with live collection or interactive options.' } }
+    Invoke-WdtSnapshotComparison -BeforePath $BeforeSnapshot -AfterPath $AfterSnapshot -OutputDirectory $OutputDirectory -PrivacyMode ([bool]$PrivacyMode) -ExportMarkdown ([bool]$ExportMarkdown)
+    return
 }
 
 $legacySelections = [ordered]@{
@@ -464,11 +586,13 @@ if ($missingLegacyIds.Count -gt 0) {
 $moduleIds = if ($PSBoundParameters.ContainsKey('Module')) { @($Module) } else { @() }
 $hasLegacySelection = @($legacySelections.GetEnumerator() | Where-Object { [bool]$_.Value }).Count -gt 0
 $hasExplicitSelection = $moduleIds.Count -gt 0 -or $hasLegacySelection
+if ($SaveSnapshot -and ($All -or $Interactive -or -not $hasExplicitSelection)) { throw 'SaveSnapshot requires an explicit supported module selection and cannot be combined with All or Interactive.' }
 $selectedDefinitions = @(Resolve-WdtModuleSelection `
         -Registry $registrySnapshot `
         -ModuleIds $moduleIds `
         -LegacySelections $legacySelections `
         -AllRequested:([bool]$All))
+if ($SaveSnapshot) { Assert-WdtSnapshotModules @($selectedDefinitions | ForEach-Object { [string]$_.Id }) }
 
 $launchMode = Get-WdtLaunchMode `
     -InteractiveRequested ([bool]$Interactive) `
@@ -511,7 +635,7 @@ if ($launchMode -eq 'Interactive') {
     return
 }
 
-$reportResult = Invoke-WdtReport -ModuleDefinitions $selectedDefinitions -CoreOptions $coreOptions -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode -ModuleTimeoutSeconds $ModuleTimeoutSeconds
+$reportResult = Invoke-WdtReport -ModuleDefinitions $selectedDefinitions -CoreOptions $coreOptions -OutputDirectory $OutputDirectory -ExportMarkdown:$ExportMarkdown -PrivacyMode:$PrivacyMode -ModuleTimeoutSeconds $ModuleTimeoutSeconds -SaveSnapshot:([bool]$SaveSnapshot)
 if ($reportResult.ExitCode -ne 0) {
     exit $reportResult.ExitCode
 }

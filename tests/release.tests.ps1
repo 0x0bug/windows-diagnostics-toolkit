@@ -107,7 +107,7 @@ try {
     foreach ($forbiddenDirectory in @('.git/', '.github/', 'tests/', 'site/', 'dist/')) {
         Assert-Equal 0 @($entries | Where-Object { $_.StartsWith($forbiddenDirectory, [System.StringComparison]::OrdinalIgnoreCase) }).Count "Archive contains forbidden directory: $forbiddenDirectory"
     }
-    Assert-Equal 0 @($entries | Where-Object { $_ -match '(^|/)(WindowsDiagnosticsReport-.*\.(txt|md)|.*\.(tmp|temp))$' }).Count 'Archive contains generated reports or temporary files.'
+    Assert-Equal 0 @($entries | Where-Object { $_ -match '(^|/)(WindowsDiagnostics(?:Report|Comparison|Incident)-.*\.(txt|md)|WindowsDiagnosticsSnapshot-.*\.json|.*\.(tmp|temp))$' }).Count 'Archive contains generated reports, snapshots, or temporary files.'
     Assert-True ($entries -contains 'VERSION') 'Archive has an extra top-level wrapper directory.'
 
     $extractedRoot = Join-Path -Path $temporaryRoot -ChildPath 'extracted'

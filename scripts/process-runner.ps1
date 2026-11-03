@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param()
 
+. $PSScriptRoot\diagnostic-data.ps1
+
 $script:WdtProcessRunnerConfig = [ordered]@{
     StreamBufferSize = 4096
     ProcessPollIntervalMilliseconds = 25
@@ -400,7 +402,11 @@ function Invoke-DiagnosticScript {
         [Parameter(Mandatory = $true)][string]$PowerShellPath,
         [Parameter(Mandatory = $true)][string]$RepositoryRoot,
         [Parameter(Mandatory = $true)][int]$TimeoutSeconds,
-        [string[]]$ScriptArguments = @()
+        [string[]]$ScriptArguments = @(),
+        [switch]$CollectData,
+        [ValidateSet('System','Crashes','Events','Updates')][string]$ModuleId,
+        [string]$DataStartUtc,
+        [string]$DataEndUtc
     )
 
     $result = [ordered]@{
@@ -414,11 +420,15 @@ function Invoke-DiagnosticScript {
         Completeness = 'Unavailable'
         Cleanup     = $null
         OutputComplete = $true
+        Data = $null
+        DataStatus = 'NotCollected'
+        DataErrors = @()
     }
 
     if (-not (Test-Path -LiteralPath $ScriptPath -PathType Leaf)) {
         $result.ExitCode = 1
         $result.ErrorLines = @("Missing script: $ScriptPath")
+        if ($CollectData) { $result.DataStatus='Unavailable'; $result.DataErrors=@('The requested diagnostic source could not be started.') }
         return Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result)
     }
 
@@ -453,6 +463,23 @@ function Invoke-DiagnosticScript {
         $startInfo.EnvironmentVariables['WDT_FINDING_PROTOCOL'] = '1'
 
         $startInfo.EnvironmentVariables['WDT_FINDING_NONCE'] = $findingNonce
+        # Always replace inherited opt-in controls, including on legacy runs.
+        $startInfo.EnvironmentVariables['WDT_DATA_PROTOCOL'] = '0'
+        $startInfo.EnvironmentVariables['WDT_DATA_NONCE'] = ''
+        $startInfo.EnvironmentVariables['WDT_DATA_MODULE'] = ''
+        $startInfo.EnvironmentVariables['WDT_DATA_START_UTC'] = ''
+        $startInfo.EnvironmentVariables['WDT_DATA_END_UTC'] = ''
+        if ($CollectData) {
+            if ([string]::IsNullOrWhiteSpace($ModuleId)) { throw 'A data request requires a supported module id.' }
+            $dataStart = ConvertTo-WdtDataUtcText $DataStartUtc
+            $dataEnd = ConvertTo-WdtDataUtcText $DataEndUtc
+            if (($null -eq $dataStart) -ne ($null -eq $dataEnd) -or ($null -ne $dataStart -and [datetimeoffset]$dataStart -ge [datetimeoffset]$dataEnd)) { throw 'Invalid diagnostic data window.' }
+            $startInfo.EnvironmentVariables['WDT_DATA_PROTOCOL'] = '1'
+            $startInfo.EnvironmentVariables['WDT_DATA_NONCE'] = $findingNonce
+            $startInfo.EnvironmentVariables['WDT_DATA_MODULE'] = $ModuleId
+            $startInfo.EnvironmentVariables['WDT_DATA_START_UTC'] = $dataStart
+            $startInfo.EnvironmentVariables['WDT_DATA_END_UTC'] = $dataEnd
+        }
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $startInfo
 
@@ -550,6 +577,11 @@ function Invoke-DiagnosticScript {
         }
     }
 
+    if ($CollectData) {
+        $dataResult = Resolve-WdtDiagnosticData -OutputLines @($result.OutputLines) -Nonce $findingNonce -ExpectedModuleId $ModuleId -ExecutionComplete ($result.Status -eq 'Success' -and $result.OutputComplete)
+        $result.OutputLines = @($dataResult.OutputLines)
+        $result.Data = $dataResult.Data; $result.DataStatus = $dataResult.DataStatus; $result.DataErrors = @($dataResult.DataErrors)
+    }
     $resolved = Resolve-WdtDiagnosticResult -Result ([pscustomobject]$result) -FindingNonce $findingNonce
     $resolved.Completeness = Get-WdtExecutionCompleteness -Status $resolved.Status -OutputComplete $resolved.OutputComplete
     if ($resolved.Status -eq $script:WdtRuntimeStatus.Timeout) {

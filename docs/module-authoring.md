@@ -65,6 +65,123 @@ Finding severity does not itself change the process exit code. Preserve existing
 
 Legacy standalone launchers under `scripts/` are compatibility entrypoints. If an established standalone path exists, keep its exact parameter contract and delegate to the package entrypoint without duplicating diagnostic logic.
 
+## Opt-in structured diagnostic data (schema 1)
+
+System, Crashes, Events, and Updates additionally support an internal in-memory
+data request. Existing CLI entrypoints and standalone launchers retain their
+parameter blocks and default text behavior. This data contract was selected by
+the orchestrator during implementation of the snapshots/incident MVP; it is
+separate from the toolkit VERSION and from the manifest SchemaVersion.
+
+`Invoke-DiagnosticScript` accepts optional `-CollectData -ModuleId <Id>
+-DataStartUtc <ISO8601> -DataEndUtc <ISO8601>`. Both boundaries are optional
+together; when supplied they define `[start, end)` and require an explicit `Z`
+or offset. Every child has inherited `WDT_DATA_*` controls overwritten, including
+legacy calls with collection disabled. Registry manifests have no new fields.
+
+The result retains all existing properties and adds `Data`, `DataStatus`, and
+`DataErrors`. Status is `NotCollected`, `Available`, `Partial`, or `Unavailable`.
+An exit code of zero or complete stdout is not evidence of complete sources.
+`Data` is either null or a module object with these required properties:
+
+| Object | Fields |
+| --- | --- |
+| Module | `SchemaVersion` integer 1; `ModuleId`; nullable `WindowStartUtc`/`WindowEndUtc`; arrays `Sources`, `Facts`, `Evidence` |
+| Source | `Id`, `Kind`, `Scope`, `Availability`, boolean `QueryComplete`/`Truncated`, nullable integer `Limit`, `Coverage`, nullable `StartUtc`/`EndUtc`/`Error` |
+| Fact | `Id`, `Type`, nullable `Key`, `IdentityScope`, `ValueState`, `Values` object, `Comparison`, arrays `SourceIds`/`EvidenceIds` |
+| Evidence | `Id`, `SourceId`, nullable `TimestampUtc`, `TimePrecision`, nullable `EndUtc`/`OriginalOffset`/`LogName`/`Provider`/`EventId`/`RecordId`/`ReportId`, `Kind`, nullable `Component`/`FailureCode`/`Message` |
+
+Source kinds are `Configuration`, `Inventory`, `History`; availability is
+`Available`, `Partial`, `Unavailable`, `NotCollected`; coverage is `Unknown`,
+`QueryWindow`, `CurrentState`. History adapters use `Unknown`: query completion
+does not establish log retention. Reaching a query cap conservatively marks the
+source Partial. An empty successful query remains Available; an inaccessible
+reboot check produces an Unknown fact with null `Present`, not false.
+
+Fact types, modules, comparison policies, and exact Values fields are closed:
+
+| Type | Module / Comparison | Values (required keys) |
+| --- | --- | --- |
+| OsVersion | System / Configuration | Version:string, Build:string |
+| RebootIndicator | Updates / Configuration | Name:string, Present:boolean |
+| HotFix | Updates / Inventory | HotFixId:string, InstalledDate:nullable string |
+| CrashObservation | Crashes / Windowed | Component:string, Kind:string, FailureCode:string |
+| EventObservation | Events / Windowed | Provider:string, EventId:integer, Level:integer |
+| UpdateFailure | Updates / Windowed | UpdateIdentifier:nullable string, Title:string, ErrorCode:string, Kind:string |
+
+`ValueState` is Known, Unknown, or NotApplicable. Unknown/NotApplicable may carry
+null for required value fields. `IdentityScope` is Semantic or SnapshotLocal;
+only Semantic has a nonempty comparison key. Source IDs/scopes are fixed by each
+adapter in `Assert-WdtDiagnosticData`, not user-provided identities. Fact IDs
+`f<number>` and evidence IDs `e<number>` are local to a module; envelope consumers
+must qualify references with ModuleId. Duplicate IDs, dangling refs, evidence
+whose SourceId is not declared by its fact, incompatible module/type/comparison,
+unknown properties, and stringified booleans/numbers are rejected.
+
+Evidence kinds are Crash, Hang, BugCheck, Event, UpdateInstallationFailure,
+UpdateDownloadFailure, HotFix. TimePrecision is Instant, Day, or Unknown. Instant
+requires a timestamp; Day requires an uncertainty interval, not an event at
+midnight; Unknown has no UTC timestamp or interval. OriginalOffset, when known,
+is within -14:00 to +14:00. `InstalledDate` is a source-reported date such as
+`2025-01-01`; an unspecified historical timezone does not become the current
+machine offset. In that case evidence time remains Unknown and the date is
+available separately for presentation. Get-HotFix is not a full Windows Update
+installation history.
+
+Use these shared helpers from `scripts/diagnostic-data.ps1`:
+
+- `New-WdtDiagnosticData -ModuleId -WindowStartUtc -WindowEndUtc -Sources -Facts -Evidence`
+- `New-WdtDataSource`, `New-WdtDataFact`, `New-WdtDataEvidence` (named parameters match the table)
+- `Assert-WdtDiagnosticData -Data` (throws generic schema errors, never evaluates data)
+- `ConvertTo-WdtDataUtcText -Value` (canonical ISO UTC text; rejects timezone-less or Unspecified input)
+- `Get-WdtDataRequest` (Enabled, StartUtc, EndUtc from the closed child request)
+- `Write-WdtDiagnosticData -Data` (opt-in only)
+- `Resolve-WdtDiagnosticData -OutputLines -Nonce -ExpectedModuleId -ExecutionComplete`
+  (Data, DataStatus, DataErrors, cleaned OutputLines)
+- `Protect-WdtDiagnosticData -Data -Context` (copy, never mutates raw input)
+
+The JSON wire protocol has authenticated Begin, Item, and End frames; end counts
+and schema/ref integrity are checked. JSON payload limits are 16,384 characters
+per frame, 12,000 items, and 16 MiB characters in total. Emission is bounded before
+writing each item; overflow and missing end markers cannot be Available. The
+existing general stdout capture is unchanged and these limits are not a new
+global limit on legacy text output. Protocol errors do not echo raw payload.
+There are no raw temporary JSON files.
+
+PowerShell 7 JSON parsing may produce Int64 and DateTime where Windows
+PowerShell 5.1 yields Int32 and timestamp strings. The validator accepts actual
+Int32/Int64 values within Int32 range and the UTC helper accepts both timestamp
+representations, preserving the same instant. Other primitive types stay strict.
+
+Privacy projection removes command/URL secrets even without a privacy context;
+with a context it protects nested values, errors, and evidence identity fields.
+Any fact whose key or string values change becomes SnapshotLocal with no key.
+Existing privacy token text is never promoted into a semantic key. The caller
+must project before writing any artifact and must not serialize the redaction
+context. Crashes exposes individual records before legacy five-minute merging;
+new incident consumers must implement conservative correlation on those records.
+
+The incident consumer in `scripts/incident.ps1` exposes
+`Resolve-WdtIncidentWindow -Symptom -At [-BeforeMinutes 30 -AfterMinutes 30]`,
+`Assert-WdtIncidentWindow -Window`, `New-WdtIncident -Window -Results
+-ToolkitVersion -CollectionStartedUtc -CollectionFinishedUtc [-PrivacyMode
+<bool>] [-Context]`, and `Get-WdtIncidentLines -Incident`. The window has canonical
+`Symptom`, original `RequestedAt`/`OriginalOffset`, canonical `AtUtc`,
+`StartUtc`/`EndUtc`, and integer `BeforeMinutes`/`AfterMinutes`. Both CLI and API
+validate the window, and the API checks all precomputed fields against the
+original request. Results use the accepted runner contract, in fixed
+Crashes/Events/Updates order, with the same exact window in all module data.
+
+The consumer reuses snapshot wrapper validation and privacy projection entirely
+in memory; it does not write a snapshot or parse findings text. Strong identity
+correlation precedes projection, and every returned source value is projected
+under the report context. Summary/timeline refs use `ModuleId/EvidenceId`, not
+raw identity values or cross-capture tokens. Returned collections are
+Observations, Timeline, DateContext, Evidence, Coverage, and Limitations, together
+with the requested/observed/collection bounds and action ExitCode. The helper
+performs no file I/O. The launcher writes only its safe TXT/optional Markdown
+presentation, using the existing unique report path and Markdown fence helpers.
+
 ## Safety and testing
 
 Before submitting a module:

@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 . $PSScriptRoot\..\..\scripts\report-common.ps1
+. $PSScriptRoot\..\..\scripts\diagnostic-data.ps1
 
 # Confirmed Windows Update failure and reboot semantics are intentionally kept
 # narrow. Microsoft references:
@@ -107,10 +108,12 @@ function Get-RecentHotFixInventory {
 
     try {
         $updates = New-Object System.Collections.Generic.List[object]
+        $inventory = New-Object System.Collections.Generic.List[object]
         $unparseableCount = 0
 
         foreach ($hotFix in @(Get-HotFix -ErrorAction Stop)) {
             $installedOn = ConvertTo-DateTimeOrNull -Value $hotFix.InstalledOn
+            $inventory.Add([pscustomobject]@{ HotFixId=[string]$hotFix.HotFixID; InstalledOn=$installedOn })
             if ($null -eq $installedOn) {
                 $unparseableCount++
                 continue
@@ -131,6 +134,7 @@ function Get-RecentHotFixInventory {
             Updates          = @($updates.ToArray())
             UnparseableCount = $unparseableCount
             Error            = $null
+            Inventory        = @($inventory.ToArray())
         }
     }
     catch {
@@ -138,6 +142,7 @@ function Get-RecentHotFixInventory {
             Updates          = @()
             UnparseableCount = 0
             Error            = $_.Exception.Message
+            Inventory        = @()
         }
     }
 }
@@ -389,6 +394,7 @@ function ConvertTo-WindowsUpdateFailure {
         Timestamp        = $timestamp
         EventSource      = $providerName
         EventId          = $eventId
+        RecordId         = [string]$Event.RecordId
         LogName          = $logName
         UpdateIdentifier = if ($null -eq $updateIdentifierValue) { $null } else { ([string]$updateIdentifierValue).Trim() }
         Title            = if ($null -eq $titleValue) { 'Unknown update' } else { ([string]$titleValue).Trim() }
@@ -450,7 +456,8 @@ function Group-WindowsUpdateFailures {
 function Read-WindowsUpdateEvents {
     param(
         [Parameter(Mandatory = $true)][datetime]$StartTime,
-        [switch]$IncludeMessage
+        [switch]$IncludeMessage,
+        [Nullable[datetime]]$EndTime = $null
     )
 
     $providerName = 'Microsoft-Windows-WindowsUpdateClient'
@@ -479,6 +486,7 @@ function Read-WindowsUpdateEvents {
                 Id           = $query.EventIds
                 StartTime    = $StartTime
             }
+            if ($null -ne $EndTime) { $filter.EndTime = [datetime]$EndTime }
 
             $candidateEvents = @(Get-WinEvent -FilterHashtable $filter -ErrorAction Stop)
             foreach ($event in $candidateEvents) {
@@ -517,12 +525,78 @@ Write-Host 'Windows Diagnostics Toolkit - Windows Update Check'
 Write-Host 'Mode: read-only'
 
 $cutoff = (Get-Date).AddDays(-1 * $SinceDays)
+$dataRequest = Get-WdtDataRequest
+$dataEndTime = $null
+if ($dataRequest.Enabled) {
+    $dataEndTime = ([datetimeoffset](Get-Date)).UtcDateTime
+    if ($null -ne $dataRequest.StartUtc) {
+        $cutoff = ([datetimeoffset]$dataRequest.StartUtc).UtcDateTime
+        $dataEndTime = ([datetimeoffset]$dataRequest.EndUtc).UtcDateTime
+    }
+}
 $windowsVersion = Get-WindowsVersionInfo
 $pendingReboot = Test-PendingRebootIndicators
 $recentUpdates = Get-RecentHotFixInventory -Cutoff $cutoff
 $updateServices = Get-WindowsUpdateServices
 $eventLogStatus = if ($IncludeEventLog) { 'Detection and representative details included' } else { 'Detection included; representative details omitted' }
-$eventInventory = Read-WindowsUpdateEvents -StartTime $cutoff -IncludeMessage:$IncludeEventLog
+$eventInventory = Read-WindowsUpdateEvents -StartTime $cutoff -IncludeMessage:$IncludeEventLog -EndTime $dataEndTime
+if ($dataRequest.Enabled) {
+    $dataSources = New-Object 'System.Collections.Generic.List[object]'
+    $dataFacts = New-Object 'System.Collections.Generic.List[object]'
+    $dataEvidence = New-Object 'System.Collections.Generic.List[object]'
+    $factIndex=0; $recordIndex=0
+    $hotFixAvailability=Get-WdtDataAvailability $recentUpdates.Error
+    $dataSources.Add((New-WdtDataSource -Id 'hotfix' -Kind Inventory -Scope 'Get-HotFix/HotFixID' -Availability $hotFixAvailability -QueryComplete ($hotFixAvailability -eq 'Available') -Coverage CurrentState -Error $recentUpdates.Error))
+    $hotFixIds=@{}
+    foreach ($hotFix in @($recentUpdates.Inventory)) {
+        if ([string]::IsNullOrWhiteSpace($hotFix.HotFixId)) {
+            $dataSources[0].Availability='Partial'; $dataSources[0].QueryComplete=$false
+            continue
+        }
+        if ($hotFixIds.ContainsKey($hotFix.HotFixId)) { continue }
+        $hotFixIds[$hotFix.HotFixId]=$true
+        $recordIndex++; $factIndex++; $evidenceId='e'+$recordIndex
+        $date = if ($null -ne $hotFix.InstalledOn) { ([datetime]$hotFix.InstalledOn).ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) } else { $null }
+        $dayStart=$null; $dayEnd=$null; $precision='Unknown'; $offset=$null
+        if ($null -ne $hotFix.InstalledOn -and ([datetime]$hotFix.InstalledOn).Kind -ne [DateTimeKind]::Unspecified) {
+            $dayStart=ConvertTo-WdtDataUtcText ([datetimeoffset]([datetime]$hotFix.InstalledOn).Date)
+            $dayEnd=ConvertTo-WdtDataUtcText ([datetimeoffset]([datetime]$hotFix.InstalledOn).Date.AddDays(1))
+            $precision='Day'; $offset=([datetimeoffset]$hotFix.InstalledOn).ToString('zzz', [Globalization.CultureInfo]::InvariantCulture)
+        }
+        $dataEvidence.Add((New-WdtDataEvidence -Id $evidenceId -SourceId hotfix -TimestampUtc $dayStart -TimePrecision $precision -EndUtc $dayEnd -OriginalOffset $offset -Kind HotFix -Component $hotFix.HotFixId))
+        $dataFacts.Add((New-WdtDataFact -Id ('f'+$factIndex) -Type HotFix -Key $hotFix.HotFixId.ToUpperInvariant() -Values @{HotFixId=$hotFix.HotFixId; InstalledDate=$date} -Comparison Inventory -SourceIds @('hotfix') -EvidenceIds @($evidenceId)))
+    }
+    $rebootNames=@('Component Based Servicing RebootPending','Windows Update Auto Update RebootRequired','PendingFileRenameOperations')
+    $rebootIndex=0
+    foreach ($name in $rebootNames) {
+        $rebootIndex++; $sourceId='reboot-'+$rebootIndex; $factIndex++
+        $errors=@($pendingReboot.Errors | Where-Object { $_.Name -eq $name })
+        $availability=if ($errors.Count -gt 0) { 'Unavailable' } else { 'Available' }
+        $reason=if ($errors.Count -gt 0) { [string]$errors[0].Error } else { $null }
+        $dataSources.Add((New-WdtDataSource -Id $sourceId -Kind Configuration -Scope ('RebootIndicator/' + $name) -Availability $availability -QueryComplete ($availability -eq 'Available') -Coverage CurrentState -Error $reason))
+        $present=if ($errors.Count -gt 0) { $null } else { @($pendingReboot.Indicators | Where-Object { $_.Name -eq $name }).Count -gt 0 }
+        $state=if ($errors.Count -gt 0) { 'Unknown' } else { 'Known' }
+        $dataFacts.Add((New-WdtDataFact -Id ('f'+$factIndex) -Type RebootIndicator -Key $name -ValueState $state -Values @{Name=$name; Present=$present} -Comparison Configuration -SourceIds @($sourceId)))
+    }
+    $logIndex=0; $sourceByLog=@{}
+    foreach ($log in @($eventInventory.Logs)) {
+        $logIndex++; $sourceId='update-log-'+$logIndex; $sourceByLog[$log]=$sourceId
+        $errors=@($eventInventory.Errors | Where-Object { $_.LogName -eq $log })
+        $reason=if ($errors.Count -gt 0) { [string]$errors[0].Error } else { $null }
+        $availability=Get-WdtDataAvailability $reason
+        $dataSources.Add((New-WdtDataSource -Id $sourceId -Kind History -Scope ($log + '/WindowsUpdateClientFailures') -Availability $availability -QueryComplete ($availability -eq 'Available') -StartUtc ([datetimeoffset]$cutoff) -EndUtc ([datetimeoffset]$dataEndTime) -Error $reason))
+    }
+    foreach ($failure in @($eventInventory.Failures)) {
+        $time=Get-WdtDataTimestamp $failure.Timestamp
+        if (-not (Test-WdtDataInWindow $time.Utc ([datetimeoffset]$cutoff) ([datetimeoffset]$dataEndTime))) { continue }
+        $recordIndex++; $factIndex++; $evidenceId='e'+$recordIndex; $sourceId=$sourceByLog[$failure.LogName]
+        $kind=if ($failure.Kind -eq 'Installation') { 'UpdateInstallationFailure' } else { 'UpdateDownloadFailure' }
+        $dataEvidence.Add((New-WdtDataEvidence -Id $evidenceId -SourceId $sourceId -TimestampUtc $time.Utc -TimePrecision $time.Precision -OriginalOffset $time.Offset -LogName $failure.LogName -Provider $failure.EventSource -EventId ([int]$failure.EventId) -RecordId $failure.RecordId -Kind $kind -Component $failure.Title -FailureCode $failure.ErrorCode -Message (ConvertTo-WdtDataMessage $failure.Message)))
+        $identity=if (-not [string]::IsNullOrEmpty($failure.UpdateIdentifier)) { $failure.UpdateIdentifier } else { $failure.Title }
+        $dataFacts.Add((New-WdtDataFact -Id ('f'+$factIndex) -Type UpdateFailure -Key ('{0}|{1}|{2}' -f $identity,$failure.Kind,$failure.ErrorCode) -Values @{UpdateIdentifier=$failure.UpdateIdentifier; Title=$failure.Title; ErrorCode=$failure.ErrorCode; Kind=$failure.Kind} -Comparison Windowed -SourceIds @($sourceId) -EvidenceIds @($evidenceId)))
+    }
+    Write-WdtDiagnosticData (New-WdtDiagnosticData -ModuleId Updates -WindowStartUtc ([datetimeoffset]$cutoff) -WindowEndUtc ([datetimeoffset]$dataEndTime) -Sources @($dataSources.ToArray()) -Facts @($dataFacts.ToArray()) -Evidence @($dataEvidence.ToArray()))
+}
 $failureGroups = @(Group-WindowsUpdateFailures -Failures $eventInventory.Failures -Cutoff $cutoff)
 $failureGroupsToShow = @($failureGroups | Select-Object -First $MaxEvents)
 $pendingRebootFindingIndicators = @(Get-PendingRebootFindingIndicators -Indicators $pendingReboot.Indicators)
@@ -608,7 +682,10 @@ foreach ($failureKind in @('Installation', 'Download')) {
 }
 
 Write-Section 'Summary'
-Write-Host ('Time window         : Last {0} day(s)' -f $SinceDays)
+if ($dataRequest.Enabled -and $null -ne $dataRequest.StartUtc) {
+    Write-Host ('Time window [UTC)   : {0} / {1}' -f $dataRequest.StartUtc,$dataRequest.EndUtc)
+}
+else { Write-Host ('Time window         : Last {0} day(s)' -f $SinceDays) }
 Write-Host ('Pending reboot     : {0}' -f $pendingReboot.Status)
 Write-Host ('Confirmed failures : {0} group(s), {1} event(s)' -f $failureGroups.Count, $eventInventory.TotalFailures)
 if ($null -eq $recentUpdates.Error) {

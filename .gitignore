@@ -20,6 +20,11 @@ reports/
 reports-test/
 WindowsDiagnosticsReport-*.txt
 WindowsDiagnosticsReport-*.md
+WindowsDiagnosticsSnapshot-*.json
+WindowsDiagnosticsComparison-*.txt
+WindowsDiagnosticsComparison-*.md
+WindowsDiagnosticsIncident-*.txt
+WindowsDiagnosticsIncident-*.md
 
 # Test and coverage output
 coverage/

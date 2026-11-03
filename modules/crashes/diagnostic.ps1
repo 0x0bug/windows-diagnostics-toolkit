@@ -13,6 +13,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 . $PSScriptRoot\..\..\scripts\report-common.ps1
+. $PSScriptRoot\..\..\scripts\diagnostic-data.ps1
 
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
@@ -399,6 +400,12 @@ $now = Get-Date
 $nowUtc = ([datetimeoffset]$now).UtcDateTime
 $startTime = $now.AddDays(-1 * $SinceDays)
 $cutoffUtc = ([datetimeoffset]$startTime).UtcDateTime
+$dataRequest = Get-WdtDataRequest
+if ($dataRequest.Enabled -and $null -ne $dataRequest.StartUtc) {
+    $startTime = ([datetimeoffset]$dataRequest.StartUtc).UtcDateTime
+    $now = ([datetimeoffset]$dataRequest.EndUtc).UtcDateTime
+    $cutoffUtc = $startTime
+}
 
 # Event 1000 is the application crash; WER 1001 supplies supporting report data.
 # https://learn.microsoft.com/en-us/troubleshoot/windows-server/performance/troubleshoot-application-service-crashing-behavior
@@ -427,6 +434,33 @@ foreach ($item in @($reliability.Records)) {
     if ($null -ne $record) { [void]$records.Add($record) }
 }
 
+if ($dataRequest.Enabled) {
+    $dataSources = New-Object 'System.Collections.Generic.List[object]'
+    $dataFacts = New-Object 'System.Collections.Generic.List[object]'
+    $dataEvidence = New-Object 'System.Collections.Generic.List[object]'
+    $sourceIndex=0; $recordIndex=0
+    $dataInputs = @($sources) + @([pscustomobject]@{Name='Reliability'; Result=$reliability})
+    foreach ($inputSource in $dataInputs) {
+        $sourceIndex++; $sourceId = 'crash-source-' + $sourceIndex
+        $limit = if ($inputSource.Name -eq 'Reliability') { $MaxEvents * 4 } else { $MaxEvents }
+        $availability = Get-WdtDataAvailability $inputSource.Result.Error @($inputSource.Result.Records).Count $limit
+        $dataSources.Add((New-WdtDataSource -Id $sourceId -Kind History -Scope $inputSource.Name -Availability $availability -QueryComplete ($availability -eq 'Available') -Truncated ($availability -eq 'Partial') -Limit $limit -StartUtc ([datetimeoffset]$startTime) -EndUtc ([datetimeoffset]$now) -Error $inputSource.Result.Error))
+        foreach ($raw in @($inputSource.Result.Records)) {
+            $origin = if ($inputSource.Name -eq 'Reliability') { 'Reliability' } else { 'EventLog' }
+            $record = ConvertTo-CrashRecord $raw $origin
+            if ($null -eq $record -or -not (Test-WdtDataInWindow $record.TimeCreated ([datetimeoffset]$startTime) ([datetimeoffset]$now))) { continue }
+            $recordIndex++; $evidenceId = 'e' + $recordIndex
+            $time = Get-WdtDataTimestamp $record.TimeCreated
+            $originalTime = if ($origin -eq 'EventLog') { Get-WdtDataTimestamp $raw.TimeCreated } else { Get-WdtDataTimestamp $raw.TimeGenerated }
+            $eventId = if ($null -ne $raw.Id) { [int]$raw.Id } elseif ($null -ne $raw.EventIdentifier) { [int]$raw.EventIdentifier } else { $null }
+            $provider = if ($null -ne $raw.ProviderName) { [string]$raw.ProviderName } else { [string]$raw.SourceName }
+            $dataEvidence.Add((New-WdtDataEvidence -Id $evidenceId -SourceId $sourceId -TimestampUtc $time.Utc -TimePrecision $time.Precision -OriginalOffset $originalTime.Offset -LogName ([string]$raw.LogName) -Provider $provider -EventId $eventId -RecordId ([string]$raw.RecordId) -ReportId $record.ReportId -Kind $record.Kind -Component $record.Component -FailureCode $record.FailureCode -Message (ConvertTo-WdtDataMessage $record.Evidence)))
+            $dataFacts.Add((New-WdtDataFact -Id ('f' + $recordIndex) -Type CrashObservation -Key ('{0}|{1}|{2}' -f $record.Component.ToLowerInvariant(),$record.Kind,$record.FailureCode) -Values @{Component=$record.Component; Kind=$record.Kind; FailureCode=$record.FailureCode} -Comparison Windowed -SourceIds @($sourceId) -EvidenceIds @($evidenceId)))
+        }
+    }
+    Write-WdtDiagnosticData (New-WdtDiagnosticData -ModuleId Crashes -WindowStartUtc ([datetimeoffset]$startTime) -WindowEndUtc ([datetimeoffset]$now) -Sources @($dataSources.ToArray()) -Facts @($dataFacts.ToArray()) -Evidence @($dataEvidence.ToArray()))
+}
+
 $incidents = @(Merge-DuplicateCrashRecords @($records.ToArray()) $cutoffUtc)
 $groups = @(Group-CrashRecords $incidents)
 $applicationGroups = @($groups | Where-Object { $_.Kind -in @('Crash', 'Hang') })
@@ -438,7 +472,10 @@ if ($unavailableCrashEventSources.Count -eq $sources.Count -and $null -ne $relia
 }
 
 Write-Section 'Summary'
-Write-Host ('Time window         : Last {0} day(s)' -f $SinceDays)
+if ($dataRequest.Enabled -and $null -ne $dataRequest.StartUtc) {
+    Write-Host ('Time window [UTC)   : {0} / {1}' -f $dataRequest.StartUtc,$dataRequest.EndUtc)
+}
+else { Write-Host ('Time window         : Last {0} day(s)' -f $SinceDays) }
 Write-Host ('Event limit         : {0} per source' -f $MaxEvents)
 Write-Host ('Dump metadata limit : {0}' -f $MaxDumpFiles)
 Write-Host ('Normalized incidents: {0}' -f $incidents.Count)

@@ -4,6 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 
 . $PSScriptRoot\..\..\scripts\report-common.ps1
+. $PSScriptRoot\..\..\scripts\diagnostic-data.ps1
 
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
@@ -74,6 +75,14 @@ Write-Host 'Windows Diagnostics Toolkit - System Information'
 Write-Host 'Mode: read-only'
 
 $os = Get-CimData -ClassName 'Win32_OperatingSystem'
+$dataRequest = Get-WdtDataRequest
+if ($dataRequest.Enabled) {
+    $available = if ($null -ne $os) { 'Available' } else { 'Unavailable' }
+    $knownVersion = $null -ne $os -and -not [string]::IsNullOrWhiteSpace([string]$os.Version) -and -not [string]::IsNullOrWhiteSpace([string]$os.BuildNumber)
+    $source = New-WdtDataSource -Id 'os' -Kind Configuration -Scope 'Win32_OperatingSystem.Version.BuildNumber' -Availability $available -QueryComplete ($null -ne $os) -Coverage CurrentState
+    $fact = New-WdtDataFact -Id f1 -Type OsVersion -Key 'windows-version' -ValueState $(if ($knownVersion) { 'Known' } else { 'Unknown' }) -Values @{Version=$(if ($knownVersion) {[string]$os.Version} else {$null}); Build=$(if ($knownVersion) {[string]$os.BuildNumber} else {$null})} -Comparison Configuration -SourceIds @('os')
+    Write-WdtDiagnosticData (New-WdtDiagnosticData -ModuleId System -Sources @($source) -Facts @($fact))
+}
 $computer = Get-CimData -ClassName 'Win32_ComputerSystem'
 $processor = Get-CimData -ClassName 'Win32_Processor' | Select-Object -First 1
 $gpuList = Get-CimData -ClassName 'Win32_VideoController'

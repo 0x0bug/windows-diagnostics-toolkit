@@ -71,6 +71,17 @@ try {
     Assert-True -Condition ($combinedContent -match '<IP-[0-9]+>') -Message 'Privacy report is missing an IP token.'
     Assert-True -Condition ($combinedContent -match 'www\.microsoft\.com') -Message 'Privacy Mode unexpectedly removed the DNS test name.'
 
+    $snapshotDirectory=Join-Path $outputDirectory 'snapshot'
+    & (Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1') -System -SaveSnapshot -PrivacyMode -ExportMarkdown -OutputDirectory $snapshotDirectory *> $null
+    $snapshotFile=@(Get-ChildItem -LiteralPath $snapshotDirectory -Filter 'WindowsDiagnosticsSnapshot-*.json' -File)
+    Assert-True ($snapshotFile.Count -eq 1) 'Privacy snapshot was not created.'
+    $snapshotJson=Get-Content -LiteralPath $snapshotFile[0].FullName -Raw
+    Assert-True ($snapshotJson -match '"PrivacyMode":\s*true') 'Snapshot did not retain its privacy policy.'
+    Assert-True ($snapshotJson -notmatch 'LiteralMap|RegexRules|@@WDT_DATA@@') 'Snapshot serialized private context or machine framing.'
+    Assert-True (-not (Test-ContainsLiteral $snapshotJson $env:USERPROFILE)) 'Snapshot leaked the user profile.'
+    & (Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1') -BeforeSnapshot $snapshotFile[0].FullName -AfterSnapshot $snapshotFile[0].FullName -OutputDirectory $snapshotDirectory *> $null
+    $comparison=Get-Content -LiteralPath @(Get-ChildItem -LiteralPath $snapshotDirectory -Filter 'WindowsDiagnosticsComparison-*.txt')[0].FullName -Raw
+    Assert-True ($comparison -match 'Privacy mode\s+: True') 'Offline comparison did not inherit input privacy.'
     Write-Host 'Privacy mode smoke test passed.'
 }
 finally {

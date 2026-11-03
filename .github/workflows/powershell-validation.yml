@@ -33,9 +33,41 @@ jobs:
         shell: powershell
         run: .\tests\report-common.tests.ps1
 
+      - name: Test diagnostic data with PowerShell 7
+        shell: pwsh
+        run: .\tests\diagnostic-data.tests.ps1
+
+      - name: Test diagnostic data with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\diagnostic-data.tests.ps1
+
       - name: Test Privacy Mode with PowerShell 7
         shell: pwsh
         run: .\tests\privacy-mode.tests.ps1
+
+      - name: Test snapshots with PowerShell 7
+        shell: pwsh
+        run: .\tests\snapshot.tests.ps1
+
+      - name: Test snapshots with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\snapshot.tests.ps1
+
+      - name: Test snapshot comparison with PowerShell 7
+        shell: pwsh
+        run: .\tests\snapshot-compare.tests.ps1
+
+      - name: Test snapshot comparison with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\snapshot-compare.tests.ps1
+
+      - name: Test incident investigation with PowerShell 7
+        shell: pwsh
+        run: .\tests\incident.tests.ps1
+
+      - name: Test incident investigation with Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\incident.tests.ps1
 
       - name: Test Privacy Mode with Windows PowerShell 5.1
         shell: powershell
