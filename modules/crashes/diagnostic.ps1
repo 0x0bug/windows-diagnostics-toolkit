@@ -230,7 +230,8 @@ function ConvertTo-CrashRecord {
         $component = $matches['App']
     }
     if ($component -match '[\\/]') {
-        $leaf = Split-Path -LiteralPath $component -Leaf
+        $separatorIndex = [Math]::Max($component.LastIndexOf('/'), $component.LastIndexOf('\'))
+        $leaf = if ($separatorIndex -ge 0) { $component.Substring($separatorIndex + 1) } else { $component }
         if (-not [string]::IsNullOrWhiteSpace($leaf)) { $component = $leaf }
     }
     $component = (($component -replace '[\r\n]+', ' ') -replace '\s{2,}', ' ').Trim().Trim('"')

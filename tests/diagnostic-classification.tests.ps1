@@ -360,6 +360,9 @@ Assert-True (-not ($serviceInventoryUnavailableText -match '"Severity":"ERROR"')
 Import-TestFunctions (Join-Path $repositoryRoot 'modules\network\diagnostic.ps1') @('Get-NetworkReachabilityClassification','Test-TcpEndpointConnection')
 Assert-Equal 'Reachable' (Get-NetworkReachabilityClassification $true 'Unavailable' 'Resolved: 1.2.3.4' 'Reachable' $true) 'Unavailable route inventory must not override working DNS/TCP.'
 Assert-Equal 'Unreachable' (Get-NetworkReachabilityClassification $true 'Absent' 'Failed: fixture' 'Unreachable: fixture' $true) 'Confirmed absent route plus failed probes must be unreachable.'
+Assert-Equal 'Indeterminate' (Get-NetworkReachabilityClassification $false 'Present' 'Resolved: 192.0.2.9' 'Indeterminate: timeout' $true 'Unavailable') 'Unavailable adapter inventory and a confirmed route must not prove a connectivity failure.'
+Assert-Equal 'BlockedOrFiltered' (Get-NetworkReachabilityClassification $false 'Present' 'Resolved: 192.0.2.9' 'BlockedOrFiltered: fixture' $true 'Unavailable') 'Unavailable adapter inventory with a route and blocked TCP must not prove a connectivity failure.'
+Assert-Equal 'Unreachable' (Get-NetworkReachabilityClassification $false 'Absent' 'Failed: fixture' 'Unreachable: fixture' $true 'Available') 'A confirmed empty adapter inventory and absent route must remain a failure.'
 Assert-Equal 'NotTested' (Get-NetworkReachabilityClassification $false 'Unavailable' 'NotTested' 'NotTested' $false) 'Disabled external tests must be explicit.'
 Assert-True ((Test-TcpEndpointConnection 'not a uri').StartsWith('Indeterminate:')) 'Invalid endpoint must be indeterminate.'
 
@@ -367,7 +370,27 @@ Import-TestFunctions (Join-Path $repositoryRoot 'modules\performance\diagnostic.
 $activity = @(Get-ProcessCpuActivity @([pscustomobject]@{Id=1;Name='old';CpuTime=10;StartTime=[datetime]'2024-01-01'}) @([pscustomobject]@{Id=1;Name='new';CpuTime=12;StartTime=[datetime]'2024-01-01'}) 1 4)
 Assert-Equal 0 $activity.Count 'Same PID with a different process name must not match.'
 
-Import-TestFunctions (Join-Path $repositoryRoot 'modules\disk\diagnostic.ps1') @('Get-StorageReliabilityData')
+Import-TestFunctions (Join-Path $repositoryRoot 'modules\disk\diagnostic.ps1') @('Get-StorageReliabilityData','Get-PhysicalDiskInfo','Get-VolumeInfo')
+$diskApiFailure = @(& {
+        function Get-Command { [CmdletBinding()] param([string]$Name); if ($Name -in @('Get-PhysicalDisk','Get-Volume')) { return [pscustomobject]@{Name=$Name} }; return $null }
+        function Get-PhysicalDisk { throw 'Fixture primary disk API unavailable.' }
+        function Get-Volume { throw 'Fixture primary volume API unavailable.' }
+        function Get-CimInstance { [CmdletBinding()] param([string]$ClassName, [string]$Filter); throw 'Fixture CIM storage API unavailable.' }
+        [pscustomobject]@{ PhysicalCount=@(Get-PhysicalDiskInfo).Count; VolumeCount=@(Get-VolumeInfo).Count }
+    })[0]
+Assert-Equal 0 $diskApiFailure.PhysicalCount 'Failed physical disk APIs must produce an empty collection, not a null record.'
+Assert-Equal 0 $diskApiFailure.VolumeCount 'Failed volume APIs must produce an empty collection, not a null record.'
+$diskUnavailableOutput = @(& {
+        function Get-Command { [CmdletBinding()] param([string]$Name); if ($Name -in @('Get-PhysicalDisk','Get-Volume')) { return [pscustomobject]@{Name=$Name} }; return $null }
+        function Get-PhysicalDisk { throw 'Fixture primary disk API unavailable.' }
+        function Get-Volume { throw 'Fixture primary volume API unavailable.' }
+        function Get-CimInstance { [CmdletBinding()] param([string]$ClassName, [string]$Filter); throw 'Fixture CIM storage API unavailable.' }
+        & (Join-Path $repositoryRoot 'modules\disk\diagnostic.ps1') 6>&1 | ForEach-Object { [string]$_ }
+    })
+$diskUnavailableText = $diskUnavailableOutput -join "`n"
+Assert-True $diskUnavailableText.Contains('Data availability: physical disk status is unavailable.') 'Physical disk source loss must retain its data availability message.'
+Assert-True $diskUnavailableText.Contains('Data availability: volume free-space data is unavailable.') 'Volume source loss must retain its data availability message.'
+Assert-True (-not $diskUnavailableText.Contains('Name         :')) 'Failed disk sources must not print a null disk record.'
 $storage = Get-StorageReliabilityData $null
 Assert-Equal $false $storage.Available 'Missing reliability counters must be unavailable.'
 Assert-True (-not ($storage.PSObject.Properties.Name -contains 'Error')) 'Unused storage Error field must not return.'

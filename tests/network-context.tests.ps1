@@ -26,6 +26,7 @@ function Test-ContainsLiteral {
 
     return $Text.IndexOf($Value, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
+. (Join-Path $PSScriptRoot 'privacy-identity.helpers.ps1')
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $networkScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\network\diagnostic.ps1'
@@ -97,15 +98,16 @@ try {
             }
 
             function Get-NetIPInterface {
-                [pscustomobject]@{ InterfaceIndex = 7; InterfaceMetric = 10 }
+                [pscustomobject]@{ InterfaceIndex = 7; AddressFamily = 'IPv6'; InterfaceMetric = 50 }
+                [pscustomobject]@{ InterfaceIndex = 7; AddressFamily = 'IPv4'; InterfaceMetric = 10 }
             }
 
             function Get-NetRoute {
                 $routes = New-Object System.Collections.Generic.List[object]
-                $routes.Add([pscustomobject]@{ DestinationPrefix = '0.0.0.0/0'; NextHop = '192.0.2.1'; InterfaceAlias = 'Fixture Ethernet'; InterfaceIndex = 7; RouteMetric = 40; State = 'Alive' })
-                $routes.Add([pscustomobject]@{ DestinationPrefix = '::/0'; NextHop = '2001:db8::1'; InterfaceAlias = 'Fixture Ethernet'; InterfaceIndex = 7; RouteMetric = 5; State = 'Alive' })
+                $routes.Add([pscustomobject]@{ DestinationPrefix = '0.0.0.0/0'; AddressFamily = 'IPv4'; NextHop = '192.0.2.1'; InterfaceAlias = 'Fixture Ethernet'; InterfaceIndex = 7; RouteMetric = 5; State = 'Alive' })
+                $routes.Add([pscustomobject]@{ DestinationPrefix = '::/0'; AddressFamily = 'IPv6'; NextHop = '2001:db8::1'; InterfaceAlias = 'Fixture Ethernet'; InterfaceIndex = 7; RouteMetric = 5; State = 'Alive' })
                 foreach ($number in 1..33) {
-                    $routes.Add([pscustomobject]@{ DestinationPrefix = ('10.{0}.0.0/16' -f $number); NextHop = '192.0.2.1'; InterfaceAlias = 'Fixture Ethernet'; InterfaceIndex = 7; RouteMetric = $number; State = 'Alive' })
+                    $routes.Add([pscustomobject]@{ DestinationPrefix = ('10.{0}.0.0/16' -f $number); AddressFamily = 'IPv4'; NextHop = '192.0.2.1'; InterfaceAlias = 'Fixture Ethernet'; InterfaceIndex = 7; RouteMetric = $number; State = 'Alive' })
                 }
 
                 return $routes.ToArray()
@@ -158,6 +160,32 @@ try {
             $env:WDT_FINDING_PROTOCOL = '1'
             & $networkScript -NoExternalNetworkTests 6>&1 | ForEach-Object { [string]$_ }
         })
+
+    $partialAdapterOutput = @(& {
+            function Get-Command { [CmdletBinding()] param([string]$Name); return [pscustomobject]@{ Name=$Name } }
+            function Test-Path { [CmdletBinding()] param([string]$LiteralPath, [string]$PathType); return $false }
+            function Get-NetAdapter { [pscustomobject]@{ Name='Fixture adapter'; InterfaceDescription='Synthetic'; Status='Up'; ifIndex=7 } }
+            function Get-NetIPConfiguration { throw 'Fixture IP configuration unavailable.' }
+            function Get-NetIPInterface { return @() }
+            function Get-NetRoute { [pscustomobject]@{ DestinationPrefix='0.0.0.0/0'; AddressFamily='IPv4'; NextHop='192.0.2.1'; InterfaceAlias='Fixture adapter'; InterfaceIndex=7; RouteMetric=1; State='Alive' } }
+            function Get-CimInstance { [CmdletBinding()] param([string]$ClassName, [string]$Filter); throw 'Fixture CIM adapter fallback unavailable.' }
+            function Get-ItemProperty { throw 'Fixture proxy setting unavailable.' }
+            $env:WDT_FINDING_PROTOCOL = '1'
+            & $networkScript -NoExternalNetworkTests 6>&1 | ForEach-Object { [string]$_ }
+        })
+
+    $emptyAdapterOutput = @(& {
+            function Get-Command { [CmdletBinding()] param([string]$Name); return [pscustomobject]@{ Name=$Name } }
+            function Test-Path { [CmdletBinding()] param([string]$LiteralPath, [string]$PathType); return $false }
+            function Get-NetAdapter { return @() }
+            function Get-NetIPConfiguration { throw 'Must not be called for an empty adapter inventory.' }
+            function Get-NetIPInterface { return @() }
+            function Get-NetRoute { return @() }
+            function Get-CimInstance { [CmdletBinding()] param([string]$ClassName, [string]$Filter); throw 'Unexpected CIM access.' }
+            function Get-ItemProperty { throw 'Fixture proxy setting unavailable.' }
+            $env:WDT_FINDING_PROTOCOL = '1'
+            & $networkScript -NoExternalNetworkTests 6>&1 | ForEach-Object { [string]$_ }
+        })
 }
 finally {
     $env:WDT_FINDING_PROTOCOL = $previousProtocolMode
@@ -166,7 +194,9 @@ finally {
 $fixtureText = $fixtureOutput -join "`n"
 $destinations = @([System.Text.RegularExpressions.Regex]::Matches($fixtureText, '(?m)^Destination\s+:\s*(.+)$') | ForEach-Object { $_.Groups[1].Value })
 Assert-True -Condition ($destinations.Count -eq 30) -Message 'The route output must contain no more than 30 routes.'
-Assert-True -Condition ($destinations[0] -eq '::/0' -and $destinations[1] -eq '0.0.0.0/0') -Message 'Default routes must be listed before non-default routes and sorted by effective metric.'
+Assert-True -Condition ($destinations[0] -eq '0.0.0.0/0' -and $destinations[1] -eq '::/0') -Message 'Default routes must be listed before non-default routes and sorted by effective metric.'
+$defaultMetricLines = @([System.Text.RegularExpressions.Regex]::Matches($fixtureText, '(?s)Type\s+: Default.*?Effective metric\s+: (\d+)') | ForEach-Object { [int]$_.Groups[1].Value })
+Assert-True -Condition ($defaultMetricLines.Count -eq 2 -and $defaultMetricLines[0] -eq 15 -and $defaultMetricLines[1] -eq 55) -Message 'IPv4 and IPv6 interface metrics must be joined by interface and family, independent of input order.'
 foreach ($sensitiveValue in @('fixtureuser', 'fixturepassword', 'fixturetoken')) {
     Assert-True -Condition (-not (Test-ContainsLiteral -Text $fixtureText -Value $sensitiveValue)) -Message ("Proxy credential or sensitive query value leaked: {0}" -f $sensitiveValue)
 }
@@ -181,6 +211,18 @@ Assert-True -Condition $unavailableText.Contains('Overall reachability: NotTeste
 foreach ($probeLabel in @('DNS /', 'TCP HTTPS /', 'Optional ICMP /')) {
     Assert-True -Condition (-not $unavailableText.Contains($probeLabel)) -Message ("Disabled external tests unexpectedly ran probe: {0}" -f $probeLabel)
 }
+
+$partialAdapterText = $partialAdapterOutput -join "`n"
+Assert-True -Condition $partialAdapterText.Contains('NETWORK_ADAPTER_CONFIGURATION_UNAVAILABLE') -Message 'An active adapter with an unreadable IP configuration must report incomplete inventory.'
+Assert-True -Condition $partialAdapterText.Contains('Default route state: Present') -Message 'Partial adapter inventory fixture must retain the confirmed default route.'
+foreach ($falseFailure in @('NETWORK_NO_ACTIVE_ADAPTER','NETWORK_NO_GATEWAY','NETWORK_CONNECTIVITY_UNREACHABLE')) {
+    Assert-True -Condition (-not $partialAdapterText.Contains($falseFailure)) -Message ("Partial adapter inventory must not assert '{0}'." -f $falseFailure)
+}
+Assert-True -Condition $partialAdapterText.Contains('Overall reachability: NotTested') -Message 'Disabled external tests must remain disabled with a partial adapter inventory.'
+
+$emptyAdapterText = $emptyAdapterOutput -join "`n"
+Assert-True -Condition $emptyAdapterText.Contains('NETWORK_NO_ACTIVE_ADAPTER') -Message 'A successfully queried empty adapter inventory must still report no active adapter.'
+Assert-True -Condition $emptyAdapterText.Contains('NETWORK_NO_GATEWAY') -Message 'A successfully queried empty adapter inventory must still report no gateway.'
 
 $standaloneOutput = @(& $networkScript -DnsTestName '' -InternetTestHost '' 6>&1 | ForEach-Object { [string]$_ })
 foreach ($section in @('Active Network Adapters', 'Active Routes (Default First)', 'WinINET Proxy', 'WinHTTP Proxy')) {
@@ -213,10 +255,13 @@ try {
     Assert-True -Condition ($textContent -match '(?m)^Selected\s+: Network Check\r?$') -Message 'Network runner selected the wrong module.'
     Assert-True -Condition $textContent.Contains('== Network Check ==') -Message 'TXT report is missing the Network Check section.'
     Assert-True -Condition $markdownContent.Contains('## Network Check') -Message 'Markdown report is missing the Network Check section.'
-    Assert-True -Condition ($textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal) -lt $textContent.IndexOf('== Network Check ==', [System.StringComparison]::Ordinal)) -Message 'TXT findings summary must precede network details.'
-    Assert-True -Condition ($markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal) -lt $markdownContent.IndexOf('## Network Check', [System.StringComparison]::Ordinal)) -Message 'Markdown findings summary must precede network details.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:COMPUTERNAME)) -Message 'Privacy Mode leaked the computer name from network diagnostics.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERNAME)) -Message 'Privacy Mode leaked the user name from network diagnostics.'
+    $textSummaryIndex = $textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal)
+    $textDetailsIndex = $textContent.IndexOf('== Network Check ==', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($textSummaryIndex -ge 0 -and $textDetailsIndex -ge 0 -and $textSummaryIndex -lt $textDetailsIndex) -Message 'TXT findings summary must exist before network details.'
+    $markdownSummaryIndex = $markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal)
+    $markdownDetailsIndex = $markdownContent.IndexOf('## Network Check', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($markdownSummaryIndex -ge 0 -and $markdownDetailsIndex -ge 0 -and $markdownSummaryIndex -lt $markdownDetailsIndex) -Message 'Markdown findings summary must exist before network details.'
+    Assert-True -Condition (-not (Test-IdentityFieldLeak -Text $combinedContent -ComputerName $env:COMPUTERNAME -UserName $env:USERNAME)) -Message 'Privacy Mode leaked a computer or user identity field from network diagnostics.'
     Assert-True -Condition ($combinedContent -notmatch '@@WDT_FINDING@@') -Message 'Network report leaked an internal finding marker.'
 
     Write-Host 'Network context tests passed.'

@@ -38,6 +38,7 @@ function Test-ContainsLiteral {
 
     return $Text.IndexOf($Value, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
+. (Join-Path $PSScriptRoot 'privacy-identity.helpers.ps1')
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $performanceScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\performance\diagnostic.ps1'
@@ -48,6 +49,33 @@ foreach ($forbiddenPattern in @('\.Path\b', '\.Owner\b', 'CommandLine')) {
 }
 
 . $performanceScript
+
+# Exercise the real snapshot entry point with the two legitimate empty process cases.
+$originalFunctions = @{}
+foreach ($functionName in @('Get-MemorySnapshot','Get-CpuSnapshot','Get-PagefileSnapshot','Get-ProcessSnapshot','Get-ProcessCpuActivity')) {
+    $originalFunctions[$functionName] = (Get-Command $functionName -CommandType Function).ScriptBlock
+}
+try {
+    function Get-MemorySnapshot { [pscustomobject]@{ TotalBytes=1GB; AvailableBytes=512MB; AvailablePercent=50; Error=$null } }
+    function Get-CpuSnapshot { [pscustomobject]@{ Percent=10; Samples=@(10,10,10); Error=$null } }
+    function Get-PagefileSnapshot { [pscustomobject]@{ AllocatedMegabytes=100; UsedMegabytes=10; UsedPercent=10; Error=$null } }
+    function Get-ProcessSnapshot { [pscustomobject]@{ Processes=@(); Error='Fixture process inventory unavailable.' } }
+    function Get-ProcessCpuActivity { return @() }
+    $emptyInventoryOutput = @(Invoke-PerformanceSnapshot -ProcessLimit 5 -MemoryWarningPercent 15 -CpuWarningPercent 95 6>&1 | ForEach-Object { [string]$_ })
+    $emptyInventoryText = $emptyInventoryOutput -join "`n"
+    Assert-True -Condition $emptyInventoryText.Contains('== Memory ==') -Message 'Empty process inventory must preserve the Memory section.'
+    Assert-True -Condition $emptyInventoryText.Contains('== Currently Most Active Processes ==') -Message 'Empty process inventory must preserve the CPU activity section.'
+    Assert-True -Condition $emptyInventoryText.Contains('PERFORMANCE_PROCESS_LIST_UNAVAILABLE') -Message 'Empty process inventory must reach the unavailable process finding.'
+
+    function Get-ProcessSnapshot { [pscustomobject]@{ Processes=@([pscustomobject]@{Id=1;Name='fixture';WorkingSet=1;CpuTime=1;StartTime=$null}); Error=$null } }
+    $emptyActivityOutput = @(Invoke-PerformanceSnapshot -ProcessLimit 5 -MemoryWarningPercent 15 -CpuWarningPercent 95 6>&1 | ForEach-Object { [string]$_ })
+    $emptyActivityText = $emptyActivityOutput -join "`n"
+    Assert-True -Condition $emptyActivityText.Contains('== Top Processes by CPU Time ==') -Message 'Empty CPU activity must preserve the cumulative CPU section.'
+    Assert-True -Condition $emptyActivityText.Contains('No process values are available.') -Message 'Empty CPU activity must be reported without aborting the snapshot.'
+}
+finally {
+    foreach ($functionName in $originalFunctions.Keys) { Set-Item -Path ("Function:{0}" -f $functionName) -Value $originalFunctions[$functionName] }
+}
 
 $previousProtocolMode = $env:WDT_FINDING_PROTOCOL
 try {
@@ -101,10 +129,13 @@ try {
     Assert-True -Condition ($textContent -match '(?m)^Selected\s+: Performance Snapshot\r?$') -Message 'Performance runner selected the wrong module.'
     Assert-True -Condition $textContent.Contains('== Performance Snapshot ==') -Message 'TXT report is missing the Performance Snapshot section.'
     Assert-True -Condition $markdownContent.Contains('## Performance Snapshot') -Message 'Markdown report is missing the Performance Snapshot section.'
-    Assert-True -Condition ($textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal) -lt $textContent.IndexOf('== Performance Snapshot ==', [System.StringComparison]::Ordinal)) -Message 'TXT findings summary must precede Performance Snapshot details.'
-    Assert-True -Condition ($markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal) -lt $markdownContent.IndexOf('## Performance Snapshot', [System.StringComparison]::Ordinal)) -Message 'Markdown findings summary must precede Performance Snapshot details.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:COMPUTERNAME)) -Message 'Privacy Mode leaked the computer name from Performance Snapshot.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERNAME)) -Message 'Privacy Mode leaked the user name from Performance Snapshot.'
+    $textSummaryIndex = $textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal)
+    $textDetailsIndex = $textContent.IndexOf('== Performance Snapshot ==', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($textSummaryIndex -ge 0 -and $textDetailsIndex -ge 0 -and $textSummaryIndex -lt $textDetailsIndex) -Message 'TXT findings summary must exist before Performance Snapshot details.'
+    $markdownSummaryIndex = $markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal)
+    $markdownDetailsIndex = $markdownContent.IndexOf('## Performance Snapshot', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($markdownSummaryIndex -ge 0 -and $markdownDetailsIndex -ge 0 -and $markdownSummaryIndex -lt $markdownDetailsIndex) -Message 'Markdown findings summary must exist before Performance Snapshot details.'
+    Assert-True -Condition (-not (Test-IdentityFieldLeak -Text $combinedContent -ComputerName $env:COMPUTERNAME -UserName $env:USERNAME)) -Message 'Privacy Mode leaked a computer or user identity field from Performance Snapshot.'
     Assert-True -Condition ($combinedContent -notmatch '@@WDT_FINDING@@') -Message 'Performance report leaked an internal finding marker.'
 
     Write-Host 'Performance snapshot tests passed.'

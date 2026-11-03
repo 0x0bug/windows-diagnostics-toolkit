@@ -26,7 +26,8 @@ $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
 $semanticPrereleasePattern = '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*$'
 Assert-True ($version -match $semanticPrereleasePattern) 'VERSION is not a valid semantic prerelease version.'
 Assert-Equal '0.1.0-beta' $version 'Unexpected release version.'
-$distDirectory = Join-Path -Path $repositoryRoot -ChildPath 'dist'
+$isolatedRepositoryRoot = Join-Path -Path $temporaryRoot -ChildPath 'repository'
+$distDirectory = Join-Path -Path $isolatedRepositoryRoot -ChildPath 'dist'
 $archiveName = "windows-diagnostics-toolkit-v$version.zip"
 $archivePath = Join-Path -Path $distDirectory -ChildPath $archiveName
 $checksumPath = "$archivePath.sha256"
@@ -42,6 +43,25 @@ foreach ($scriptPath in @($buildScript, $bootstrapScript)) {
 
 New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 try {
+    # The build script writes to the repository containing itself. Stage its release
+    # inputs in this unique temporary checkout so the real dist directory is untouched.
+    foreach ($relativePath in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'modules', 'scripts', 'README.md', 'LICENSE', 'SECURITY.md', 'docs\usage.md', 'docs\report-example.md')) {
+        $sourcePath = Join-Path -Path $repositoryRoot -ChildPath $relativePath
+        $destinationPath = Join-Path -Path $isolatedRepositoryRoot -ChildPath $relativePath
+        $destinationParent = Split-Path -Parent $destinationPath
+        if (-not (Test-Path -LiteralPath $destinationParent -PathType Container)) {
+            New-Item -ItemType Directory -Path $destinationParent -Force | Out-Null
+        }
+        Copy-Item -LiteralPath $sourcePath -Destination $destinationPath -Recurse -Force
+    }
+    $buildScript = Join-Path -Path $isolatedRepositoryRoot -ChildPath 'scripts\build-release.ps1'
+    $bootstrapScript = Join-Path -Path $isolatedRepositoryRoot -ChildPath 'scripts\bootstrap\run.ps1'
+    $isolatedSentinelDirectory = Join-Path -Path $distDirectory -ChildPath 'preexisting-sentinel'
+    New-Item -ItemType Directory -Path $isolatedSentinelDirectory -Force | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $isolatedSentinelDirectory 'unrelated.zip'), 'sentinel zip')
+    [System.IO.File]::WriteAllText((Join-Path $isolatedSentinelDirectory 'unrelated.zip.sha256'), 'sentinel checksum')
+    [System.IO.File]::WriteAllText((Join-Path $isolatedSentinelDirectory 'keep.txt'), 'sentinel other dist file')
+
     $sourceReportDirectory = Join-Path -Path $temporaryRoot -ChildPath 'source-report'
     & $powerShellPath -NoProfile -ExecutionPolicy Bypass -File $entrypoint -System -ExportMarkdown -OutputDirectory $sourceReportDirectory *> $null
     Assert-Equal 0 $LASTEXITCODE 'Source checkout System report failed.'
@@ -57,6 +77,9 @@ try {
     & $buildScript *> $null
     Assert-True (Test-Path -LiteralPath $archivePath -PathType Leaf) 'Release build did not create the expected ZIP.'
     Assert-True (Test-Path -LiteralPath $checksumPath -PathType Leaf) 'Release build did not create the checksum file.'
+    Assert-Equal 'sentinel zip' ([System.IO.File]::ReadAllText((Join-Path $isolatedSentinelDirectory 'unrelated.zip'))) 'Release build changed a preexisting unrelated ZIP.'
+    Assert-Equal 'sentinel checksum' ([System.IO.File]::ReadAllText((Join-Path $isolatedSentinelDirectory 'unrelated.zip.sha256'))) 'Release build changed a preexisting unrelated checksum.'
+    Assert-Equal 'sentinel other dist file' ([System.IO.File]::ReadAllText((Join-Path $isolatedSentinelDirectory 'keep.txt'))) 'Release build changed another preexisting dist file.'
 
     $checksumText = Get-Content -LiteralPath $checksumPath -Raw
     $checksumMatch = [regex]::Match($checksumText, '^(?<Hash>[0-9a-f]{64})  (?<Name>[^\r\n]+)\r?\n?$')
@@ -254,7 +277,12 @@ finally {
         }
     }
     if (Test-Path -LiteralPath $temporaryRoot) {
-        Remove-Item -LiteralPath $temporaryRoot -Recurse -Force
+        $resolvedTemporaryRoot = (Resolve-Path -LiteralPath $temporaryRoot).Path
+        $systemTemporaryRoot = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+        if (-not $resolvedTemporaryRoot.StartsWith($systemTemporaryRoot, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a path outside the temporary root: $resolvedTemporaryRoot"
+        }
+        Remove-Item -LiteralPath $resolvedTemporaryRoot -Recurse -Force
     }
 }
 

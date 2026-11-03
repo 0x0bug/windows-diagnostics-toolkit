@@ -26,6 +26,7 @@ function Test-ContainsLiteral {
 
     return $Text.IndexOf($Value, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
+. (Join-Path $PSScriptRoot 'privacy-identity.helpers.ps1')
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $timeScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\time\diagnostic.ps1'
@@ -149,10 +150,13 @@ try {
     Assert-True -Condition ($textContent -match '(?m)^Selected\s+: Time Sync Diagnostics\r?$') -Message 'Time runner selected the wrong module.'
     Assert-True -Condition $textContent.Contains('== Time Sync Diagnostics ==') -Message 'TXT report is missing the Time Sync Diagnostics section.'
     Assert-True -Condition $markdownContent.Contains('## Time Sync Diagnostics') -Message 'Markdown report is missing the Time Sync Diagnostics section.'
-    Assert-True -Condition ($textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal) -lt $textContent.IndexOf('== Time Sync Diagnostics ==', [System.StringComparison]::Ordinal)) -Message 'TXT findings summary must precede time details.'
-    Assert-True -Condition ($markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal) -lt $markdownContent.IndexOf('## Time Sync Diagnostics', [System.StringComparison]::Ordinal)) -Message 'Markdown findings summary must precede time details.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:COMPUTERNAME)) -Message 'Privacy Mode leaked the computer name from time diagnostics.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERNAME)) -Message 'Privacy Mode leaked the user name from time diagnostics.'
+    $textSummaryIndex = $textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal)
+    $textDetailsIndex = $textContent.IndexOf('== Time Sync Diagnostics ==', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($textSummaryIndex -ge 0 -and $textDetailsIndex -ge 0 -and $textSummaryIndex -lt $textDetailsIndex) -Message 'TXT findings summary must exist before time details.'
+    $markdownSummaryIndex = $markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal)
+    $markdownDetailsIndex = $markdownContent.IndexOf('## Time Sync Diagnostics', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($markdownSummaryIndex -ge 0 -and $markdownDetailsIndex -ge 0 -and $markdownSummaryIndex -lt $markdownDetailsIndex) -Message 'Markdown findings summary must exist before time details.'
+    Assert-True -Condition (-not (Test-IdentityFieldLeak -Text $combinedContent -ComputerName $env:COMPUTERNAME -UserName $env:USERNAME)) -Message 'Privacy Mode leaked a computer or user identity field from time diagnostics.'
     Assert-True -Condition ($combinedContent -notmatch '@@WDT_FINDING@@') -Message 'Time report leaked an internal finding marker.'
 
     Write-Host 'Time sync diagnostics tests passed.'

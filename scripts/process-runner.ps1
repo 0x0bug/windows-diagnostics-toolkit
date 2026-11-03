@@ -503,13 +503,17 @@ function Invoke-DiagnosticScript {
         foreach ($streamState in @($stdoutState, $stderrState)) {
             if (-not [string]::IsNullOrWhiteSpace([string]$streamState.Error)) { $result.ErrorLines += [string]$streamState.Error }
         }
-        if (-not $stdoutState.Complete -or -not $stderrState.Complete) {
+        $stdoutCaptureFailed = -not [string]::IsNullOrWhiteSpace([string]$stdoutState.Error)
+        $stderrCaptureFailed = -not [string]::IsNullOrWhiteSpace([string]$stderrState.Error)
+        if (-not $stdoutState.Complete -or -not $stderrState.Complete -or $stdoutCaptureFailed -or $stderrCaptureFailed) {
             $result.OutputComplete = $false
             $incompleteStreams = @()
             if (-not $stdoutState.Complete) { $incompleteStreams += 'stdout' }
             if (-not $stderrState.Complete) { $incompleteStreams += 'stderr' }
-            $drainTimeoutSeconds = $script:WdtProcessRunnerConfig.StreamDrainTimeoutMilliseconds / 1000
-            $result.ErrorLines += ('Captured output is incomplete because stream drain did not finish within {0} seconds: {1}.' -f $drainTimeoutSeconds, ($incompleteStreams -join ', '))
+            if (-not $stdoutState.Complete -or -not $stderrState.Complete) {
+                $drainTimeoutSeconds = $script:WdtProcessRunnerConfig.StreamDrainTimeoutMilliseconds / 1000
+                $result.ErrorLines += ('Captured output is incomplete because stream drain did not finish within {0} seconds: {1}.' -f $drainTimeoutSeconds, ($incompleteStreams -join ', '))
+            }
         }
     }
     catch {

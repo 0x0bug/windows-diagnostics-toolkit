@@ -576,7 +576,8 @@ function ConvertTo-WdtTuiFallbackMenuAction {
     if ($Answer -ieq 'Run') { return [pscustomobject]@{ Action = 'Select'; Index = $RunIndex } }
     if ($Answer -ieq 'Exit') { return [pscustomobject]@{ Action = 'Exit'; Index = $null } }
     if ($Answer -match '^\d+$') {
-        $index = [int]$Answer - 1
+        try { $index = [int]$Answer - 1 }
+        catch { return $null }
         if ($VisibleIndexes -contains $index) { return [pscustomobject]@{ Action = 'Select'; Index = $index } }
     }
     return $null

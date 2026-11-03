@@ -371,7 +371,8 @@ function Write-StartupEntryRows {
             Write-Host ('Source type         : {0}' -f $entry.SourceType)
             Write-Host ('Location            : {0}' -f (ConvertTo-SafeSingleLine -Value $entry.Location))
             Write-Host ('Name                : {0}' -f (ConvertTo-SafeSingleLine -Value $entry.Name))
-            Write-Host ('Startup Command Line: {0}' -f (ConvertTo-SafeSingleLine -Value $entry.Command))
+            # Keep the complete one-line command so centralized Privacy Mode can redact quoted arguments before report serialization.
+            Write-Host ('Startup Command Line: {0}' -f (ConvertTo-SafeSingleLine -Value $entry.Command -MaxLength ([int]::MaxValue)))
             Write-Host ''
         }
     }

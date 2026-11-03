@@ -27,6 +27,8 @@ function Test-ContainsLiteral {
     return $Text.IndexOf($Value, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
 
+. (Join-Path $PSScriptRoot 'privacy-identity.helpers.ps1')
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $temporaryRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
@@ -51,11 +53,18 @@ try {
     $markdownContent = Get-Content -LiteralPath $markdownReport.FullName -Raw
     $combinedContent = $textContent + "`n" + $markdownContent
 
+    $benignIdentityText = "Windows Diagnostics Toolkit`nElevation : Standard user"
+    Assert-True -Condition (-not (Test-IdentityFieldLeak -Text $benignIdentityText -ComputerName 'WINDOWS' -UserName 'User')) -Message 'Privacy identity check rejected benign product or elevation text.'
+    Assert-True -Condition (Test-IdentityFieldLeak -Text 'Computer name : WDT-IDENTITY-FIXTURE' -ComputerName 'WDT-IDENTITY-FIXTURE' -UserName 'WDT-USER-FIXTURE') -Message 'Privacy identity check did not detect a synthetic host identity leak.'
+    Assert-True -Condition (Test-IdentityFieldLeak -Text '- Computer name: `WDT-IDENTITY-FIXTURE`' -ComputerName 'WDT-IDENTITY-FIXTURE' -UserName 'WDT-USER-FIXTURE') -Message 'Privacy identity check did not detect a synthetic Markdown host identity leak.'
+    Assert-True -Condition (Test-IdentityFieldLeak -Text 'Computer name : WDT-IDENTITY-FIXTURE.example.test' -ComputerName 'WDT-IDENTITY-FIXTURE' -UserName 'WDT-USER-FIXTURE') -Message 'Privacy identity check did not detect a synthetic FQDN host identity leak.'
+    Assert-True -Condition (Test-IdentityFieldLeak -Text 'Owner : WDT-USER-FIXTURE' -ComputerName 'WDT-IDENTITY-FIXTURE' -UserName 'WDT-USER-FIXTURE') -Message 'Privacy identity check did not detect a synthetic user identity leak.'
+    Assert-True -Condition (Test-IdentityFieldLeak -Text '- User: `WDT-USER-FIXTURE`' -ComputerName 'WDT-IDENTITY-FIXTURE' -UserName 'WDT-USER-FIXTURE') -Message 'Privacy identity check did not detect a synthetic Markdown user identity leak.'
+
     Assert-True -Condition ($textContent -match '(?m)^Privacy mode\s+: enabled\r?$') -Message 'TXT report does not show enabled Privacy Mode.'
     Assert-True -Condition ($markdownContent -match '(?m)^- Privacy mode: `enabled`\r?$') -Message 'Markdown report does not show enabled Privacy Mode.'
     Assert-True -Condition ($combinedContent -notmatch '@@WDT_FINDING@@') -Message 'Privacy report leaked an internal finding marker.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:COMPUTERNAME)) -Message 'Privacy report leaked the computer name.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERNAME)) -Message 'Privacy report leaked the user name.'
+    Assert-True -Condition (-not (Test-IdentityFieldLeak -Text $combinedContent -ComputerName $env:COMPUTERNAME -UserName $env:USERNAME)) -Message 'Privacy report leaked a computer or user identity field.'
     Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERPROFILE)) -Message 'Privacy report leaked the user-profile path.'
     Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value '1.1.1.1')) -Message 'Privacy report leaked the connectivity test IP address.'
     Assert-True -Condition ($combinedContent -match '<HOST-1>') -Message 'Privacy report is missing a host token.'

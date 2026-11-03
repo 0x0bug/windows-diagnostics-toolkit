@@ -96,6 +96,8 @@ function Assert-LayoutBounds {
 $registrySnapshot = New-TestRegistrySnapshot
 $state = New-WdtTuiState -RegistrySnapshot $registrySnapshot -OutputDirectory 'C:\Reports'
 Assert-Equal 10 $registrySnapshot.Modules.Count 'Diagnostic registry count is incorrect.'
+Assert-Equal $null (ConvertTo-WdtTuiFallbackMenuAction -Answer '999999999999999999999999' -VisibleIndexes @(0..9) -RunIndex 10) 'Overflowing menu numbers must be treated as an unknown command.'
+Assert-Equal 'Select' (ConvertTo-WdtTuiFallbackMenuAction -Answer '1' -VisibleIndexes @(0..9) -RunIndex 10).Action 'Valid fallback menu numbers must still select items.'
 Assert-True ([object]::ReferenceEquals($registrySnapshot, $state.RegistrySnapshot)) 'TUI state must retain the supplied registry snapshot.'
 Assert-Equal 7 @(Get-WdtTuiSelectedModule $state).Count 'Default selection is incorrect.'
 Assert-SequenceEqual @('System', 'Security', 'Performance', 'Network', 'Time', 'Disk', 'Updates') @(Get-WdtRecommendedSelection -RegistrySnapshot $registrySnapshot) 'Recommended module order is incorrect.'

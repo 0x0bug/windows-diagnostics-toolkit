@@ -187,6 +187,65 @@ try {
     $protectedDisplay = Protect-WdtText -Text $displayText -Context $privacyContext
     Assert-True (-not $protectedDisplay.Contains('super-secret')) 'Privacy Mode leaked a startup command line.'
     Assert-True $protectedDisplay.Contains('fixture.exe --token=<REDACTED>') 'Privacy Mode did not preserve the executable while redacting the startup command secret.'
+
+    # 15. Long quoted secret arguments remain recognizable after startup display formatting and report serialization.
+    $longDoubleSecret = 'FIXTURE_SECRET_' + ('A' * 200)
+    $longSingleSecret = 'FIXTURE_SECRET_' + ('B' * 200)
+    $rawDoubleCommand = 'fixture.exe --mode=inspect --token="' + $longDoubleSecret + '"'
+    $rawSingleCommand = "fixture.exe --mode=inspect --token='" + $longSingleSecret + "'"
+    $startupReportText = @(Write-StartupEntryRows -Inventory ([pscustomobject]@{
+                Entries = @(
+                    (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'Double' -Command $rawDoubleCommand),
+                    (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'Single' -Command $rawSingleCommand),
+                    (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'Short' -Command 'fixture.exe --token="SHORT_FIXTURE_SECRET" --mode=inspect')
+                )
+                Errors = @()
+            }) -Limit 10 6>&1 | ForEach-Object { [string]$_ }) -join "`n"
+    Assert-True $startupReportText.Contains($rawDoubleCommand) 'Standalone formatting changed the raw double-quoted startup command.'
+    Assert-True $startupReportText.Contains($rawSingleCommand) 'Standalone formatting changed the raw single-quoted startup command.'
+    $entrypointPath = Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'
+    $reportTokens = $null
+    $reportParseErrors = $null
+    $reportAst = [System.Management.Automation.Language.Parser]::ParseFile($entrypointPath, [ref]$reportTokens, [ref]$reportParseErrors)
+    Assert-Equal 0 @($reportParseErrors).Count 'Entrypoint did not parse for startup privacy serialization tests.'
+    foreach ($functionName in @('Protect-WdtDiagnosticResults', 'Add-TextSection', 'Add-MarkdownSection', 'Get-WdtMarkdownFence', 'ConvertTo-MarkdownInlineText')) {
+        $definition = $reportAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $functionName }, $true)
+        Assert-True ($null -ne $definition) "Missing report privacy function: $functionName"
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+    $startupReportResult = [pscustomobject]@{
+        Title = 'Startup fixture'; Command = 'fixture'; ExitCode = 0; Status = 'Success'
+        Duration = [timespan]::Zero; Completeness = 'Complete'; OutputLines = @($startupReportText -split "`n"); ErrorLines = @(); Findings = @()
+    }
+    Protect-WdtDiagnosticResults -Results @($startupReportResult) -Context $privacyContext
+    $serializedTextLines = New-Object System.Collections.Generic.List[string]
+    $serializedMarkdownLines = New-Object System.Collections.Generic.List[string]
+    Add-TextSection -Lines $serializedTextLines -Result $startupReportResult
+    Add-MarkdownSection -Lines $serializedMarkdownLines -Result $startupReportResult
+    $serializationRoot = Join-Path $temporaryRoot ('wdt-startup-privacy-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $serializationRoot -Force | Out-Null
+    try {
+        $serializedTextPath = Join-Path $serializationRoot 'report.txt'
+        $serializedMarkdownPath = Join-Path $serializationRoot 'report.md'
+        [System.IO.File]::WriteAllLines($serializedTextPath, $serializedTextLines, [System.Text.Encoding]::UTF8)
+        [System.IO.File]::WriteAllLines($serializedMarkdownPath, $serializedMarkdownLines, [System.Text.Encoding]::UTF8)
+        foreach ($serializedPath in @($serializedTextPath, $serializedMarkdownPath)) {
+            $serializedReport = [System.IO.File]::ReadAllText($serializedPath)
+            Assert-True (-not $serializedReport.Contains($longDoubleSecret)) 'Serialized privacy-mode report leaked the long double-quoted token.'
+            Assert-True (-not $serializedReport.Contains($longSingleSecret)) 'Serialized privacy-mode report leaked the long single-quoted token.'
+            Assert-True (-not $serializedReport.Contains('FIXTURE_SECRET_')) 'Serialized privacy-mode report leaked a truncated prefix of a long quoted token.'
+            Assert-True (-not $serializedReport.Contains('SHORT_FIXTURE_SECRET')) 'Serialized privacy-mode report leaked the short token.'
+            Assert-True $serializedReport.Contains('fixture.exe') 'Privacy filtering removed useful startup command context.'
+            Assert-True $serializedReport.Contains('--mode=inspect') 'Privacy filtering removed a useful non-secret argument.'
+        }
+    }
+    finally {
+        $resolvedSerializationRoot = (Resolve-Path -LiteralPath $serializationRoot).Path
+        if (-not $resolvedSerializationRoot.StartsWith($temporaryRootPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+            throw "Refusing to remove a path outside the temporary root: $resolvedSerializationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedSerializationRoot -Recurse -Force
+    }
 }
 finally {
     if (Test-Path -LiteralPath $fixtureRoot) {

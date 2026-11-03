@@ -47,6 +47,7 @@ function Test-ContainsLiteral {
 
     return $Text.IndexOf($Value, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
+. (Join-Path $PSScriptRoot 'privacy-identity.helpers.ps1')
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $crashScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\crashes\diagnostic.ps1'
@@ -60,6 +61,10 @@ Assert-True -Condition ($scriptSource -match "MaxDumpFiles = 20") -Message 'Cras
 
 Import-TestFunctions $crashScript @('ConvertTo-CrashRecord','Merge-DuplicateCrashRecords','Group-CrashRecords','Get-CrashGroupSeverity')
 $nowUtc = ([datetimeoffset](Get-Date)).UtcDateTime
+$eventPathRecord = ConvertTo-CrashRecord ([pscustomobject]@{ ProviderName='Application Error'; Id=1000; TimeCreated=$nowUtc; Properties=@([pscustomobject]@{Value='C:\Program Files\Fixture [x]\fixture.exe'}) }) EventLog
+$reliabilityPathRecord = ConvertTo-CrashRecord ([pscustomobject]@{ SourceName='Application Hang'; EventIdentifier=1002; TimeGenerated=$nowUtc; ProductName='C:/Program Files/Fixture [x]/hung app.exe' }) Reliability
+Assert-Equal 'fixture.exe' $eventPathRecord.Component 'EventLog component paths with literal brackets and spaces must normalize to the file name.'
+Assert-Equal 'hung app.exe' $reliabilityPathRecord.Component 'Reliability component paths must normalize to the file name.'
 $cutoffUtc = $nowUtc.AddDays(-7)
 $sharedReportId = '11111111-2222-3333-4444-555555555555'
 $applicationEventRecord = ConvertTo-CrashRecord ([pscustomobject]@{
@@ -284,10 +289,13 @@ try {
     Assert-True -Condition ($textContent -match '(?m)^Selected\s+: Crash and Hang Diagnostics\r?$') -Message 'Crash runner selected the wrong module.'
     Assert-True -Condition $textContent.Contains('== Crash and Hang Diagnostics ==') -Message 'TXT report is missing the Crash and Hang Diagnostics section.'
     Assert-True -Condition $markdownContent.Contains('## Crash and Hang Diagnostics') -Message 'Markdown report is missing the Crash and Hang Diagnostics section.'
-    Assert-True -Condition ($textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal) -lt $textContent.IndexOf('== Crash and Hang Diagnostics ==', [System.StringComparison]::Ordinal)) -Message 'TXT findings summary must precede crash details.'
-    Assert-True -Condition ($markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal) -lt $markdownContent.IndexOf('## Crash and Hang Diagnostics', [System.StringComparison]::Ordinal)) -Message 'Markdown findings summary must precede crash details.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:COMPUTERNAME)) -Message 'Privacy Mode leaked the computer name from crash diagnostics.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERNAME)) -Message 'Privacy Mode leaked the user name from crash diagnostics.'
+    $textSummaryIndex = $textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal)
+    $textDetailsIndex = $textContent.IndexOf('== Crash and Hang Diagnostics ==', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($textSummaryIndex -ge 0 -and $textDetailsIndex -ge 0 -and $textSummaryIndex -lt $textDetailsIndex) -Message 'TXT findings summary must exist before crash details.'
+    $markdownSummaryIndex = $markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal)
+    $markdownDetailsIndex = $markdownContent.IndexOf('## Crash and Hang Diagnostics', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($markdownSummaryIndex -ge 0 -and $markdownDetailsIndex -ge 0 -and $markdownSummaryIndex -lt $markdownDetailsIndex) -Message 'Markdown findings summary must exist before crash details.'
+    Assert-True -Condition (-not (Test-IdentityFieldLeak -Text $combinedContent -ComputerName $env:COMPUTERNAME -UserName $env:USERNAME)) -Message 'Privacy Mode leaked a computer or user identity field from crash diagnostics.'
     Assert-True -Condition ($combinedContent -notmatch '@@WDT_FINDING@@') -Message 'Crash report leaked an internal finding marker.'
 
     Write-Host 'Crash and hang diagnostics tests passed.'

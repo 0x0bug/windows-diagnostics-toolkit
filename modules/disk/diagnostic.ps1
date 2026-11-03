@@ -78,7 +78,7 @@ function Get-PhysicalDiskInfo {
     }
     catch {
         Write-Warning "Could not read physical disks with CIM fallback. $($_.Exception.Message)"
-        return $null
+        return
     }
 }
 
@@ -159,7 +159,7 @@ function Get-VolumeInfo {
     }
     catch {
         Write-Warning "Could not read logical disks with CIM fallback. $($_.Exception.Message)"
-        return $null
+        return
     }
 }
 

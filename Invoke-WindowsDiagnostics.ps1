@@ -306,6 +306,25 @@ function Protect-WdtDiagnosticResults {
     }
 }
 
+function Get-WdtUniqueReportPaths {
+    param(
+        [Parameter(Mandatory = $true)][string]$OutputDirectory,
+        [bool]$ExportMarkdown
+    )
+
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $reportBaseName = 'WindowsDiagnosticsReport-{0}-{1}' -f $timestamp, [System.Guid]::NewGuid().ToString('N')
+        $textPath = Join-Path -Path $OutputDirectory -ChildPath ($reportBaseName + '.txt')
+        $markdownPath = Join-Path -Path $OutputDirectory -ChildPath ($reportBaseName + '.md')
+        if (Test-Path -LiteralPath $textPath) { continue }
+        if ($ExportMarkdown -and (Test-Path -LiteralPath $markdownPath)) { continue }
+        return [pscustomobject]@{ TextPath = $textPath; MarkdownPath = $markdownPath }
+    }
+
+    throw 'Could not allocate a unique report filename after 10 attempts.'
+}
+
 function Invoke-WdtReport {
     param(
         [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$ModuleDefinitions,
@@ -328,16 +347,9 @@ function Invoke-WdtReport {
         New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
     }
 
-    do {
-        $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-        $reportBaseName = "WindowsDiagnosticsReport-$timestamp"
-        $textReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.txt"
-        $markdownReportPath = Join-Path -Path $resolvedOutputDirectory -ChildPath "$reportBaseName.md"
-
-        if ((Test-Path -LiteralPath $textReportPath) -or (Test-Path -LiteralPath $markdownReportPath)) {
-            Start-Sleep -Seconds 1
-        }
-    } while ((Test-Path -LiteralPath $textReportPath) -or (Test-Path -LiteralPath $markdownReportPath))
+    $reportPaths = Get-WdtUniqueReportPaths -OutputDirectory $resolvedOutputDirectory -ExportMarkdown:$ExportMarkdown
+    $textReportPath = $reportPaths.TextPath
+    $markdownReportPath = $reportPaths.MarkdownPath
 
     $powerShellPath = Get-CurrentPowerShellPath
     $createdAt = Get-Date -Format 'yyyy-MM-dd HH:mm:ss zzz'
