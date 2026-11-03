@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $entrypoint = Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'
 $toolkitVersion=(Get-Content -LiteralPath (Join-Path $repositoryRoot 'VERSION') -Raw).Trim()
+$smokeTemporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 . (Join-Path $repositoryRoot 'scripts\report-common.ps1')
 . (Join-Path $repositoryRoot 'scripts\module-registry.ps1')
 . (Join-Path $repositoryRoot 'scripts\process-runner.ps1')
@@ -13,6 +14,16 @@ $toolkitVersion=(Get-Content -LiteralPath (Join-Path $repositoryRoot 'VERSION') 
 . (Join-Path $repositoryRoot 'scripts\tui.ps1')
 function Assert-True { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message } }
 function Assert-Equal { param($Expected, $Actual, [string]$Message) if ($Expected -ne $Actual) { throw "$Message Expected=$Expected Actual=$Actual" } }
+function Resolve-WdtSmokeCleanupPath {
+    param([string]$Path, [string]$TemporaryRoot)
+    $resolvedPath = [IO.Path]::GetFullPath($Path)
+    $temporaryRootPrefix = [IO.Path]::GetFullPath($TemporaryRoot).TrimEnd('\') + '\'
+    if (-not $resolvedPath.StartsWith($temporaryRootPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a path outside the temporary root: $resolvedPath"
+    }
+    return $resolvedPath
+}
+& (Join-Path $PSScriptRoot 'report-smoke-paths.tests.ps1')
 
 $tokens=$null; $errors=$null
 $ast = [Management.Automation.Language.Parser]::ParseFile($entrypoint,[ref]$tokens,[ref]$errors)
@@ -23,7 +34,7 @@ Assert-Equal $expectedParameterNames $parameterNames 'Public parameter order cha
 foreach ($definition in @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))) { . ([scriptblock]::Create($definition.Extent.Text)) }
 $registrySnapshot = Get-WdtModuleRegistry -ModuleRoot (Join-Path $repositoryRoot 'modules')
 
-$output = Join-Path $env:TEMP ('wdt-report-smoke-' + [guid]::NewGuid().ToString('N'))
+$output = Join-Path $smokeTemporaryRoot ('wdt-report-smoke-' + [guid]::NewGuid().ToString('N'))
 try {
     $state = New-WdtTuiState -RegistrySnapshot $registrySnapshot -OutputDirectory $output
     foreach ($diagnostic in $state.Diagnostics) { $diagnostic.Selected = ($diagnostic.Id -eq 'Network') }
@@ -35,7 +46,7 @@ try {
 }
 finally { if (Test-Path -LiteralPath $output) { Remove-Item -LiteralPath $output -Recurse -Force } }
 
-$cliOutput = Join-Path $env:TEMP ('wdt-cli-module-smoke-' + [guid]::NewGuid().ToString('N'))
+$cliOutput = Join-Path $smokeTemporaryRoot ('wdt-cli-module-smoke-' + [guid]::NewGuid().ToString('N'))
 try {
     & $entrypoint -Module System,Network -NoExternalNetworkTests -ModuleTimeoutSeconds 17 -OutputDirectory $cliOutput
     $cliReport = @(Get-ChildItem -LiteralPath $cliOutput -Filter 'WindowsDiagnosticsReport-*.txt' -File)
@@ -48,7 +59,7 @@ try {
 }
 finally { if (Test-Path -LiteralPath $cliOutput) { Remove-Item -LiteralPath $cliOutput -Recurse -Force } }
 
-$legacyOutput = Join-Path $env:TEMP ('wdt-cli-legacy-smoke-' + [guid]::NewGuid().ToString('N'))
+$legacyOutput = Join-Path $smokeTemporaryRoot ('wdt-cli-legacy-smoke-' + [guid]::NewGuid().ToString('N'))
 try {
     & $entrypoint -System -Network -NoExternalNetworkTests -ModuleTimeoutSeconds 17 -OutputDirectory $legacyOutput
     $legacyReport = @(Get-ChildItem -LiteralPath $legacyOutput -Filter 'WindowsDiagnosticsReport-*.txt' -File)
@@ -59,7 +70,7 @@ try {
 }
 finally { if (Test-Path -LiteralPath $legacyOutput) { Remove-Item -LiteralPath $legacyOutput -Recurse -Force } }
 
-$parallelOutput = Join-Path $env:TEMP ('wdt-parallel-report-smoke-' + [guid]::NewGuid().ToString('N'))
+$parallelOutput = Join-Path $smokeTemporaryRoot ('wdt-parallel-report-smoke-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $parallelOutput -Force | Out-Null
 $parallelProcesses = @()
 try {
@@ -105,16 +116,12 @@ finally {
             finally { $parallelProcess.Dispose() }
         }
     }
-    $resolvedParallelOutput = (Resolve-Path -LiteralPath $parallelOutput).Path
-    $temporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
-    if (-not $resolvedParallelOutput.StartsWith($temporaryRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw "Refusing to remove a path outside the temporary root: $resolvedParallelOutput"
-    }
+    $resolvedParallelOutput = Resolve-WdtSmokeCleanupPath -Path $parallelOutput -TemporaryRoot $smokeTemporaryRoot
     Remove-Item -LiteralPath $resolvedParallelOutput -Recurse -Force
 }
 $global:LASTEXITCODE = 0
 
-$snapshotOutput=Join-Path $env:TEMP ('wdt-cli-snapshot-smoke-'+[guid]::NewGuid().ToString('N'))
+$snapshotOutput=Join-Path $smokeTemporaryRoot ('wdt-cli-snapshot-smoke-'+[guid]::NewGuid().ToString('N'))
 try {
     & $entrypoint -Module system -SaveSnapshot -PrivacyMode -ExportMarkdown -OutputDirectory $snapshotOutput
     $saved=@(Get-ChildItem -LiteralPath $snapshotOutput -Filter 'WindowsDiagnosticsSnapshot-*.json' -File)
@@ -160,8 +167,7 @@ try {
 }
 finally {
     . (Join-Path $repositoryRoot 'scripts\process-runner.ps1')
-    $resolvedSnapshotOutput=[IO.Path]::GetFullPath($snapshotOutput)
-    if (-not $resolvedSnapshotOutput.StartsWith([IO.Path]::GetFullPath([IO.Path]::GetTempPath()),[StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe snapshot smoke cleanup.' }
+    $resolvedSnapshotOutput = Resolve-WdtSmokeCleanupPath -Path $snapshotOutput -TemporaryRoot $smokeTemporaryRoot
     if (Test-Path -LiteralPath $resolvedSnapshotOutput) { Remove-Item -LiteralPath $resolvedSnapshotOutput -Recurse -Force }
 }
 $global:LASTEXITCODE = 0
