@@ -79,6 +79,35 @@ If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not install
 
 ## What happens during a run
 
+The source checkout also supports opt-in structured snapshots for System,
+Crashes, Events, and Updates, and offline comparison of two saved snapshots:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Module System,Crashes,Events,Updates -SaveSnapshot -PrivacyMode -OutputDirectory C:\WdtReports
+.\Invoke-WindowsDiagnostics.ps1 -BeforeSnapshot C:\WdtReports\before.json -AfterSnapshot C:\WdtReports\after.json -OutputDirectory C:\WdtReports
+```
+
+Use the actual generated snapshot paths for `before.json` and `after.json`.
+JSON is written only with `-SaveSnapshot`; ordinary reports and the TUI retain
+their existing defaults. Snapshots use a seven-day history window while current
+configuration and Get-HotFix inventory describe collection time. Comparison
+reports distinguish inventory changes from windowed evidence observations and
+show unavailable or incomplete sources. Changes and event counts alone do not
+establish a regression, resolution, or cause. See the [snapshot workflow and
+limitations](docs/usage.md#structured-snapshots-and-offline-comparison).
+
+The source checkout can also investigate an approximate incident time:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -IncidentSymptom AppFailure -IncidentAt '2026-11-02T14:30:00+02:00' -PrivacyMode -ExportMarkdown -OutputDirectory C:\WdtReports
+```
+
+Choose `AppFailure` or `UnexpectedRestart`. The default window is 30 minutes
+before and after the supplied time, which requires an explicit offset or `Z`.
+The incident TXT/optional Markdown report links recognized signals, a timeline,
+source evidence and coverage limitations. Updates remain temporal context;
+ordering alone does not establish cause. See the [incident workflow](docs/usage.md#incident-investigation-by-symptom-and-time).
+
 1. WDT discovers the reviewed built-in diagnostic modules.
 2. Each selected module runs in a separate child PowerShell process with an independent timeout.
 3. Results are normalized into a combined findings summary and detailed evidence sections.

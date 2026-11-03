@@ -146,6 +146,20 @@ function Test-WdtAllowedDotSource {
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\report-common.ps1' },
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\process-runner.ps1' },
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\tui.ps1' }
+        [pscustomobject]@{ Caller = 'scripts\process-runner.ps1'; Target = 'scripts\diagnostic-data.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\diagnostic-data.ps1'; Target = 'scripts\report-common.ps1' }
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\snapshot-compare.ps1' },
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\snapshot.ps1' },
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\diagnostic-data.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\snapshot-compare.ps1'; Target = 'scripts\snapshot.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\snapshot-compare.ps1'; Target = 'scripts\diagnostic-data.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\snapshot-compare.ps1'; Target = 'scripts\report-common.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\snapshot.ps1'; Target = 'scripts\diagnostic-data.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\snapshot.ps1'; Target = 'scripts\report-common.ps1' },
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\incident.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\incident.ps1'; Target = 'scripts\snapshot.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\incident.ps1'; Target = 'scripts\diagnostic-data.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\incident.ps1'; Target = 'scripts\report-common.ps1' }
     )
     foreach ($fixedImport in $fixedImports) {
         if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot $fixedImport.Caller) -and
@@ -158,8 +172,11 @@ function Test-WdtAllowedDotSource {
     if ($null -eq $ModuleDefinition) { return $false }
 
     if (Test-WdtPathInCollection -Path $targetPath -Paths $ModuleDefinition.ScriptPaths) { return $true }
-    return (Test-WdtPathInCollection -Path $ScriptPath -Paths @($ModuleDefinition.EntryPoint)) -and
-        (Test-WdtScriptPath $targetPath $RepositoryRoot 'scripts\report-common.ps1')
+    if ((Test-WdtPathInCollection -Path $ScriptPath -Paths @($ModuleDefinition.EntryPoint)) -and
+        (Test-WdtScriptPath $targetPath $RepositoryRoot 'scripts\report-common.ps1')) { return $true }
+    return ($ModuleDefinition.Id -in @('System','Crashes','Events','Updates')) -and
+        (Test-WdtPathInCollection -Path $ScriptPath -Paths @($ModuleDefinition.EntryPoint)) -and
+        (Test-WdtScriptPath $targetPath $RepositoryRoot 'scripts\diagnostic-data.ps1')
 }
 
 function Test-WdtTerminalTopLevelCommand {
@@ -507,6 +524,11 @@ function Test-WdtAllowedNewObjectCommand {
     )
     if ($typeName -in $safeTypes) { return $true }
 
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\snapshot.ps1') -and
+        (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Read-WdtSnapshot' -and
+        ($CommandAst.Extent.Text -ceq 'New-Object System.IO.StreamReader -ArgumentList $snapshotStream,$snapshotEncoding,$false' -or
+         $CommandAst.Extent.Text -ceq 'New-Object char[] 4096')) { return $true }
+
     if ($typeName -eq 'char[]' -and
         (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
         (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'New-WdtStreamCaptureState' -and
@@ -757,6 +779,17 @@ function Get-WdtMemberSafetyIssue {
     $isStatic = $MemberAst.Expression -is [System.Management.Automation.Language.TypeExpressionAst]
     if ($isStatic) {
         $typeName = $MemberAst.Expression.TypeName.FullName
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\snapshot.ps1') -and $typeName -ceq 'System.IO.File' -and $member -ceq 'Open' -and $argumentCount -eq 4) {
+            $snapshotFunction=Get-WdtEnclosingFunctionName $MemberAst
+            $snapshotForm=ConvertTo-WdtNormalizedAstText -Ast $MemberAst
+            if (($snapshotFunction -ceq 'Read-WdtSnapshot' -and $snapshotForm -ceq '[System.IO.File]::Open($snapshotInputPath,[System.IO.FileMode]::Open,[System.IO.FileAccess]::Read,[System.IO.FileShare]::Read)') -or
+                ($snapshotFunction -ceq 'Write-WdtSnapshot' -and $snapshotForm -ceq '[System.IO.File]::Open($snapshotPath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None)')) { return }
+        }
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\diagnostic-data.ps1') -and
+            $typeName -eq 'datetimeoffset' -and $member -eq 'Parse' -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'ConvertTo-WdtDataUtcText' -and
+            $argumentCount -eq 2 -and $MemberAst.Arguments[0].Extent.Text -ceq '$Value' -and
+            $MemberAst.Arguments[1].Extent.Text -ceq '[Globalization.CultureInfo]::InvariantCulture') { return }
         if (Test-WdtModuleRegistryPath $ScriptPath $RepositoryRoot) {
             $registryStaticMethods = @(
                 'System.Collections.Generic.Dictionary[string,object]::new',
@@ -861,6 +894,15 @@ function Get-WdtMemberSafetyIssue {
     }
 
     $receiver = if ($MemberAst.Expression -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Expression.VariablePath.UserPath } else { '' }
+    if (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\snapshot.ps1') {
+        $snapshotFunction=Get-WdtEnclosingFunctionName $MemberAst
+        $snapshotForm=ConvertTo-WdtNormalizedAstText -Ast $MemberAst
+        if (($snapshotFunction -ceq 'Read-WdtSnapshot' -and $snapshotForm -ceq '$snapshotReader.Read($snapshotBuffer,0,$snapshotBuffer.Length)') -or
+            ($snapshotFunction -ceq 'Write-WdtSnapshot' -and $snapshotForm -ceq '$snapshotStream.Write($snapshotBytes,0,$snapshotBytes.Length)') -or
+            ($snapshotFunction -ceq 'Write-WdtSnapshot' -and $snapshotForm -ceq '$snapshotEncoding.GetBytes($json)') -or
+            ($snapshotFunction -ceq 'Read-WdtSnapshot' -and $snapshotForm -in @('$snapshotReader.Dispose()','$snapshotStream.Dispose()')) -or
+            ($snapshotFunction -ceq 'Write-WdtSnapshot' -and $snapshotForm -ceq '$snapshotStream.Dispose()')) { return }
+    }
     if ((Test-WdtModuleRegistryPath $ScriptPath $RepositoryRoot) -and $member -eq 'AsReadOnly' -and
         $receiver -in @('list', 'moduleList') -and $argumentCount -eq 0) { return }
     if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot)) { return }
@@ -883,6 +925,11 @@ function Get-WdtMemberSafetyIssue {
         $member -eq 'WriteLine' -and $argumentCount -eq 1 -and
         $MemberAst.Expression.Extent.Text -ceq '[System.Console]::Out' -and
         $MemberAst.Arguments[0].Extent.Text -ceq '$marker') { return }
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\diagnostic-data.ps1') -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Write-WdtDiagnosticDataFrame' -and
+        $member -eq 'WriteLine' -and $argumentCount -eq 1 -and
+        $MemberAst.Expression.Extent.Text -ceq '[System.Console]::Out' -and
+        $MemberAst.Arguments[0].Extent.Text -ceq '$Marker') { return }
     if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\network\diagnostic.ps1') -and
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Test-TcpEndpointConnection' -and
         $member -in @('ConnectAsync', 'Wait', 'Dispose')) { return }

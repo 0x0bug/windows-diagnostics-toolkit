@@ -243,7 +243,7 @@ function Get-ProcessCpuActivity {
 
 function Write-ProcessList {
     param(
-        [Parameter(Mandatory = $true)][object[]]$Processes,
+        [Parameter(Mandatory = $true)][AllowEmptyCollection()][object[]]$Processes,
         [Parameter(Mandatory = $true)][string]$Metric,
         [Parameter(Mandatory = $true)][int]$Limit
     )

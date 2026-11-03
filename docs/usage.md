@@ -4,6 +4,149 @@ This guide covers the interactive TUI, command-line mode, standalone modules, re
 
 All production diagnostics are read-only by design.
 
+## Structured snapshots and offline comparison
+
+In a source checkout, explicitly select supported modules to request JSON in
+addition to the ordinary TXT report (and optional Markdown):
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -Module System,Crashes,Events,Updates -SaveSnapshot -PrivacyMode -ExportMarkdown -OutputDirectory C:\WdtReports
+.\Invoke-WindowsDiagnostics.ps1 -BeforeSnapshot C:\WdtReports\before.json -AfterSnapshot C:\WdtReports\after.json -ExportMarkdown -OutputDirectory C:\WdtReports
+```
+
+Replace the example input names with actual generated paths. `-SaveSnapshot`
+requires an explicit selection consisting only of System, Crashes, Events, and
+Updates; it cannot be combined with `-All` or `-Interactive`. Existing individual
+selectors, such as `-System -SaveSnapshot`, also work. Without `-SaveSnapshot`,
+no JSON is created and legacy time-window defaults remain unchanged.
+
+Snapshot history uses a single seven-day UTC window, `[start,end)`. System OS
+version/build, reboot indicators, and Get-HotFix inventory describe the current
+collection time, rather than the state at the start of that window. Get-HotFix
+is a limited inventory, not all Windows updates or drivers. Installed dates
+retain source-reported `yyyy-MM-dd` values; an unknown historical timezone does
+not become an invented UTC time. Reports show effective history bounds and
+structured availability separately from execution success.
+
+`-BeforeSnapshot` and `-AfterSnapshot` are a required pair, incompatible with
+live collection options. Comparison only reads the two JSON files and writes a
+new TXT comparison, with Markdown when requested; it does not query Windows or
+open the TUI. Inputs remain unchanged. File names use timestamps and random
+GUIDs. JSON writes use create-new semantics, including concurrent writers.
+
+The selected pair is assumed to describe the intended system; WDT does not
+verify that both snapshots came from the same PC and stores no stable personal
+machine identifier. Known semantic keys can be compared. Redacted or local
+identities remain explicitly not comparable across snapshot scopes, including
+identical-looking privacy tokens. If either input uses Privacy Mode, the new
+comparison inherits Privacy Mode; raw inputs are not rewritten. Use
+`-PrivacyMode` to request stricter output from two non-private inputs.
+
+Comparison distinguishes `Changed`, `Added`, `Removed`, `NewlyObserved`,
+`InformationLost`, `InformationGained`, `NotComparable`, and
+`WindowedObservations`; unchanged facts appear only in the summary. An inventory
+addition requires a complete comparable before inventory; removal requires a
+complete comparable after inventory. Scope, filters, query limits, execution,
+and source completeness matter. Unknown/unavailable/not-collected data cannot
+stand in for a complete empty inventory. A date-quality change is metadata,
+not proof that an update was reinstalled.
+
+Windowed groups show evidence-observation counts and first/last known times,
+with snapshot/module/evidence references. Multiple sources can describe one
+incident; these counts have not undergone incident correlation. Window
+movement, unknown retention, caps, and missing sources limit comparisons.
+Absence in the after window does not establish resolution. Count changes,
+configuration differences, and temporal ordering do not establish a regression
+or cause. Coverage details and safe source/protocol reasons remain visible.
+
+The persisted schema is version 1, independent of `VERSION`. Its closed envelope
+contains `SchemaVersion`, `ToolkitVersion`, random capture `SnapshotId` and
+`RedactionScopeId` (preserved when rewriting a copy of the same capture), `CreatedUtc`, `CollectionStartedUtc`,
+`CollectionFinishedUtc`, Boolean `PrivacyMode`, `SelectedModules`, nullable
+paired `WindowStartUtc`/`WindowEndUtc`, and `Modules`. Each module carries
+`ModuleId`, runtime `Status`, nullable integer `ExitCode`, execution
+`Completeness`, Boolean `OutputComplete`, `DataStatus`, `DataErrors`, and nullable
+`Data` using the [normalized module contract](module-authoring.md#opt-in-structured-diagnostic-data-schema-1).
+Privacy contexts and token maps are never serialized. The reader accepts only
+JSON, validates types and references, rejects unsupported schema versions and
+malformed/truncated input, and limits input to 64 MiB UTF-8 bytes and 16 Mi
+characters. Errors omit input content and input paths. Missing or damaged
+requested machine data makes the snapshot action fail, even when the child
+process exited successfully; valid unavailable source data stays explicit.
+
+## Incident investigation by symptom and time
+
+In a source checkout, investigate an approximate time without selecting modules:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -IncidentSymptom AppFailure -IncidentAt '2026-11-02T14:30:00+02:00' -IncidentBeforeMinutes 30 -IncidentAfterMinutes 30 -PrivacyMode -ExportMarkdown -OutputDirectory C:\WdtReports
+.\Invoke-WindowsDiagnostics.ps1 -IncidentSymptom UnexpectedRestart -IncidentAt '2026-11-02T12:30:00Z' -PrivacyMode -OutputDirectory C:\WdtReports
+```
+
+`IncidentSymptom` and `IncidentAt` are a required pair. `AppFailure` targets
+recognized application crashes and hangs. `UnexpectedRestart` targets recognized
+BugChecks and the existing System / Microsoft-Windows-Kernel-Power / Event 41 /
+Critical (level 1) signal. Event 41 does not prove a BugCheck or a restart cause.
+Other normalized events and Windows Update failures remain context. The command
+collects Crashes, Events, and Updates once each through the existing process
+runner and uses normalized data rather than parsing their human-readable output.
+
+The ISO 8601 center requires seconds and an explicit `Z` or `+/-HH:mm` offset;
+timezone-less input is rejected. Explicit offsets disambiguate repeated DST
+hours. Each shoulder is an integer number of minutes, defaults to 30, and can
+be zero; their total must be positive and at most 43,200 minutes (30 days).
+The UTC interval includes its start and excludes its end: `[start,end)`.
+The user-supplied center is approximate, and evidence timestamps describe
+recording time rather than a verified exact failure time. Reports show the
+requested offset, UTC bounds, collection time, and the latest possible observed
+bound. Future portions are unobserved; source timestamps after collection
+finish are retained as clock inconsistencies outside the exact timeline.
+
+Incident options cannot be combined with `-All`, `-Module`, individual module
+switches, `-Interactive`, snapshot options, or network probe options. Invalid
+combinations are rejected before collection or directory creation. Existing
+ordinary CLI, TUI, standalone launchers and pinned beta bootstrap retain their
+behavior. Source-checkout capabilities do not update the published beta package.
+
+The command writes `WindowsDiagnosticsIncident-<timestamp>-<GUID>.txt` and, with
+`-ExportMarkdown`, matching Markdown. It creates no incident JSON. Privacy is
+applied in memory before artifact writes; identity tokens share one scope across
+summary, timeline, evidence appendix and source errors. URL/command secrets are
+removed even without Privacy Mode. Review reports before sharing them.
+
+The summary contains up to five deterministic meaningful observations, with
+target evidence first; a small or empty dataset does not receive invented
+observations or a health verdict. `Fact` identifies a confirmed observation.
+`TemporalCoincidence` identifies timing or ambiguous duplicate reporting and
+does not establish cause. The MVP generates no causal `Hypothesis`. Installation
+and download failures (including Event 20/31) do not establish successful update
+installation, and an update preceding a crash does not establish update or
+driver causality.
+
+Deduplication links the exact same source record using channel, provider,
+event ID, positive record ID and exact UTC time, or a nonzero GUID ReportId with
+compatible failure kind, known component and non-conflicting failure code.
+All module/evidence references are retained. Different record/report identities
+remain separate unless a compatible shared ReportId proves a link. Close times
+and the same application alone never remove a record. Ambiguous possible
+duplicates are annotated while retaining both timeline entries. Incident
+correlation is separate from legacy report grouping.
+
+Date-only HotFix evidence appears separately from the exact timeline. A known
+day interval is an uncertainty interval, not an event at midnight. When the
+historical timezone is unknown, a source-reported date can supply possible
+overlap context using conservative +/-14-hour bounds only for filtering; those
+inferred bounds are not presented as installation times. Get-HotFix is a limited
+current inventory, so missing entries do not prove that no updates occurred.
+Current reboot/service states are not historical evidence of the incident.
+
+Source coverage distinguishes successful empty queries, missing data,
+Partial/Unavailable/NotCollected sources, caps, protocol errors and execution
+failure. Retention remains unknown, including successful queries. Recognized
+signals do not change the process exit code; execution or missing/damaged
+requested machine data does. Valid unavailable sources remain explicit without
+being treated as a failed process or a healthy system.
+
 ## Requirements
 
 - Windows 10 or Windows 11

@@ -26,6 +26,7 @@ function Test-ContainsLiteral {
 
     return $Text.IndexOf($Value, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
 }
+. (Join-Path $PSScriptRoot 'privacy-identity.helpers.ps1')
 
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $securityScript = Join-Path -Path $repositoryRoot -ChildPath 'modules\security\diagnostic.ps1'
@@ -97,10 +98,13 @@ try {
     Assert-True -Condition ($textContent -match '(?m)^Selected\s+: Security Posture\r?$') -Message 'Security runner selected the wrong module.'
     Assert-True -Condition $textContent.Contains('== Security Posture ==') -Message 'TXT report is missing the Security Posture section.'
     Assert-True -Condition $markdownContent.Contains('## Security Posture') -Message 'Markdown report is missing the Security Posture section.'
-    Assert-True -Condition ($textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal) -lt $textContent.IndexOf('== Security Posture ==', [System.StringComparison]::Ordinal)) -Message 'TXT findings summary must precede Security Posture details.'
-    Assert-True -Condition ($markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal) -lt $markdownContent.IndexOf('## Security Posture', [System.StringComparison]::Ordinal)) -Message 'Markdown findings summary must precede Security Posture details.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:COMPUTERNAME)) -Message 'Privacy Mode leaked the computer name from Security Posture.'
-    Assert-True -Condition (-not (Test-ContainsLiteral -Text $combinedContent -Value $env:USERNAME)) -Message 'Privacy Mode leaked the user name from Security Posture.'
+    $textSummaryIndex = $textContent.IndexOf('== Findings Summary ==', [System.StringComparison]::Ordinal)
+    $textDetailsIndex = $textContent.IndexOf('== Security Posture ==', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($textSummaryIndex -ge 0 -and $textDetailsIndex -ge 0 -and $textSummaryIndex -lt $textDetailsIndex) -Message 'TXT findings summary must exist before Security Posture details.'
+    $markdownSummaryIndex = $markdownContent.IndexOf('## Findings Summary', [System.StringComparison]::Ordinal)
+    $markdownDetailsIndex = $markdownContent.IndexOf('## Security Posture', [System.StringComparison]::Ordinal)
+    Assert-True -Condition ($markdownSummaryIndex -ge 0 -and $markdownDetailsIndex -ge 0 -and $markdownSummaryIndex -lt $markdownDetailsIndex) -Message 'Markdown findings summary must exist before Security Posture details.'
+    Assert-True -Condition (-not (Test-IdentityFieldLeak -Text $combinedContent -ComputerName $env:COMPUTERNAME -UserName $env:USERNAME)) -Message 'Privacy Mode leaked a computer or user identity field from Security Posture.'
     Assert-True -Condition ($combinedContent -notmatch '@@WDT_FINDING@@') -Message 'Security report leaked an internal finding marker.'
 
     Write-Host 'Security posture tests passed.'

@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 . $PSScriptRoot\..\..\scripts\report-common.ps1
+. $PSScriptRoot\..\..\scripts\diagnostic-data.ps1
 
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
@@ -242,7 +243,8 @@ function Read-EventLog {
         [Parameter(Mandatory = $true)][string]$LogName,
         [Parameter(Mandatory = $true)][datetime]$StartTime,
         [Parameter(Mandatory = $true)][int[]]$Levels,
-        [Parameter(Mandatory = $true)][int]$EventLimit
+        [Parameter(Mandatory = $true)][int]$EventLimit,
+        [Nullable[datetime]]$EndTime = $null
     )
 
     try {
@@ -251,6 +253,7 @@ function Read-EventLog {
             Level     = $Levels
             StartTime = $StartTime
         }
+        if ($null -ne $EndTime) { $filter.EndTime = [datetime]$EndTime }
 
         return [pscustomobject]@{
             LogName = $LogName
@@ -276,16 +279,16 @@ function Read-EventLog {
 }
 
 function Read-HighSignalEvents {
-    param([Parameter(Mandatory = $true)][datetime]$Cutoff)
+    param([Parameter(Mandatory = $true)][datetime]$Cutoff, [Nullable[datetime]]$EndTime = $null)
 
     try {
-        $candidateEvents = @(
-            Get-WinEvent -FilterHashtable @{
+        $filter = @{
                 LogName   = 'System'
                 Id        = @(41, 55)
                 StartTime = $Cutoff
-            } -ErrorAction Stop
-        )
+        }
+        if ($null -ne $EndTime) { $filter.EndTime = [datetime]$EndTime }
+        $candidateEvents = @(Get-WinEvent -FilterHashtable $filter -ErrorAction Stop)
 
         $signalEvents = @(
             $candidateEvents |
@@ -318,6 +321,15 @@ Write-Host 'Windows Diagnostics Toolkit - Event Log Check'
 Write-Host 'Mode: read-only'
 
 $startTime = (Get-Date).AddHours(-1 * $SinceHours)
+$dataRequest = Get-WdtDataRequest
+$dataEndTime = $null
+if ($dataRequest.Enabled) {
+    $dataEndTime = ([datetimeoffset](Get-Date)).UtcDateTime
+    if ($null -ne $dataRequest.StartUtc) {
+        $startTime = ([datetimeoffset]$dataRequest.StartUtc).UtcDateTime
+        $dataEndTime = ([datetimeoffset]$dataRequest.EndUtc).UtcDateTime
+    }
+}
 $levels = @(1, 2)
 $levelNames = @('Critical', 'Error')
 
@@ -328,9 +340,9 @@ if ($IncludeWarnings) {
 
 $logs = @('System', 'Application')
 $logResults = foreach ($log in $logs) {
-    Read-EventLog -LogName $log -StartTime $startTime -Levels $levels -EventLimit $MaxEvents
+    Read-EventLog -LogName $log -StartTime $startTime -Levels $levels -EventLimit $MaxEvents -EndTime $dataEndTime
 }
-$signalResult = Read-HighSignalEvents -Cutoff $startTime
+$signalResult = Read-HighSignalEvents -Cutoff $startTime -EndTime $dataEndTime
 
 $contextEvents = @(
     $logResults |
@@ -364,6 +376,31 @@ foreach ($event in @($contextEvents + @($signalResult.Events))) {
 
     $seenEvents[$eventKey] = $true
     $events.Add($event)
+}
+
+if ($dataRequest.Enabled) {
+    $dataSources = New-Object 'System.Collections.Generic.List[object]'
+    $dataFacts = New-Object 'System.Collections.Generic.List[object]'
+    $dataEvidence = New-Object 'System.Collections.Generic.List[object]'
+    $sourceByLog=@{}; $sourceIndex=0; $recordIndex=0
+    foreach ($logResult in @($logResults)) {
+        $sourceIndex++; $sourceId='event-log-' + $sourceIndex; $sourceByLog[$logResult.LogName]=$sourceId
+        $availability=Get-WdtDataAvailability $logResult.Error @($logResult.Events).Count $MaxEvents
+        $dataSources.Add((New-WdtDataSource -Id $sourceId -Kind History -Scope ($logResult.LogName + '/Levels=' + ($levels -join ',')) -Availability $availability -QueryComplete ($availability -eq 'Available') -Truncated ($availability -eq 'Partial') -Limit $MaxEvents -StartUtc ([datetimeoffset]$startTime) -EndUtc ([datetimeoffset]$dataEndTime) -Error $logResult.Error))
+    }
+    $signalAvailability=Get-WdtDataAvailability $signalResult.Error
+    $dataSources.Add((New-WdtDataSource -Id 'high-signals' -Kind History -Scope 'System/Id=41,55/ProviderLevelRules' -Availability $signalAvailability -QueryComplete ($signalAvailability -eq 'Available') -StartUtc ([datetimeoffset]$startTime) -EndUtc ([datetimeoffset]$dataEndTime) -Error $signalResult.Error))
+    foreach ($event in @($events.ToArray())) {
+        $time=Get-WdtDataTimestamp $event.TimeCreated
+        if (-not (Test-WdtDataInWindow $time.Utc ([datetimeoffset]$startTime) ([datetimeoffset]$dataEndTime))) { continue }
+        $recordIndex++; $evidenceId='e' + $recordIndex
+        $sourceId=$sourceByLog[[string]$event.LogName]
+        $primaryRecords=@($logResults | ForEach-Object { $_.Events } | Where-Object { [System.Object]::ReferenceEquals($_,$event) })
+        if ($null -eq $sourceId -or $primaryRecords.Count -eq 0) { $sourceId='high-signals' }
+        $dataEvidence.Add((New-WdtDataEvidence -Id $evidenceId -SourceId $sourceId -TimestampUtc $time.Utc -TimePrecision $time.Precision -OriginalOffset $time.Offset -LogName ([string]$event.LogName) -Provider ([string]$event.ProviderName) -EventId ([int]$event.Id) -RecordId ([string]$event.RecordId) -Kind Event -Message (ConvertTo-WdtDataMessage ([string]$event.Message))))
+        $dataFacts.Add((New-WdtDataFact -Id ('f'+$recordIndex) -Type EventObservation -Key ('{0}|{1}|{2}' -f $event.ProviderName,$event.Id,$event.Level) -Values @{Provider=[string]$event.ProviderName; EventId=[int]$event.Id; Level=[int]$event.Level} -Comparison Windowed -SourceIds @($sourceId) -EvidenceIds @($evidenceId)))
+    }
+    Write-WdtDiagnosticData (New-WdtDiagnosticData -ModuleId Events -WindowStartUtc ([datetimeoffset]$startTime) -WindowEndUtc ([datetimeoffset]$dataEndTime) -Sources @($dataSources.ToArray()) -Facts @($dataFacts.ToArray()) -Evidence @($dataEvidence.ToArray()))
 }
 
 $groupSort = @(
@@ -419,7 +456,10 @@ foreach ($group in @($eventGroups | Where-Object { $_.IsSignal })) {
 }
 
 Write-Section 'Summary'
-Write-Host ('Time window     : Last {0} hour(s), since {1}' -f $SinceHours, $startTime)
+if ($dataRequest.Enabled -and $null -ne $dataRequest.StartUtc) {
+    Write-Host ('Time window [UTC) : {0} / {1}' -f $dataRequest.StartUtc,$dataRequest.EndUtc)
+}
+else { Write-Host ('Time window     : Last {0} hour(s), since {1}' -f $SinceHours, $startTime) }
 Write-Host ('Logs checked    : {0}' -f ($logs -join ', '))
 Write-Host ('Levels included : {0}' -f ($levelNames -join ', '))
 Write-Host ('Data availability: {0}' -f $dataAvailability)

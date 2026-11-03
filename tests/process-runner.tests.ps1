@@ -58,6 +58,42 @@ try {
     Assert-True (($launch.ErrorLines -join "`n").Contains('Failed to run script:')) 'Original launch message is missing.'
     Assert-True (-not (($launch.ErrorLines -join "`n").Contains('No process is associated'))) 'Secondary process error masked launch error.'
 
+    foreach ($captureFailure in @('Faulted', 'Cancelled')) {
+        $captureResult = & {
+            param($failureMode, $fixturePath, $executablePath, $rootPath)
+            $script:captureFactoryCall = 0
+            function New-WdtStreamCaptureState {
+                param([System.IO.StreamReader]$Reader)
+                $script:captureFactoryCall++
+                if ($script:captureFactoryCall -eq 1) {
+                    $completion = New-Object 'System.Threading.Tasks.TaskCompletionSource[int]'
+                    if ($failureMode -eq 'Faulted') {
+                        $completion.SetException((New-Object System.InvalidOperationException 'fixture stream read fault'))
+                    }
+                    else {
+                        $completion.SetCanceled()
+                    }
+                    return [pscustomobject]@{
+                        Reader = $Reader; Buffer = (New-Object char[] 4096); Task = $completion.Task
+                        Text = New-Object System.Text.StringBuilder; Complete = $false; Error = $null
+                    }
+                }
+                $buffer = New-Object char[] 4096
+                return [pscustomobject]@{
+                    Reader = $Reader; Buffer = $buffer; Task = $Reader.ReadAsync($buffer, 0, $buffer.Length)
+                    Text = New-Object System.Text.StringBuilder; Complete = $false; Error = $null
+                }
+            }
+            Invoke-DiagnosticScript ('Capture' + $failureMode) $fixturePath $executablePath $rootPath 10
+        } $captureFailure $streamFixture $powerShellPath $repositoryRoot
+        Assert-Equal 'Success' $captureResult.Status "$captureFailure stream capture failure must preserve process success."
+        Assert-Equal 0 $captureResult.ExitCode "$captureFailure stream capture failure changed the process exit code."
+        Assert-Equal $false $captureResult.OutputComplete "$captureFailure stream capture failure must mark captured output incomplete."
+        Assert-Equal 'Partial' $captureResult.Completeness "$captureFailure stream capture failure must make completeness partial."
+        Assert-True (($captureResult.ErrorLines -join "`n").Contains('Stream read')) "$captureFailure stream capture failure details were not retained."
+        Assert-True (-not (($captureResult.ErrorLines -join "`n").Contains('stream drain did not finish'))) "$captureFailure stream capture failure must not be mislabeled as a drain timeout."
+    }
+
     $ansiFixture = Join-Path $fixtureRoot 'ansi-stream.ps1'
     $ansiSource = @'
 $esc = [char]27

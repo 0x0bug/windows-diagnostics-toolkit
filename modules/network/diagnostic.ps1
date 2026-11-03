@@ -89,7 +89,7 @@ function Get-AdapterConfiguration {
         $cimResult = Get-CimAdapterConfiguration
         if ($null -ne $cimResult.Error) {
             Write-WdtFinding -Severity WARN -Code 'NETWORK_ADAPTERS_UNAVAILABLE' -Message 'Active network adapter configuration is unavailable.' -Evidence $cimResult.Error
-            return @()
+            return [pscustomobject]@{ Available = $false; Complete = $false; Adapters = @() }
         }
 
         $searchList = 'None'
@@ -98,7 +98,7 @@ function Get-AdapterConfiguration {
             $searchList = Join-ValuesOrNone -Values $searchListValues
         }
 
-        return @($cimResult.Adapters | ForEach-Object { ConvertTo-CimAdapterRecord -Adapter $_ -SearchList $searchList })
+        return [pscustomobject]@{ Available = $true; Complete = $true; Adapters = @($cimResult.Adapters | ForEach-Object { ConvertTo-CimAdapterRecord -Adapter $_ -SearchList $searchList }) }
     }
 
     try {
@@ -108,11 +108,11 @@ function Get-AdapterConfiguration {
         $cimResult = Get-CimAdapterConfiguration
         if ($null -ne $cimResult.Error) {
             Write-WdtFinding -Severity WARN -Code 'NETWORK_ADAPTERS_UNAVAILABLE' -Message 'Active network adapter configuration is unavailable.' -Evidence ("Get-NetAdapter failed: {0}; CIM fallback failed: {1}" -f $_.Exception.Message, $cimResult.Error)
-            return @()
+            return [pscustomobject]@{ Available = $false; Complete = $false; Adapters = @() }
         }
 
         Write-WdtFinding -Severity WARN -Code 'NETWORK_ADAPTERS_PRIMARY_UNAVAILABLE' -Message 'Get-NetAdapter is unavailable; CIM adapter data was used.' -Evidence $_.Exception.Message
-        return @($cimResult.Adapters | ForEach-Object { ConvertTo-CimAdapterRecord -Adapter $_ })
+        return [pscustomobject]@{ Available = $true; Complete = $true; Adapters = @($cimResult.Adapters | ForEach-Object { ConvertTo-CimAdapterRecord -Adapter $_ }) }
     }
 
     $searchList = 'None'
@@ -129,11 +129,13 @@ function Get-AdapterConfiguration {
     }
 
     $records = New-Object System.Collections.Generic.List[object]
+    $configurationComplete = $true
     foreach ($adapter in $adapters) {
         try {
             $ipConfig = Get-NetIPConfiguration -InterfaceIndex $adapter.ifIndex -ErrorAction Stop
         }
         catch {
+            $configurationComplete = $false
             Write-WdtFinding -Severity WARN -Code 'NETWORK_ADAPTER_CONFIGURATION_UNAVAILABLE' -Message 'IP configuration for an active adapter is unavailable.' -Evidence ("Adapter={0}; {1}" -f $adapter.Name, $_.Exception.Message)
             continue
         }
@@ -201,7 +203,7 @@ function Get-AdapterConfiguration {
             })
     }
 
-    return @($records.ToArray())
+    return [pscustomobject]@{ Available = $true; Complete = $configurationComplete; Adapters = @($records.ToArray()) }
 }
 
 function Get-CidrPrefixLength {
@@ -241,7 +243,8 @@ function Get-NetworkRoutes {
             $interfaceMetrics = @{}
             if ($null -ne $getNetIpInterfaceCommand) {
                 foreach ($interface in @(Get-NetIPInterface -ErrorAction Stop)) {
-                    $interfaceMetrics[[int]$interface.InterfaceIndex] = [double]$interface.InterfaceMetric
+                    $family = [string]$interface.AddressFamily
+                    $interfaceMetrics[(('{0}|{1}' -f [int]$interface.InterfaceIndex, $family).ToLowerInvariant())] = [double]$interface.InterfaceMetric
                 }
             }
 
@@ -254,7 +257,10 @@ function Get-NetworkRoutes {
                 $destinationPrefix = [string]$route.DestinationPrefix
                 $isDefaultRoute = $destinationPrefix -in @('0.0.0.0/0', '::/0')
                 $routeMetric = if ($null -ne $route.RouteMetric) { [double]$route.RouteMetric } else { 0 }
-                $interfaceMetric = if ($interfaceMetrics.ContainsKey([int]$route.InterfaceIndex)) { [double]$interfaceMetrics[[int]$route.InterfaceIndex] } else { 0 }
+                $family = [string]$route.AddressFamily
+                if ([string]::IsNullOrWhiteSpace($family)) { $family = if ($destinationPrefix -like '*:*') { 'IPv6' } else { 'IPv4' } }
+                $interfaceMetricKey = ('{0}|{1}' -f [int]$route.InterfaceIndex, $family).ToLowerInvariant()
+                $interfaceMetric = if ($interfaceMetrics.ContainsKey($interfaceMetricKey)) { [double]$interfaceMetrics[$interfaceMetricKey] } else { 0 }
                 $routes.Add([pscustomobject]@{
                         DestinationPrefix = $destinationPrefix
                         NextHop           = [string]$route.NextHop
@@ -473,11 +479,12 @@ function Get-NetworkReachabilityClassification {
         [ValidateSet('Present', 'Absent', 'Unavailable')][string]$DefaultRouteState,
         [string]$DnsStatus,
         [string]$TcpStatus,
-        [bool]$ExternalTestsEnabled
+        [bool]$ExternalTestsEnabled,
+        [ValidateSet('Available', 'Partial', 'Unavailable')][string]$AdapterInventoryState = 'Available'
     )
     if (-not $ExternalTestsEnabled) { return 'NotTested' }
     if ($TcpStatus -eq 'Reachable' -and $DnsStatus -match '^Resolved') { return 'Reachable' }
-    if (-not $HasAdapter -or $DefaultRouteState -eq 'Absent') { return 'Unreachable' }
+    if (($AdapterInventoryState -eq 'Available' -and -not $HasAdapter) -or $DefaultRouteState -eq 'Absent') { return 'Unreachable' }
     if ($TcpStatus -eq 'Reachable') { return 'BlockedOrFiltered' }
     if ($DnsStatus -match '^Resolved' -and $TcpStatus -match '^(Unreachable|BlockedOrFiltered)') { return 'BlockedOrFiltered' }
     if ($DnsStatus -match '^Failed' -and $TcpStatus -match '^Unreachable') { return 'Unreachable' }
@@ -487,13 +494,20 @@ function Get-NetworkReachabilityClassification {
 Write-Host 'Windows Diagnostics Toolkit - Network Check'
 Write-Host 'Mode: read-only'
 
-$adapterConfigurations = @(Get-AdapterConfiguration)
+$adapterResult = Get-AdapterConfiguration
+$adapterConfigurations = @($adapterResult.Adapters)
 $routeResult = Get-NetworkRoutes
 $winInetProxy = Get-WinInetProxy
 $winHttpProxy = Get-WinHttpProxy
 
 Write-Section 'Active Network Adapters'
-if ($adapterConfigurations.Count -eq 0) {
+if (-not $adapterResult.Available) {
+    Write-Host 'Active network adapter inventory is unavailable.'
+}
+elseif (-not $adapterResult.Complete -and $adapterConfigurations.Count -eq 0) {
+    Write-Host 'Active network adapter inventory is incomplete.'
+}
+elseif ($adapterResult.Complete -and $adapterConfigurations.Count -eq 0) {
     Write-Host 'No active network adapters found.'
     Write-WdtFinding -Severity WARN -Code 'NETWORK_NO_ACTIVE_ADAPTER' -Message 'No active network adapters were found.'
 }
@@ -573,7 +587,7 @@ if ($gateways) {
         if ($gatewayResult -ne 'Reachable') { Write-Host 'ICMP may be blocked; route presence is evaluated independently.' }
     }
 }
-else {
+elseif ($adapterResult.Available -and $adapterResult.Complete) {
     Write-Host 'No IPv4 gateway detected.'
     Write-WdtFinding -Severity WARN -Code 'NETWORK_NO_GATEWAY' -Message 'No IPv4 default gateway was detected.'
 }
@@ -603,8 +617,9 @@ else {
     'Absent'
 }
 Write-Host ('Default route state: {0}' -f $defaultRouteState)
-$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -DefaultRouteState $defaultRouteState -DnsStatus $dnsResult -TcpStatus $tcpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests)
+$adapterInventoryState = if (-not $adapterResult.Available) { 'Unavailable' } elseif (-not $adapterResult.Complete) { 'Partial' } else { 'Available' }
+$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -DefaultRouteState $defaultRouteState -DnsStatus $dnsResult -TcpStatus $tcpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests) -AdapterInventoryState $adapterInventoryState
 Write-Host ('Overall reachability: {0}' -f $classification)
 if ($classification -eq 'Unreachable') {
-    Write-WdtFinding -Severity WARN -Code 'NETWORK_CONNECTIVITY_UNREACHABLE' -Message 'Multiple independent network signals indicate connectivity is unavailable.' -Evidence ("Adapter={0}; DefaultRoute={1}; DNS={2}; TCP={3}; ICMP={4}" -f ($adapterConfigurations.Count -gt 0), $defaultRouteState, $dnsResult, $tcpResult, $icmpResult)
+    Write-WdtFinding -Severity WARN -Code 'NETWORK_CONNECTIVITY_UNREACHABLE' -Message 'Multiple independent network signals indicate connectivity is unavailable.' -Evidence ("Adapter={0}; AdapterInventory={1}; DefaultRoute={2}; DNS={3}; TCP={4}; ICMP={5}" -f ($adapterConfigurations.Count -gt 0), $adapterInventoryState, $defaultRouteState, $dnsResult, $tcpResult, $icmpResult)
 }
