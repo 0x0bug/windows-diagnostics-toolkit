@@ -441,18 +441,22 @@ function Invoke-DiagnosticScript {
     try {
         $utf8NoBom = New-Object System.Text.UTF8Encoding -ArgumentList $false
         $findingNonce = [System.Guid]::NewGuid().ToString('N')
-        $escapedScriptPath = $ScriptPath.Replace("'", "''")
+        $escapedScriptPath = [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($ScriptPath)
         $escapedArguments = @($ScriptArguments | ForEach-Object {
                 $argument = [string]$_
                 if ($argument -match '^-[A-Za-z][A-Za-z0-9]*$') { $argument }
-                else { "'" + $argument.Replace("'", "''") + "'" }
+                else { "'" + [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($argument) + "'" }
             })
         $commandText = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; `$ProgressPreference = 'SilentlyContinue'; & '$escapedScriptPath' $($escapedArguments -join ' ')"
-        $encodedCommand = [System.Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($commandText))
+        # Windows PowerShell serializes auxiliary streams with EncodedCommand,
+        # even with OutputFormat Text. Command keeps their native text routing.
+        # Quote the whole command as one Windows argument, preserving backslashes.
+        $quotedCommandText = [System.Text.RegularExpressions.Regex]::Replace($commandText, '(\\*)"', '$1$1\"')
+        $quotedCommandText = [System.Text.RegularExpressions.Regex]::Replace($quotedCommandText, '(\\+)$', '$1$1')
 
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
         $startInfo.FileName = $PowerShellPath
-        $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -OutputFormat Text -EncodedCommand ' + $encodedCommand
+        $startInfo.Arguments = '-NoProfile -ExecutionPolicy Bypass -OutputFormat Text -Command "' + $quotedCommandText + '"'
         $startInfo.WorkingDirectory = $RepositoryRoot
         $startInfo.UseShellExecute = $false
         $startInfo.RedirectStandardOutput = $true

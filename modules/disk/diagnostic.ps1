@@ -174,6 +174,7 @@ Write-Section 'Physical Disks'
 if ($physicalDisks.Count -eq 0) {
     Write-Host 'No physical disk information available.'
     Write-Host 'Data availability: physical disk status is unavailable.'
+    Write-WdtFinding -Severity 'WARN' -Code 'DISK_DATA_UNAVAILABLE' -Message 'Physical disk assessment could not be completed because disk data is unavailable.' -Evidence 'Sources: Get-PhysicalDisk, Win32_DiskDrive.'
 }
 else {
     foreach ($disk in $physicalDisks) {
@@ -214,6 +215,7 @@ Write-Section 'Volumes'
 if ($volumes.Count -eq 0) {
     Write-Host 'No volume information available.'
     Write-Host 'Data availability: volume free-space data is unavailable.'
+    Write-WdtFinding -Severity 'WARN' -Code 'VOLUME_DATA_UNAVAILABLE' -Message 'Volume free-space assessment could not be completed because volume data is unavailable.' -Evidence 'Sources: Get-Volume, Win32_LogicalDisk.'
 }
 else {
     foreach ($volume in $volumes) {

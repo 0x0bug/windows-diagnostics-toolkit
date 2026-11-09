@@ -6,7 +6,7 @@ All production diagnostics are read-only by design.
 
 ## Structured snapshots and offline comparison
 
-In a source checkout, explicitly select supported modules to request JSON in
+Explicitly select supported modules to request JSON in
 addition to the ordinary TXT report (and optional Markdown):
 
 ```powershell
@@ -76,7 +76,7 @@ process exited successfully; valid unavailable source data stays explicit.
 
 ## Incident investigation by symptom and time
 
-In a source checkout, investigate an approximate time without selecting modules:
+Investigate an approximate time without selecting modules:
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -IncidentSymptom AppFailure -IncidentAt '2026-11-02T14:30:00+02:00' -IncidentBeforeMinutes 30 -IncidentAfterMinutes 30 -PrivacyMode -ExportMarkdown -OutputDirectory C:\WdtReports
@@ -106,7 +106,8 @@ Incident options cannot be combined with `-All`, `-Module`, individual module
 switches, `-Interactive`, snapshot options, or network probe options. Invalid
 combinations are rejected before collection or directory creation. Existing
 ordinary CLI, TUI, standalone launchers and pinned beta bootstrap retain their
-behavior. Source-checkout capabilities do not update the published beta package.
+behavior. Snapshots, offline comparison, and incident reports are included in
+`v0.2.0-beta.1`; earlier release packages are unchanged.
 
 The command writes `WindowsDiagnosticsIncident-<timestamp>-<GUID>.txt` and, with
 `-ExportMarkdown`, matching Markdown. It creates no incident JSON. Privacy is
@@ -158,13 +159,15 @@ Administrator rights are optional. Some Windows data sources expose less detail 
 
 ## Installation
 
-The public `v0.1.0-beta` prerelease is available through the fixed-release bootstrap:
+The public `v0.2.0-beta.1` prerelease is available through the fixed-release bootstrap:
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The bootstrap downloads the `v0.1.0-beta` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
+The bootstrap downloads the `v0.2.0-beta.1` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
+
+The repository bootstrap sets `Invoke-WebRequest -TimeoutSec 60` for each ZIP and checksum request. It also sets `OperationTimeoutSeconds` to 60 when that parameter is supported. That stream read timeout limits inactivity between reads; it is not an overall download deadline. A timeout stops the bootstrap before extraction or execution and removes its temporary directory.
 
 To inspect the bootstrap before running it:
 
@@ -334,7 +337,7 @@ Privacy Mode centrally redacts captured module output, findings, headers, and re
 - `<MAC-1>` for a MAC address
 - `<ID-1>` for a SID, GUID, or device identifier
 
-The token map resets for each report. Process names, application names, and dump-file names remain visible for diagnostic context. Privacy Mode cannot guarantee removal of arbitrary sensitive text embedded in Windows Event Log messages. Review every report before publishing it.
+The token map resets for each report. Recognizable process names, application names, and dump-file names remain visible for diagnostic context. Ambiguous names without a file extension may be redacted to protect identities. Privacy Mode cannot guarantee removal of arbitrary sensitive text embedded in Windows Event Log messages. Review every report before publishing it.
 
 Combined reports always replace proxy URL credentials and sensitive query values with `<REDACTED>`, including when Privacy Mode is disabled.
 
@@ -437,6 +440,8 @@ The module only queries `w32tm.exe /query /source` and `w32tm.exe /query /status
 ### Storage Status
 
 Reads Windows-reported physical disk state, volume free space, and reliability counters when `Get-StorageReliabilityCounter` supports the device. Missing counters are normal for some USB, RAID, virtual, and controller-backed disks and are not a warning. This is not a complete SMART or NVMe diagnostic. No new serial numbers or device identifiers are collected. The default low-space warning threshold is 15 percent.
+
+If neither the primary storage API nor its CIM fallback returns physical disk or volume data, `DISK_DATA_UNAVAILABLE` or `VOLUME_DATA_UNAVAILABLE` reports a `WARN` that the corresponding assessment could not be completed. These findings describe data availability, not a confirmed disk health or free-space problem. A successful fallback does not create an availability finding.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Disk

@@ -169,6 +169,94 @@ Assert-True -Condition $protectedFixture.Contains('10.0.22631.3155') -Message 'O
 Assert-True -Condition (-not $protectedFixture.Contains('secret-value')) -Message 'A labelled process command line must be redacted.'
 Assert-Equal -Expected $protectedFixture -Actual (Protect-WdtText -Text $protectedFixture -Context $redactionContext) -Message 'Redaction must be idempotent for an existing context.'
 
+$taskSid = 'S-1-5-21-111111111-222222222-333333333-1001'
+$taskNames = Protect-WdtText -Text ("OneDrive Reporting Task-$taskSid`nGoogleUpdateTaskUser${taskSid}Core`nSID: $taskSid") -Context $redactionContext
+Assert-True -Condition (-not $taskNames.Contains($taskSid)) -Message 'A SID embedded in a scheduled-task name must be redacted.'
+Assert-True -Condition ([regex]::IsMatch($taskNames, 'OneDrive Reporting Task-(?<Token><ID-\d+>)\r?\nGoogleUpdateTaskUser\k<Token>Core\r?\nSID: \k<Token>')) -Message 'Embedded SID redaction must preserve task context and reuse the SID token.'
+
+$narrativeContext = New-WdtRedactionContext -ComputerName 'SyntheticPrivateHost' -UserName 'SyntheticPrivateUser' -UserDomain '' -UserProfile ''
+foreach ($narrative in @(
+    'The process svchost.exe has initiated the restart of computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser.',
+    'The process svchost.exe running on computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser was terminated.',
+    'Process: svchost.exe has initiated the restart of computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser.',
+    'Application name: helper running on computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser was stopped.',
+    'The process helper running on computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser was terminated.',
+    'Process: "svchost.exe running on computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser" was terminated.',
+    "Process: 'svchost.exe running on computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser' was terminated.",
+    'Process "helper running on computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser" was terminated.',
+    'Process: "Helper Running On Computer SyntheticPrivateHost On Behalf Of User SyntheticPrivateUser" was terminated.',
+    "Process 'Helper Running On Computer SyntheticPrivateHost On Behalf Of User SyntheticPrivateUser' was terminated.",
+    'Application name: Helper Running On Computer SyntheticPrivateHost On Behalf Of User SyntheticPrivateUser',
+    'Dump file: audit.dmp containing data from computer SyntheticPrivateHost for user SyntheticPrivateUser was found.',
+    'The application helper has reported computer SyntheticPrivateHost and user SyntheticPrivateUser',
+    'The process status for computer SyntheticPrivateHost and user SyntheticPrivateUser',
+    '<Event><Data>The process svchost.exe has initiated the restart of computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser.</Data></Event>',
+    '<Event><Data>Process: svchost.exe running on computer SyntheticPrivateHost on behalf of user SyntheticPrivateUser was terminated.</Data></Event>'
+)) {
+    $safeNarrative = Protect-WdtText -Text $narrative -Context $narrativeContext
+    Assert-True -Condition ($safeNarrative -notmatch 'SyntheticPrivateHost|SyntheticPrivateUser') -Message 'Narrative text after a process/application name bypassed identity masking.'
+    Assert-Equal -Expected $safeNarrative -Actual (Protect-WdtText -Text $safeNarrative -Context $narrativeContext) -Message 'Narrative masking must remain idempotent.'
+    $safeCrlf = Protect-WdtText -Text ($narrative + "`r`n" + $narrative) -Context $narrativeContext
+    Assert-Equal -Expected ($safeNarrative + "`r`n" + $safeNarrative) -Actual $safeCrlf -Message 'CRLF must not extend a diagnostic name into another line.'
+}
+
+# Only the actual name is exempt: the same identity appearing later in a
+# narrative must still use a token, including inside a quoted payload.
+foreach ($nameFixture in @(
+    [pscustomobject]@{ Text='Process SyntheticPrivateUser Helper failed on computer SyntheticPrivateHost for user SyntheticPrivateUser.'; Name='SyntheticPrivateUser Helper' },
+    [pscustomobject]@{ Text='Process: "SyntheticPrivateUser Helper" failed on computer SyntheticPrivateHost for user SyntheticPrivateUser.'; Name='"SyntheticPrivateUser Helper"' },
+    [pscustomobject]@{ Text="Application 'SyntheticPrivateUser Helper' failed on computer SyntheticPrivateHost for user SyntheticPrivateUser."; Name="'SyntheticPrivateUser Helper'" },
+    [pscustomobject]@{ Text='Faulting application name: SyntheticPrivateUser Photo Editor.exe running on computer SyntheticPrivateHost for user SyntheticPrivateUser.'; Name='SyntheticPrivateUser Photo Editor.exe' },
+    [pscustomobject]@{ Text='Application: SyntheticPrivateUser For User.exe running on computer SyntheticPrivateHost for user SyntheticPrivateUser.'; Name='SyntheticPrivateUser For User.exe' },
+    [pscustomobject]@{ Text='Process: "SyntheticPrivateUser Photo Editor.exe running on computer SyntheticPrivateHost for user SyntheticPrivateUser" was terminated.'; Name='SyntheticPrivateUser Photo Editor.exe' }
+)) {
+    $safeName = Protect-WdtText -Text $nameFixture.Text -Context $narrativeContext
+    Assert-True -Condition $safeName.Contains($nameFixture.Name) -Message 'A delimited diagnostic name lost its useful identity collision.'
+    Assert-True -Condition (-not $safeName.Contains('computer SyntheticPrivateHost') -and -not $safeName.Contains('for user SyntheticPrivateUser')) -Message 'Preserving a name exempted a repeated identity later in the narrative.'
+    Assert-Equal -Expected $safeName -Actual (Protect-WdtText -Text $safeName -Context $narrativeContext) -Message 'Name preservation and narrative masking must be idempotent together.'
+}
+$unicodeUser = [string][char]0x00C5 + 'lice'
+$unicodeName = 'Application: ' + $unicodeUser + ' ' + [char]0x00C9 + 'diteur'
+$unicodeContext = New-WdtRedactionContext -ComputerName '' -UserName $unicodeUser -UserDomain '' -UserProfile ''
+Assert-Equal -Expected $unicodeName -Actual (Protect-WdtText -Text $unicodeName -Context $unicodeContext) -Message 'A standalone Unicode application name must remain useful.'
+$benignContext = New-WdtRedactionContext -ComputerName 'WINDOWS' -UserName 'User' -UserDomain '' -UserProfile ''
+$benignNames = 'Process User Helper failed; Application: Windows User Photo Editor; User.exe Windows.dll; NotTested; Unavailable'
+Assert-Equal -Expected $benignNames -Actual (Protect-WdtText -Text $benignNames -Context $benignContext) -Message 'Product names, diagnostic names and neutral statuses must stay visible.'
+
+$networkPrivacyFixture = @'
+DNS suffix      : private.corp.test
+DNS search list : branch.private.test, second.private.test
+Proxy server   : http=proxy.private.test:8080;https=secure.private.test:8443
+Auto config URL: https://pac.private.test/private/config.pac
+WinHTTP proxy details: arbitrary localized label: hidden.private.test:9090; bypass=*.private.test
+netsh.exe exited with code 5; WinHTTP proxy details: localized error: proxy.error.private.test:6060
+DNS / www.microsoft.com: Resolved
+TCP HTTPS / https://www.microsoft.com/: Reachable
+'@
+$safeNetworkContext = New-WdtRedactionContext -ComputerName '' -UserName '' -UserDomain '' -UserProfile ''
+$safeNetwork = Protect-WdtText -Text $networkPrivacyFixture -Context $safeNetworkContext
+foreach ($sensitiveValue in @('private.corp.test','branch.private.test','second.private.test','proxy.private.test','secure.private.test','pac.private.test','/private/config.pac','hidden.private.test','*.private.test','proxy.error.private.test')) {
+    Assert-True -Condition (-not $safeNetwork.Contains($sensitiveValue)) -Message "Sensitive network configuration '$sensitiveValue' was not redacted."
+}
+Assert-True -Condition $safeNetwork.Contains('DNS / www.microsoft.com: Resolved') -Message 'Privacy Mode must preserve the public DNS probe name.'
+Assert-True -Condition $safeNetwork.Contains('TCP HTTPS / https://www.microsoft.com/: Reachable') -Message 'Privacy Mode must preserve the public HTTPS probe endpoint.'
+Assert-True -Condition $safeNetwork.Contains('netsh.exe exited with code 5; WinHTTP proxy details: <ID-') -Message 'Privacy Mode must preserve source status/code before the WinHTTP payload.'
+Assert-Equal -Expected $safeNetwork -Actual (Protect-WdtText -Text $safeNetwork -Context $safeNetworkContext) -Message 'Network-field masking must be idempotent.'
+$crlfNetwork = Protect-WdtText -Text ($networkPrivacyFixture -replace '\r?\n', "`r`n") -Context $safeNetworkContext
+Assert-Equal -Expected ($safeNetwork -replace '\r?\n', "`n") -Actual ($crlfNetwork -replace '\r?\n', "`n") -Message 'CRLF and LF network fields must receive identical privacy protection.'
+foreach ($field in @('DNS suffix','DNS search list','Proxy server','Auto config URL')) {
+    foreach ($value in @('None','Unavailable','NotTested','Unknown','')) {
+        $neutralField = '{0}: {1}' -f $field, $value
+        Assert-Equal -Expected $neutralField -Actual (Protect-WdtText -Text $neutralField -Context $safeNetworkContext) -Message 'A canonical empty or unavailable network field must retain its status.'
+    }
+}
+$emailContext = New-WdtRedactionContext -ComputerName '' -UserName 'SyntheticPrivateUser' -UserDomain '' -UserProfile ''
+$emailFixture = 'Contact SyntheticPrivateUser.smith+tag@example.test; again SyntheticPrivateUser.smith+tag@example.test; <Data Name="Email">other.person@private.example.test</Data>'
+$safeEmail = Protect-WdtText -Text $emailFixture -Context $emailContext
+Assert-True -Condition ($safeEmail -notmatch 'SyntheticPrivateUser|smith|example\.test|other\.person|private\.example') -Message 'Email masking must remove the complete address before known-user replacement.'
+Assert-True -Condition ([regex]::IsMatch($safeEmail, 'Contact (?<Token><USER-\d+>); again \k<Token>; <Data Name="Email"><USER-\d+></Data>')) -Message 'Email redaction must preserve surrounding text/XML and use stable per-context tokens.'
+Assert-Equal -Expected $safeEmail -Actual (Protect-WdtText -Text $safeEmail -Context $emailContext) -Message 'Email masking must be idempotent.'
+
 $pathBoundaryContext = New-WdtRedactionContext -ComputerName '' -UserName 'Ann' -UserDomain '' -UserProfile 'C:\Users\Ann'
 $pathBoundaryResult = Protect-WdtText -Text 'Other profile: C:\Users\Anna\report.txt' -Context $pathBoundaryContext
 Assert-True -Condition $pathBoundaryResult.Contains('C:\Users\<USER-1>\report.txt') -Message 'A longer user-profile name must be redacted as its own profile instead of a partial literal match.'
@@ -256,6 +344,8 @@ Assert-True -Condition $fragmentSecretFixture.Contains('#access_token=<REDACTED>
 $commandSecretFixtures = @(
     [pscustomobject]@{ Input = 'tool.exe --api-token alpha --mode safe'; Secrets = @('alpha'); Preserved = @('tool.exe', '--mode safe') },
     [pscustomobject]@{ Input = 'tool.exe --api-token=bravo --token charlie --token=delta'; Secrets = @('bravo', 'charlie', 'delta'); Preserved = @('tool.exe') },
+    [pscustomobject]@{ Input = 'tool.exe --api-key=api-secret --access-token access-secret --client-secret="client secret" --pwd pwd-secret'; Secrets = @('api-secret', 'access-secret', 'client secret', 'pwd-secret'); Preserved = @('tool.exe', '--client-secret="<REDACTED>"') },
+    [pscustomobject]@{ Input = "tool.exe --api_key 'underscored secret' /Access_Token:slash-access -ClientSecret=compact-client /PWD:slash-pwd --refresh-token refresh-secret --id-token=id-secret --passwd passwd-secret"; Secrets = @('underscored secret', 'slash-access', 'compact-client', 'slash-pwd', 'refresh-secret', 'id-secret', 'passwd-secret'); Preserved = @('tool.exe') },
     [pscustomobject]@{ Input = 'tool.exe --password "quoted secret" --secret=''single secret'''; Secrets = @('quoted secret', 'single secret'); Preserved = @('tool.exe', '--password "<REDACTED>"', "--secret='<REDACTED>'") },
     [pscustomobject]@{ Input = "tool.exe`t-Key`tEcho-Secret`t/ToKeN:slash-secret --KEY=last-secret"; Secrets = @('Echo-Secret', 'slash-secret', 'last-secret'); Preserved = @('tool.exe') },
     [pscustomobject]@{ Input = 'tool.exe "--token=outer-secret" --password trailing\ --verbose'; Secrets = @('outer-secret', 'trailing\'); Preserved = @('tool.exe', '--verbose') }
@@ -273,7 +363,8 @@ foreach ($fixture in $commandSecretFixtures) {
 $commandNegativeFixtures = @(
     'tool.exe --mode safe --monkey banana',
     'tool.exe /endpoint:https://example.test/path -KeyboardLayout en-US',
-    'tool.exe --tokenizer enabled --password-policy strict'
+    'tool.exe --tokenizer enabled --password-policy strict',
+    'tool.exe --api-keyring public --access-token-lifetime 30 --client-secret-name public --pwd-policy strict'
 )
 foreach ($fixture in $commandNegativeFixtures) {
     Assert-Equal -Expected $fixture -Actual (Protect-WdtCommandLineSecrets -Text $fixture) -Message "A non-secret command argument changed on PowerShell $($PSVersionTable.PSVersion)."

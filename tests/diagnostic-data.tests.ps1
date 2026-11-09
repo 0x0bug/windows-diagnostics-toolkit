@@ -94,6 +94,16 @@ try {
     Assert-Equal 'C:\Users\PrivateUser\app.exe' $raw.Evidence[0].Component 'Privacy must not mutate the original.'
     $json=$protected | ConvertTo-Json -Depth 12
     Assert-True ($json -notmatch 'PRIVATE-HOST|PrivateUser|private quoted token|11111111-2222') 'Nested privacy projection leaked identity, secrets, or raw identifiers.'
+    $raw.Evidence[0].Message = '<Event><Data Name="Message">The process svchost.exe has initiated the restart of computer PRIVATE-HOST on behalf of user PrivateUser</Data><Data Name="Email">PrivateUser.smith@example.test</Data><Data Name="Task">GoogleUpdateTaskUserS-1-5-21-111111111-222222222-333333333-1001Core</Data><Data Name="Command">tool.exe --api-key=data-api-secret --access-token=data-access-secret --client-secret=data-client-secret --pwd=data-pwd-secret</Data></Event>'
+    $raw.Sources[0].Error = "DNS suffix: data.private.test`nDNS search list: branch.data.private.test, other.data.private.test`nProxy server: data-proxy.private.test:8080`nAuto config URL: https://data-pac.private.test/private.pac"
+    $protected = Protect-WdtDiagnosticData $raw $context
+    $projectionPath = Join-Path $tempRoot 'privacy-projection.json'
+    [IO.File]::WriteAllText($projectionPath, (ConvertTo-Json -InputObject $protected -Depth 12), [Text.Encoding]::UTF8)
+    $projectedArtifact = [IO.File]::ReadAllText($projectionPath)
+    Assert-True ($projectedArtifact -notmatch 'PRIVATE-HOST|PrivateUser|smith@example|S-1-5-21-|data-(?:api|access|client|pwd)-secret|(?:data|branch|other|data-proxy|data-pac)\.private\.test|/private\.pac') 'Actual JSON string fields leaked XML event identities, aliases or network configuration.'
+    Assert-True ($protected.Evidence[0].Message.Contains('svchost.exe') -and $protected.Evidence[0].Message.Contains('GoogleUpdateTaskUser<ID-')) 'Structured privacy removed useful process/task context.'
+    $withoutContext = Protect-WdtDiagnosticData $raw
+    Assert-True (($withoutContext | ConvertTo-Json -Depth 12) -notmatch 'data-(?:api|access|client|pwd)-secret') 'Command-secret aliases leaked from ordinary structured output.'
     $broken=$raw | ConvertTo-Json -Depth 12 | ConvertFrom-Json; $broken.Facts[0].SourceIds=@('crash-source-2'); Assert-Throws { Assert-WdtDiagnosticData $broken } 'Evidence must belong to a declared fact source.'
     $broken=$raw | ConvertTo-Json -Depth 12 | ConvertFrom-Json; $broken.Evidence[0].OriginalOffset='+14:01'; Assert-Throws { Assert-WdtDiagnosticData $broken } 'Impossible offsets must fail.'
 
@@ -212,7 +222,12 @@ function Get-WinEvent {
     }
     if ($FilterHashtable.LogName -ne 'Application') { return @() }
     foreach ($n in @(0,1,2)) {
-        [pscustomobject]@{LogName='Application'; ProviderName='Fixture'; Id=7000; Level=2; RecordId=(200+$n); TimeCreated=([datetime]'2026-11-02T12:00:00Z').AddHours($n); Message='fixture'; LevelDisplayName='Error'}
+        $message = switch ($n) {
+            0 { 'The process svchost.exe running on computer ALICE-PC on behalf of user alice was terminated.' }
+            1 { 'Process: svchost.exe has initiated the restart of computer ALICE-PC on behalf of user alice.' }
+            2 { 'fixture' }
+        }
+        [pscustomobject]@{LogName='Application'; ProviderName=('Fixture-'+$n); Id=7000; Level=2; RecordId=(200+$n); TimeCreated=([datetime]'2026-11-02T12:00:00Z').AddHours($n); Message=$message; LevelDisplayName='Error'}
     }
 }
 & '__MODULE__' -MaxEvents 3
@@ -226,6 +241,45 @@ Write-Output ('queries='+$global:queryCount)
     Assert-Equal high-signals $events.Data.Evidence[1].SourceId 'A signal supplied only by the signal query must retain its actual source.'
     Assert-True (($events.OutputLines -join '') -match 'queries=3') 'Event export must reuse three existing queries.'
     Assert-True (($events.OutputLines -join '') -match 'Time window \[UTC\).*2026-11-02T12:00:00.*2026-11-02T13:00:00') 'Opt-in event report did not show the effective data window.'
+
+    # Reuse the actual Events collector fixture through the real runner and
+    # report/snapshot projections. Both narratives must be represented before
+    # checking final bytes, so source loss cannot make privacy pass.
+    & {
+        foreach ($helperName in @('module-registry','snapshot','snapshot-compare','incident')) { . (Join-Path $repositoryRoot ('scripts\' + $helperName + '.ps1')) }
+        $entryTokens=$null; $entryErrors=$null
+        $entryAst=[Management.Automation.Language.Parser]::ParseFile((Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'),[ref]$entryTokens,[ref]$entryErrors)
+        Assert-Equal 0 @($entryErrors).Count 'Report entrypoint did not parse for the Events privacy fixture.'
+        foreach ($definition in @($entryAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] },$true))) { . ([scriptblock]::Create($definition.Extent.Text)) }
+        $toolkitVersion='fixture'
+        $identityEnvironment=@{}
+        foreach ($name in @('COMPUTERNAME','USERNAME','USERDOMAIN','USERPROFILE')) { $identityEnvironment[$name]=[Environment]::GetEnvironmentVariable($name) }
+        try {
+            $env:COMPUTERNAME='ALICE-PC'; $env:USERNAME='alice'; $env:USERDOMAIN='EXAMPLE'; $env:USERPROFILE='C:\Users\alice'
+            # Derive dates from collection time: this fixture must remain inside
+            # SaveSnapshot's seven-day window after the original audit date.
+            $privacyEventFixture=Join-Path $tempRoot 'events-privacy.ps1'
+            $privacyEventText=$eventText.Replace("[datetime]'2026-11-02T12:00:00Z'",'([datetime]::UtcNow.AddHours(-3))')
+            $privacyEventText=$privacyEventText.Replace('-MaxEvents 3','-MaxEvents 10')
+            [IO.File]::WriteAllText($privacyEventFixture,$privacyEventText.Replace('__MODULE__',$eventModule),[Text.Encoding]::UTF8)
+            $definition=[pscustomobject]@{ Id='Events'; Title='Events'; EntryPoint=$privacyEventFixture; OptionBindings=@{}; DefaultArguments=@() }
+            $report=Invoke-WdtReport -ModuleDefinitions @($definition) -CoreOptions @{} -OutputDirectory (Join-Path $tempRoot 'events-privacy-artifacts') -SaveSnapshot $true -PrivacyMode $true -ExportMarkdown $true -SuppressConsoleOutput $true
+            Assert-Equal 0 $report.ExitCode 'Actual Events privacy report lost successful execution/data collection.'
+            $snapshot=Get-Content -LiteralPath $report.SnapshotPath -Raw | ConvertFrom-Json
+            $messages=@($snapshot.Modules[0].Data.Evidence | ForEach-Object { $_.Message }) -join "`n"
+            Assert-True ($messages.Contains('svchost.exe running on computer') -and $messages.Contains('Process: svchost.exe has initiated')) 'Events snapshot did not retain both narrative variants.'
+            foreach ($artifactPath in @($report.TextReportPath,$report.MarkdownReportPath,$report.SnapshotPath)) {
+                $artifact=[IO.File]::ReadAllText($artifactPath)
+                Assert-True ($artifact -notmatch 'ALICE-PC|\balice\b') 'Final Events PrivacyMode TXT/Markdown/JSON leaked known narrative identities.'
+                # Windows PowerShell escapes token angle brackets in JSON;
+                # inspect decoded values for semantic preservation in that format.
+                $displayText=if ($artifactPath -eq $report.SnapshotPath) { $messages } else { $artifact }
+                Assert-True ($displayText.Contains('svchost.exe running on computer') -and $displayText.Contains('Process: svchost.exe has initiated')) 'A final Events artifact lost one of the narrative variants.'
+                Assert-True ($displayText.Contains('<HOST-') -and $displayText.Contains('<USER-')) 'Events privacy failed to tokenize identities.'
+            }
+        }
+        finally { foreach ($name in $identityEnvironment.Keys) { [Environment]::SetEnvironmentVariable($name,$identityEnvironment[$name]) } }
+    }
 }
 finally {
     foreach ($name in $savedEnv.Keys) { [Environment]::SetEnvironmentVariable($name,$savedEnv[$name]) }

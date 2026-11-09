@@ -72,12 +72,13 @@ try {
 
     $private=New-FixtureSnapshot
     $unicode=-join @([char]0x041f,[char]0x0440,[char]0x0438,[char]0x0432,[char]0x0435,[char]0x0442)
-    $private.Modules[0].Data.Facts[0].Values.Version=$unicode+' PRIVATE-HOST "C:\Users\PrivateUser" --token "secret value"'
+    $private.Modules[0].Data.Facts[0].Values.Version=$unicode+' PRIVATE-HOST "C:\Users\PrivateUser" --token "secret value" --api-key=snapshot-api-secret --access-token=snapshot-access-secret --client-secret=snapshot-client-secret --pwd=snapshot-pwd-secret'+"`n"+'<Event><Data>The process svchost.exe has initiated the restart of computer PRIVATE-HOST on behalf of user PrivateUser</Data><Data>PrivateUser.smith@example.test</Data><Data>OneDrive Reporting Task-S-1-5-21-111111111-222222222-333333333-1001</Data></Event>'+"`nDNS suffix: snapshot.private.test`nDNS search list: branch.snapshot.private.test`nProxy server: snapshot-proxy.private.test:8080`nAuto config URL: https://snapshot-pac.private.test/private/config.pac"
     $context=New-WdtRedactionContext -ComputerName PRIVATE-HOST -UserName PrivateUser -UserProfile 'C:\Users\PrivateUser'
     $private.PrivacyMode=$true
     $privatePath=Write-WdtSnapshot $private $temporaryRoot -Context $context
     $privateText=[IO.File]::ReadAllText($privatePath)
     Assert-True ($privateText -notmatch 'PRIVATE-HOST|PrivateUser|secret value|LiteralMap|RegexRules|RawContext') 'Snapshot leaked protected values or the context.'
+    Assert-True ($privateText -notmatch 'smith@example|S-1-5-21-|snapshot-(?:api|access|client|pwd)-secret|(?:snapshot|snapshot-proxy|snapshot-pac)\.private\.test|/private/config\.pac') 'Snapshot JSON leaked protected XML/string-field values or configuration.'
     Assert-True ($privateText.Contains($unicode)) 'UTF-8 non-ASCII text was lost.'
     Assert-Equal SnapshotLocal (Read-WdtSnapshot $privatePath).Modules[0].Data.Facts[0].IdentityScope 'Protected identities must stay local.'
     Assert-True ($private.Modules[0].Data.Facts[0].Values.Version.Contains('PRIVATE-HOST')) 'Writer mutated raw in-memory input.'

@@ -25,7 +25,7 @@ Assert-True (Test-Path -LiteralPath $versionPath -PathType Leaf) 'VERSION is mis
 $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
 $semanticPrereleasePattern = '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*$'
 Assert-True ($version -match $semanticPrereleasePattern) 'VERSION is not a valid semantic prerelease version.'
-Assert-Equal '0.1.0-beta' $version 'Unexpected release version.'
+Assert-Equal '0.2.0-beta.1' $version 'Unexpected release version.'
 $isolatedRepositoryRoot = Join-Path -Path $temporaryRoot -ChildPath 'repository'
 $distDirectory = Join-Path -Path $isolatedRepositoryRoot -ChildPath 'dist'
 $archiveName = "windows-diagnostics-toolkit-v$version.zip"
@@ -104,7 +104,7 @@ try {
         Assert-True (@($entries | Where-Object { $_.StartsWith($requiredDirectory, [System.StringComparison]::OrdinalIgnoreCase) }).Count -gt 0) "Archive is missing directory content: $requiredDirectory"
     }
 
-    foreach ($forbiddenDirectory in @('.git/', '.github/', 'tests/', 'site/', 'dist/')) {
+    foreach ($forbiddenDirectory in @('.git/', '.github/', 'tests/', 'site/', 'dist/', 'docs/superpowers/')) {
         Assert-Equal 0 @($entries | Where-Object { $_.StartsWith($forbiddenDirectory, [System.StringComparison]::OrdinalIgnoreCase) }).Count "Archive contains forbidden directory: $forbiddenDirectory"
     }
     Assert-Equal 0 @($entries | Where-Object { $_ -match '(^|/)(WindowsDiagnostics(?:Report|Comparison|Incident)-.*\.(txt|md)|WindowsDiagnosticsSnapshot-.*\.json|.*\.(tmp|temp))$' }).Count 'Archive contains generated reports, snapshots, or temporary files.'
@@ -113,14 +113,36 @@ try {
     $extractedRoot = Join-Path -Path $temporaryRoot -ChildPath 'extracted'
     Expand-Archive -LiteralPath $archivePath -DestinationPath $extractedRoot
     $extractedReportDirectory = Join-Path -Path $temporaryRoot -ChildPath 'extracted-report'
-    & $powerShellPath -NoProfile -ExecutionPolicy Bypass -File (Join-Path $extractedRoot 'Invoke-WindowsDiagnostics.ps1') -System -OutputDirectory $extractedReportDirectory *> $null
+    & $powerShellPath -NoProfile -ExecutionPolicy Bypass -File (Join-Path $extractedRoot 'Invoke-WindowsDiagnostics.ps1') -System -ExportMarkdown -OutputDirectory $extractedReportDirectory *> $null
     Assert-Equal 0 $LASTEXITCODE 'Extracted release System report failed.'
-    Assert-Equal 1 @(Get-ChildItem -LiteralPath $extractedReportDirectory -Filter 'WindowsDiagnosticsReport-*.txt' -File).Count 'Extracted release did not create a TXT report.'
+    foreach ($extension in @('txt','md')) {
+        $extractedReports = @(Get-ChildItem -LiteralPath $extractedReportDirectory -Filter ("WindowsDiagnosticsReport-*.$extension") -File)
+        Assert-Equal 1 $extractedReports.Count "Extracted release did not create exactly one $extension report."
+        $extractedReportText = Get-Content -LiteralPath $extractedReports[0].FullName -Raw
+        Assert-True ($extractedReportText.Contains("Toolkit version : $version")) "Extracted release $extension report has the wrong version."
+        Assert-True ($extractedReportText -notmatch '#< CLIXML|<Objs\b') "Extracted release $extension report contains serialized CLIXML."
+    }
 
     $bootstrapTokens = $null
     $bootstrapErrors = $null
     $bootstrapSource = Get-Content -LiteralPath $bootstrapScript -Raw
     $bootstrapAst = [System.Management.Automation.Language.Parser]::ParseFile($bootstrapScript, [ref]$bootstrapTokens, [ref]$bootstrapErrors)
+    $expectedBootstrapConstants = @{
+        wdtVersion = $version
+        wdtArchiveName = $archiveName
+        wdtReleaseBaseUri = "https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v$version"
+    }
+    foreach ($constantName in $expectedBootstrapConstants.Keys) {
+        $assignments = @($bootstrapAst.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+            $node.Left.VariablePath.UserPath -ceq $constantName
+        }, $true))
+        Assert-Equal 1 $assignments.Count "Bootstrap must assign exactly one release constant: $constantName"
+        Assert-True ($assignments[0].Right -is [System.Management.Automation.Language.CommandExpressionAst] -and $assignments[0].Right.Expression -is [System.Management.Automation.Language.StringConstantExpressionAst]) "Bootstrap release constant must be a string literal: $constantName"
+        Assert-Equal $expectedBootstrapConstants[$constantName] $assignments[0].Right.Expression.Value "Bootstrap release constant does not match VERSION: $constantName"
+    }
     Assert-Equal 0 @($bootstrapErrors).Count 'Bootstrap AST parse failed.'
 
     $bootstrapFunctionNames = @('Get-WdtExpectedChecksum', 'Test-WdtArchiveHash', 'New-WdtTemporaryDirectory', 'Invoke-WdtDownloadFile', 'Assert-WdtPackageLayout', 'Get-WdtCurrentPowerShellPath', 'Invoke-WdtBootstrap')
@@ -166,7 +188,7 @@ Invoke-WdtBootstrap -NewTemporaryDirectory {
     Assert-Equal 'Offline scope fixture.' $scopeFixtureError 'IEX-like bootstrap scope fixture did not use the offline downloader.'
     Assert-True (-not (Test-Path -LiteralPath $scopeFixtureDirectory)) 'IEX-like bootstrap scope fixture did not clean its temporary directory.'
 
-    foreach ($functionName in @('Get-WdtExpectedChecksum', 'Test-WdtArchiveHash', 'New-WdtTemporaryDirectory', 'Assert-WdtPackageLayout', 'Get-WdtCurrentPowerShellPath', 'Invoke-WdtBootstrap')) {
+    foreach ($functionName in $bootstrapFunctionNames) {
         $definition = $bootstrapAst.Find({
                 param($node)
                 $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $functionName
@@ -176,7 +198,7 @@ Invoke-WdtBootstrap -NewTemporaryDirectory {
     }
     $wdtVersion = $version
     $wdtArchiveName = $archiveName
-    $wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.1.0-beta'
+    $wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.1'
     $wdtArchiveUri = "$wdtReleaseBaseUri/$wdtArchiveName"
     $wdtChecksumUri = "$wdtArchiveUri.sha256"
 
@@ -193,10 +215,121 @@ Invoke-WdtBootstrap -NewTemporaryDirectory {
 
     $downloadReferences = @([regex]::Matches($bootstrapSource, '(?i)https?://[^''"\s]+') | ForEach-Object Value)
     Assert-Equal 1 $downloadReferences.Count 'Bootstrap must contain exactly one fixed URL base.'
-    Assert-Equal 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.1.0-beta' $downloadReferences[0] 'Bootstrap references an unapproved download host or path.'
+    Assert-Equal 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.1' $downloadReferences[0] 'Bootstrap references an unapproved download host or path.'
     Assert-True ($bootstrapSource -notmatch '(?i)(/main/|/master/|raw\.githubusercontent\.com|gist\.github(?:usercontent)?\.com)') 'Bootstrap contains a forbidden branch, raw, or gist download reference.'
     Assert-True ($bootstrapSource -notmatch '(?m)^\s*exit\b') 'Bootstrap must not use exit.'
     Assert-True ($bootstrapSource -notmatch '\bStart-Process\b') 'Bootstrap must launch the child PowerShell process in the current console.'
+
+    & {
+        $requestCalls = New-Object System.Collections.Generic.List[object]
+        $timeoutUri = $null
+        function Invoke-WebRequest {
+            [CmdletBinding()]
+            param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing, [int]$TimeoutSec, [int]$OperationTimeoutSeconds)
+            [void]$requestCalls.Add([pscustomobject]@{ Uri = $Uri; OutFile = $OutFile; UseBasicParsing = [bool]$UseBasicParsing; TimeoutSec = $TimeoutSec; OperationTimeoutSeconds = $OperationTimeoutSeconds; Progress = [string]$ProgressPreference })
+            [System.IO.File]::WriteAllText($OutFile, 'offline download fixture')
+            if ($Uri -eq $timeoutUri) {
+                throw [System.Net.WebException]::new('Offline request timeout fixture.', [System.Net.WebExceptionStatus]::Timeout)
+            }
+        }
+
+        Invoke-WdtDownloadFile -Uri $wdtArchiveUri -Destination (Join-Path $temporaryRoot 'download-archive.zip')
+        Invoke-WdtDownloadFile -Uri $wdtChecksumUri -Destination (Join-Path $temporaryRoot 'download-archive.zip.sha256')
+        Assert-Equal 2 $requestCalls.Count 'Bootstrap downloader did not request both fixed release files.'
+        Assert-Equal $wdtArchiveUri $requestCalls[0].Uri 'Bootstrap downloader changed the fixed archive URL.'
+        Assert-Equal $wdtChecksumUri $requestCalls[1].Uri 'Bootstrap downloader changed the fixed checksum URL.'
+        foreach ($request in $requestCalls) {
+            Assert-Equal 60 $request.TimeoutSec 'Bootstrap downloader must apply a 60-second request timeout.'
+            Assert-Equal 60 $request.OperationTimeoutSeconds 'Bootstrap downloader must apply a 60-second stream read timeout when supported.'
+            Assert-True $request.UseBasicParsing 'Bootstrap downloader must preserve basic parsing for Windows PowerShell.'
+        }
+        $unapprovedDownload = Join-Path $temporaryRoot 'unapproved-download.zip'
+        $unapprovedError = $null
+        try { Invoke-WdtDownloadFile -Uri 'https://example.invalid/unapproved.zip' -Destination $unapprovedDownload }
+        catch { $unapprovedError = $_.Exception.Message }
+        Assert-Equal 'Refusing unapproved download URL: https://example.invalid/unapproved.zip' $unapprovedError 'Bootstrap downloader accepted an unapproved URL.'
+        Assert-Equal 2 $requestCalls.Count 'Bootstrap downloader sent an unapproved URL to Invoke-WebRequest.'
+        Assert-True (-not (Test-Path -LiteralPath $unapprovedDownload)) 'Bootstrap downloader wrote an unapproved download.'
+
+        $extractCalls = New-Object System.Collections.Generic.List[string]
+        $launchCalls = New-Object System.Collections.Generic.List[string]
+        $cleanupProgress = New-Object System.Collections.Generic.List[string]
+        function Expand-Archive {
+            param($LiteralPath, $DestinationPath)
+            [void]$extractCalls.Add($LiteralPath)
+        }
+        function Get-WdtCurrentPowerShellPath {
+            [void]$launchCalls.Add('launch')
+            throw 'A timed-out bootstrap must not prepare to launch PowerShell.'
+        }
+        function Remove-Item {
+            param([string]$LiteralPath, [switch]$Recurse, [switch]$Force)
+            $resolvedPath = (Resolve-Path -LiteralPath $LiteralPath).Path
+            $fixtureRoot = [System.IO.Path]::GetFullPath($temporaryRoot).TrimEnd('\') + '\'
+            Assert-True ($resolvedPath.StartsWith($fixtureRoot, [System.StringComparison]::OrdinalIgnoreCase)) 'Timeout cleanup escaped the owned fixture root.'
+            [void]$cleanupProgress.Add([string]$ProgressPreference)
+            Microsoft.PowerShell.Management\Remove-Item -LiteralPath $resolvedPath -Recurse:$Recurse -Force:$Force
+        }
+
+        foreach ($timeoutUri in @($wdtArchiveUri, $wdtChecksumUri)) {
+            $requestCalls.Clear()
+            $cleanupProgress.Clear()
+            $timeoutPhase = if ($timeoutUri -eq $wdtArchiveUri) { 'archive' } else { 'checksum' }
+            $timeoutDirectory = Join-Path $temporaryRoot ("bootstrap-timeout-$timeoutPhase")
+            $previousProgressPreference = $ProgressPreference
+            $timeoutError = $null
+            try {
+                $ProgressPreference = 'Continue'
+                try {
+                    Invoke-WdtBootstrap -NewTemporaryDirectory {
+                        New-Item -ItemType Directory -Path $timeoutDirectory -ErrorAction Stop | Out-Null
+                        return $timeoutDirectory
+                    }
+                }
+                catch { $timeoutError = $_.Exception }
+                Assert-True ($timeoutError -is [System.Net.WebException]) "The $timeoutPhase request timeout was not propagated."
+                Assert-Equal ([System.Net.WebExceptionStatus]::Timeout) $timeoutError.Status "The $timeoutPhase request timeout status changed."
+                Assert-Equal 'Offline request timeout fixture.' $timeoutError.Message "The $timeoutPhase request timeout was replaced by a later error."
+                Assert-Equal 'Continue' ([string]$ProgressPreference) "The $timeoutPhase timeout changed the caller progress preference."
+            }
+            finally {
+                $ProgressPreference = $previousProgressPreference
+            }
+            $expectedRequestCount = if ($timeoutPhase -eq 'archive') { 1 } else { 2 }
+            Assert-Equal $expectedRequestCount $requestCalls.Count "The $timeoutPhase timeout did not stop subsequent downloads."
+            Assert-Equal $wdtArchiveUri $requestCalls[0].Uri 'A timeout fixture changed the fixed archive URL.'
+            Assert-Equal $timeoutUri $requestCalls[$requestCalls.Count - 1].Uri 'A timeout fixture did not reach the intended request.'
+            foreach ($request in $requestCalls) {
+                Assert-Equal 60 $request.TimeoutSec 'A bootstrap timeout fixture lost its bounded request timeout.'
+                Assert-Equal 60 $request.OperationTimeoutSeconds 'A bootstrap timeout fixture lost its bounded stream read timeout.'
+                Assert-Equal 'SilentlyContinue' $request.Progress 'Bootstrap did not suppress progress while downloading.'
+            }
+            Assert-Equal 0 $extractCalls.Count "The $timeoutPhase timeout allowed archive extraction."
+            Assert-Equal 0 $launchCalls.Count "The $timeoutPhase timeout allowed child launch preparation."
+            Assert-Equal 1 $cleanupProgress.Count "The $timeoutPhase timeout did not clean exactly its owned temporary directory."
+            Assert-Equal 'Continue' $cleanupProgress[0] "The $timeoutPhase timeout did not restore progress before cleanup."
+            Assert-True (-not (Test-Path -LiteralPath $timeoutDirectory)) "The $timeoutPhase timeout left partial downloads behind."
+        }
+    }
+
+    & {
+        $legacyRequests = New-Object System.Collections.Generic.List[object]
+        function Invoke-WebRequest {
+            [CmdletBinding()]
+            param([string]$Uri, [string]$OutFile, [switch]$UseBasicParsing, [int]$TimeoutSec)
+            [void]$legacyRequests.Add([pscustomobject]@{ Uri = $Uri; TimeoutSec = $TimeoutSec; UseBasicParsing = [bool]$UseBasicParsing })
+        }
+        Assert-True (-not (Get-Command Invoke-WebRequest).Parameters.ContainsKey('OperationTimeoutSeconds')) 'Legacy downloader fixture unexpectedly supports stream read timeouts.'
+        Invoke-WdtDownloadFile -Uri $wdtArchiveUri -Destination (Join-Path $temporaryRoot 'legacy-archive.zip')
+        Invoke-WdtDownloadFile -Uri $wdtChecksumUri -Destination (Join-Path $temporaryRoot 'legacy-archive.zip.sha256')
+        Assert-Equal 2 $legacyRequests.Count 'Bootstrap downloader did not support the legacy Invoke-WebRequest signature.'
+        Assert-Equal $wdtArchiveUri $legacyRequests[0].Uri 'Legacy downloader changed the fixed archive URL.'
+        Assert-Equal $wdtChecksumUri $legacyRequests[1].Uri 'Legacy downloader changed the fixed checksum URL.'
+        foreach ($request in $legacyRequests) {
+            Assert-Equal 60 $request.TimeoutSec 'Legacy downloader lost its bounded request timeout.'
+            Assert-True $request.UseBasicParsing 'Legacy downloader lost basic parsing.'
+        }
+    }
 
     $offlinePackageRoot = Join-Path -Path $temporaryRoot -ChildPath 'offline-bootstrap-package'
     $offlineArchive = Join-Path -Path $temporaryRoot -ChildPath 'offline-bootstrap.zip'

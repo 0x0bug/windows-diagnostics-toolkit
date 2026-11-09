@@ -70,7 +70,7 @@ function Protect-WdtCommandLineSecrets {
         return $Text
     }
 
-    $secretArgumentPattern = '(?i)(?<Option>(?<![A-Z0-9_-])(?:--?|/)(?:api[-_]?token|token|password|secret|key)(?![A-Z0-9_-]))(?:(?<Separator>[ \t]*[=:][ \t]*)(?<Value>"[^"\r\n]*"|''[^''\r\n]*''|[^\s"''`;&|]+)|(?<Separator>[ \t]+)(?<Value>"[^"\r\n]*"|''[^''\r\n]*''|[^\s"''`;&|]+))'
+    $secretArgumentPattern = '(?i)(?<Option>(?<![A-Z0-9_-])(?:--?|/)(?:api[-_]?(?:token|key)|(?:access|refresh|id)[-_]?token|client[-_]?secret|token|password|passwd|pwd|secret|key)(?![A-Z0-9_-]))(?:(?<Separator>[ \t]*[=:][ \t]*)(?<Value>"[^"\r\n]*"|''[^''\r\n]*''|[^\s"''`;&|]+)|(?<Separator>[ \t]+)(?<Value>"[^"\r\n]*"|''[^''\r\n]*''|[^\s"''`;&|]+))'
     $secretArgumentEvaluator = [System.Text.RegularExpressions.MatchEvaluator]{
         param([System.Text.RegularExpressions.Match]$Match)
 
@@ -264,15 +264,35 @@ function Test-WdtDiagnosticNameMatch {
 
     $line = $Text.Substring($lineStart, $lineEnd - $lineStart)
     $relativeIndex = $Index - $lineStart
+    $labelPrefix = '(?i:\b(?:Faulting application name|Application(?: Name)?|Process(?: Name)?|Image(?: Name)?|Dump(?: File)?(?: Name)?|DumpFile))[ \t]*[:=][ \t]*'
+    $narrativePrefix = '(?i:\b(?:Process|Application))[ \t]+'
+    $namePrefix = '(?:' + $labelPrefix + '|' + $narrativePrefix + ')'
+    $nameAtom = '[^\s<>:"''/\\|?*,;=]+'
+    $titleWord = '\p{Lu}[\p{L}\p{N}_''(){}\[\]&+~-]*'
+    $bareName = '(?<WdtValue>(?:' + $titleWord + '(?:[ \t]+' + $titleWord + ')+|' + $nameAtom + '))'
+    $fileExtension = '(?i:exe|com|dll|sys|msi|msix|appx|lnk|dmp|mdmp|hdmp|wer)'
+    # A completed filename ends the exemption even if prose follows inside
+    # quotes. Space-separated name words are conservative: ambiguous prose is
+    # masked rather than treated as an extensionless application name.
+    $fileName = '(?<WdtValue>(?:' + $titleWord + '[ \t]+)*' + $nameAtom + '\.' + $fileExtension + ')(?=$|[\s,;''"<>)])'
     $diagnosticNamePatterns = @(
-        '(?i)\b(?:Faulting application name|Application(?: Name)?|Process(?: Name)?|Image(?: Name)?|Dump(?: File)?(?: Name)?|DumpFile)\s*[:=]\s*(?<WdtValue>[^,;\r\n]+)',
-        '(?i)\b(?:Process|Application)\s+(?<WdtValue>.+?)(?=\s+(?:failed|hung|stopped|terminated|crashed|exited|is|was)\b|[,;]|$)'
+        ($namePrefix + '["'']?' + $fileName),
+        ($namePrefix + '(?<WdtQuote>["''])' + $bareName + '\k<WdtQuote>'),
+        ($labelPrefix + $bareName + '(?=[ \t]*(?:[,;]|$|</))'),
+        ($namePrefix + $bareName + '(?=[ \t]+(?i:failed|hung|stopped|terminated|crashed|exited|is|was|has|have)\b)')
     )
 
     foreach ($pattern in $diagnosticNamePatterns) {
         foreach ($match in [System.Text.RegularExpressions.Regex]::Matches($line, $pattern)) {
             $valueGroup = $match.Groups['WdtValue']
             if (-not $valueGroup.Success -or $valueGroup.Value -match '[\\/]') {
+                continue
+            }
+
+            # Title casing or quoting does not turn an identity clause into a
+            # name. Keep this conservative guard separate from actual files.
+            $isFileName = $valueGroup.Value -match ('\.' + $fileExtension + '$')
+            if (-not $isFileName -and $valueGroup.Value -match '(?i)\b(?:on[ \t]+behalf[ \t]+of|on|from|for|by|of)[ \t]+(?:computer|host|machine|user|account)\b') {
                 continue
             }
 
@@ -329,7 +349,33 @@ function Protect-WdtText {
         return $Text
     }
 
-    # A known profile prefix is protected first and shares the current user's token.
+    $protectedText = Protect-WdtCommandLineSecrets -Text $Text
+
+    # Protect the whole address before a known user can replace only its local part.
+    $emailPattern = '(?<![A-Z0-9.!#$%&''*+/=?^_`{|}~-])[A-Z0-9.!#$%&''*+/=?^_`{|}~-]+@(?:[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?\.)+[A-Z0-9](?:[A-Z0-9-]*[A-Z0-9])?(?![A-Z0-9_-])'
+    $emailRegex = New-Object System.Text.RegularExpressions.Regex($emailPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+    $protectedText = Protect-WdtRegexMatches -Text $protectedText -Context $Context -Category USER -Regex $emailRegex
+
+    # These configuration payloads can identify private infrastructure even when
+    # they contain no known machine name or IP. Tokens represent opaque values.
+    $networkValueValidator = {
+        param([string]$Candidate)
+        return -not [string]::IsNullOrWhiteSpace($Candidate) -and
+            $Candidate.Trim() -notmatch '^(?:None|Unavailable|NotTested|Unknown|<(?:HOST|ID)-\d+>)$'
+    }
+    $dnsFieldPattern = '(?im)(?:^|;)[ \t]*DNS[ \t]*(?:suffix|search[ \t]*list)[ \t]*[:=][ \t]*(?<WdtValue>[^\r\n]*?)[ \t]*\r?$'
+    $dnsFieldRegex = New-Object System.Text.RegularExpressions.Regex($dnsFieldPattern)
+    $protectedText = Protect-WdtRegexMatches -Text $protectedText -Context $Context -Category HOST -Regex $dnsFieldRegex -CaptureGroupName 'WdtValue' -Validator $networkValueValidator
+    $proxyFieldPattern = '(?im)(?:^|;)[ \t]*(?:Proxy[ \t]*server|Auto[ \t]*config[ \t]*URL)[ \t]*[:=][ \t]*(?<WdtValue>[^\r\n]*?)[ \t]*\r?$'
+    $proxyFieldRegex = New-Object System.Text.RegularExpressions.Regex($proxyFieldPattern)
+    $protectedText = Protect-WdtRegexMatches -Text $protectedText -Context $Context -Category ID -Regex $proxyFieldRegex -CaptureGroupName 'WdtValue' -Validator $networkValueValidator
+    # The network collector tags raw netsh lines/errors so protection does not
+    # depend on the display language or on interpreting the proxy configuration.
+    $winHttpDetailPattern = '(?im)\bWinHTTP proxy details:[ \t]*(?<WdtValue>[^\r\n]*?)[ \t]*\r?$'
+    $winHttpDetailRegex = New-Object System.Text.RegularExpressions.Regex($winHttpDetailPattern)
+    $protectedText = Protect-WdtRegexMatches -Text $protectedText -Context $Context -Category ID -Regex $winHttpDetailRegex -CaptureGroupName 'WdtValue' -Validator $networkValueValidator
+
+    # A known profile prefix shares the current user's token.
     $profileTokenValueSelector = {
         param([string]$Candidate)
 
@@ -339,7 +385,6 @@ function Protect-WdtText {
 
         return $Candidate
     }
-    $protectedText = Protect-WdtCommandLineSecrets -Text $Text
     $protectedText = Protect-WdtLiteralValue -Text $protectedText -Context $Context -Category USER -Value $Context.UserProfile -UsePathBoundary -TokenValueSelector $profileTokenValueSelector
 
     $userProfilePattern = '(?:[A-Z]:)?[\\/](?:Users|Documents and Settings)[\\/](?<WdtValue>[^\\/\r\n:]+)(?=$|[\\/])'
@@ -460,7 +505,7 @@ function Protect-WdtText {
     }
     $protectedText = Protect-WdtRegexMatches -Text $protectedText -Context $Context -Category ID -Regex $labelledDeviceIdRegex -CaptureGroupName 'WdtValue' -Validator $identifierValueValidator
 
-    $sidPattern = '(?<![A-Z0-9_-])S-\d-\d+(?:-\d+)+(?![0-9-])'
+    $sidPattern = 'S-\d-\d+(?:-\d+)+(?![0-9-])'
     $sidRegex = New-Object System.Text.RegularExpressions.Regex(
         $sidPattern,
         [System.Text.RegularExpressions.RegexOptions]::IgnoreCase
