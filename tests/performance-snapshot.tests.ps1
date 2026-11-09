@@ -50,6 +50,92 @@ foreach ($forbiddenPattern in @('\.Path\b', '\.Owner\b', 'CommandLine')) {
 
 . $performanceScript
 
+# An empty successful runtime query is different from a failed query. It does
+# not establish configured intent or a measured zero percent of usage.
+function Invoke-PagefileQueryFixture {
+    param([string]$Mode)
+    & {
+        param($FixtureMode)
+        function Get-CimInstance {
+            [CmdletBinding()]
+            param([string]$ClassName)
+            if ($ClassName -ne 'Win32_PageFileUsage') { throw 'Unexpected fixture CIM query.' }
+            switch ($FixtureMode) {
+                'Empty' { return @() }
+                'Failed' { throw 'Fixture pagefile provider failure.' }
+                'Zero' { return [pscustomobject]@{ AllocatedBaseSize=0; CurrentUsage=0 } }
+                'Active' {
+                    [pscustomobject]@{ AllocatedBaseSize=100; CurrentUsage=50 }
+                    [pscustomobject]@{ AllocatedBaseSize=300; CurrentUsage=150 }
+                }
+            }
+        }
+        Get-PagefileSnapshot
+    } $Mode
+}
+$emptyPagefile = Invoke-PagefileQueryFixture Empty
+Assert-True ($null -eq $emptyPagefile.Error) 'A successful empty pagefile query must not become a provider error.'
+Assert-Equal 0 $emptyPagefile.RecordCount 'Empty pagefile results must retain an explicit record count.'
+foreach ($metric in @('AllocatedMegabytes','UsedMegabytes','UsedPercent')) {
+    Assert-True ($null -eq $emptyPagefile.$metric) "Empty pagefile results must not fabricate $metric."
+}
+$activePagefile = Invoke-PagefileQueryFixture Active
+Assert-Equal 2 $activePagefile.RecordCount 'Pagefile record count is wrong.'
+Assert-Equal 400 $activePagefile.AllocatedMegabytes 'Active pagefile allocation changed.'
+Assert-Equal 200 $activePagefile.UsedMegabytes 'Active pagefile usage changed.'
+Assert-Equal 50 $activePagefile.UsedPercent 'Active pagefile percent changed.'
+foreach ($mode in @('Failed','Zero')) {
+    $failedPagefile = Invoke-PagefileQueryFixture $mode
+    Assert-True (-not [string]::IsNullOrWhiteSpace($failedPagefile.Error)) "$mode pagefile evidence must remain unavailable."
+    Assert-True ($null -eq $failedPagefile.UsedPercent) "$mode pagefile evidence must not produce a percentage."
+}
+
+function Invoke-PagefilePresentationFixture {
+    param($Pagefile, [switch]$MemoryUnavailable)
+    & {
+        param($FixturePagefile, $FixtureMemoryUnavailable)
+        function Get-MemorySnapshot {
+            if ($FixtureMemoryUnavailable) { return [pscustomobject]@{ AvailablePercent=$null;Error='Fixture memory unavailable.' } }
+            [pscustomobject]@{ TotalBytes=1GB; AvailableBytes=512MB; AvailablePercent=50; Error=$null }
+        }
+        function Get-CpuSnapshot { [pscustomobject]@{ Percent=10; Samples=@(10,10,10); Error=$null } }
+        function Get-PagefileSnapshot { $FixturePagefile }
+        function Get-ProcessSnapshot { [pscustomobject]@{ Processes=@(); Error=$null } }
+        function Get-ProcessCpuActivity { @() }
+        @(Invoke-PerformanceSnapshot -ProcessLimit 5 -MemoryWarningPercent 15 -CpuWarningPercent 95 6>&1 | ForEach-Object { [string]$_ })
+    } $Pagefile ([bool]$MemoryUnavailable)
+}
+$savedPagefileProtocol = $env:WDT_FINDING_PROTOCOL
+$savedPagefileNonce = $env:WDT_FINDING_NONCE
+try {
+    $env:WDT_FINDING_PROTOCOL = '1'
+    $env:WDT_FINDING_NONCE = ''
+    foreach ($mode in @('Empty','Active','Failed','Zero')) {
+        $pagefileResult = Invoke-PagefileQueryFixture $mode
+        $fixtureLines = @(Invoke-PagefilePresentationFixture $pagefileResult)
+        $fixtureText = $fixtureLines -join "`n"
+        Assert-True ($fixtureText.Contains('PERFORMANCE_PAGEFILE_UNAVAILABLE') -eq ($mode -in @('Failed','Zero'))) "$mode pagefile availability was classified incorrectly."
+        Assert-True (-not $fixtureText.Contains('PERFORMANCE_PAGEFILE_HIGH')) "$mode fixture must not produce a high-usage finding."
+        $resolvedFixture = Resolve-WdtDiagnosticResult ([pscustomobject]@{ Title='Performance Snapshot';ExitCode=0;OutputLines=$fixtureLines })
+        $summary = Get-WdtFindingsSummary @($resolvedFixture)
+        Assert-Equal $(if ($mode -in @('Failed','Zero')) { 'WARN' } else { 'OK' }) $summary.OverallStatus "$mode pagefile finding changed summary availability incorrectly."
+        Assert-Equal 0 $summary.ErrorCount 'A pagefile collection state must not become a health ERROR.'
+        if ($mode -eq 'Empty') {
+            Assert-True ($fixtureText.Contains('No pagefile usage records were returned')) 'Empty pagefile output must explain the successful empty result.'
+            Assert-True ($fixtureText.Contains('indeterminate')) 'Empty runtime records must not imply a healthy pagefile assessment.'
+            Assert-True ($fixtureText -notmatch '(?m)^(Allocated|Used|Usage)\s*:') 'Empty pagefile output must not display zero-valued metrics.'
+            Assert-True ($fixtureText -notmatch '(?i)pagefile.*disabled') 'Empty runtime records must not infer configured intent.'
+            $partialLines = @(Invoke-PagefilePresentationFixture $pagefileResult -MemoryUnavailable)
+            $partialResult = Resolve-WdtDiagnosticResult ([pscustomobject]@{ Title='Performance Snapshot';ExitCode=0;OutputLines=$partialLines })
+            $partialSummary = Get-WdtFindingsSummary @($partialResult)
+            Assert-Equal 'WARN' $partialSummary.OverallStatus 'Known-empty pagefile records must not conceal another unavailable source.'
+            Assert-Equal 1 $partialSummary.WarningCount 'Only the genuinely unavailable memory source must produce a warning.'
+            Assert-Equal 'PERFORMANCE_MEMORY_UNAVAILABLE' $partialSummary.Items[0].Code 'The unavailable memory source finding was lost.'
+        }
+    }
+}
+finally { $env:WDT_FINDING_PROTOCOL=$savedPagefileProtocol; $env:WDT_FINDING_NONCE=$savedPagefileNonce }
+
 # Exercise the real snapshot entry point with the two legitimate empty process cases.
 $originalFunctions = @{}
 foreach ($functionName in @('Get-MemorySnapshot','Get-CpuSnapshot','Get-PagefileSnapshot','Get-ProcessSnapshot','Get-ProcessCpuActivity')) {
