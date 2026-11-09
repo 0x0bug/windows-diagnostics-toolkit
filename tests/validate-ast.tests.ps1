@@ -62,6 +62,10 @@ Assert-Allowed '. $PSScriptRoot\..\..\scripts\report-common.ps1' 'modules\disk\d
 Assert-Allowed '. $PSScriptRoot\scripts\report-common.ps1' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed '. $PSScriptRoot\scripts\module-registry.ps1' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed '. $PSScriptRoot\scripts\process-runner.ps1' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Allowed '. $PSScriptRoot\..\..\scripts\process-runner.ps1' 'modules\time\diagnostic.ps1'
+Assert-Denied '. $PSScriptRoot\..\..\scripts\process-runner.ps1' '*approved repository helper*' 'modules\disk\diagnostic.ps1'
+Assert-Denied '. $PSScriptRoot\..\..\scripts\process-runner.ps1; Invoke-DiagnosticScript -ScriptPath $path -PowerShellPath $executable' '*reviewed read-only allowlist*' 'modules\time\diagnostic.ps1'
+Assert-Denied '. $PSScriptRoot\..\..\scripts\process-runner.ps1; Stop-WdtProcessTree -RootProcess $other' '*exact reviewed w32tm query*' 'modules\time\diagnostic.ps1'
 Assert-Allowed '. $PSScriptRoot\scripts\tui.ps1' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed '. $PSScriptRoot\scripts\incident.ps1' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed '. $PSScriptRoot\snapshot.ps1' 'scripts\incident.ps1'
@@ -184,8 +188,22 @@ $maliciousProcessFixture = 'function Invoke-W32tmQuery { $startInfo = New-Object
 Assert-Denied $maliciousProcessFixture '*safe-type allowlist*' 'modules\time\diagnostic.ps1'
 $changedExecutableFixture = $w32tmFunctions[0].Extent.Text.Replace('$startInfo.FileName = $commandPath', '$startInfo.FileName = ''cmd.exe''')
 Assert-Denied $changedExecutableFixture '*safe-type allowlist*' 'modules\time\diagnostic.ps1'
-$pathPoisoningFixture = $w32tmFunctions[0].Extent.Text.Replace('try {', "try {`n        `$env:PATH = 'C:\attacker'")
+$pathPoisoningFixture = $w32tmFunctions[0].Extent.Text.Replace('try {', "try {`n        `$env:PATH = 'C:\attacker'`n")
 Assert-Denied $pathPoisoningFixture '*safe-type allowlist*' 'modules\time\diagnostic.ps1'
+foreach ($mutation in @(
+        @('$process.WaitForExit(25)', '$process.WaitForExit()'),
+        @('[ValidateRange(1, 60)]', '[ValidateRange(0, 3600)]'),
+        @('$stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds', '$true'),
+        @('$drainStopwatch.ElapsedMilliseconds -lt 2000', '$true'),
+        @('-CleanupTimeoutMilliseconds 2000', '-CleanupTimeoutMilliseconds 30000'),
+        @("'/query /source'", "'/resync'")
+    )) {
+    $unboundedOrChangingFixture = $w32tmFunctions[0].Extent.Text.Replace($mutation[0], $mutation[1])
+    Assert-True ($unboundedOrChangingFixture -cne $w32tmFunctions[0].Extent.Text) 'The w32tm safety mutation did not change the production shape.'
+    Assert-Denied $unboundedOrChangingFixture '*safe-type allowlist*' 'modules\time\diagnostic.ps1'
+}
+Assert-Denied 'function Invoke-W32tmQuery { $process.Kill() }' '*safe allowlist*' 'modules\time\diagnostic.ps1'
+Assert-Denied 'function Other { [System.Diagnostics.Stopwatch]::StartNew() }' '*safe allowlist*' 'modules\time\diagnostic.ps1'
 
 $allowedCallbacks = @'
 function Protect-WdtRegexMatches {

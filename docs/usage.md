@@ -107,7 +107,7 @@ switches, `-Interactive`, snapshot options, or network probe options. Invalid
 combinations are rejected before collection or directory creation. Existing
 ordinary CLI, TUI, standalone launchers and pinned beta bootstrap retain their
 behavior. Snapshots, offline comparison, and incident reports are included in
-`v0.2.0-beta.1`; earlier release packages are unchanged.
+`v0.2.0-beta.1` and later; earlier release packages are unchanged.
 
 The command writes `WindowsDiagnosticsIncident-<timestamp>-<GUID>.txt` and, with
 `-ExportMarkdown`, matching Markdown. It creates no incident JSON. Privacy is
@@ -159,13 +159,13 @@ Administrator rights are optional. Some Windows data sources expose less detail 
 
 ## Installation
 
-The public `v0.2.0-beta.1` prerelease is available through the fixed-release bootstrap:
+The public `v0.2.0-beta.2` prerelease is available through the fixed-release bootstrap:
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The bootstrap downloads the `v0.2.0-beta.1` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
+The bootstrap downloads the `v0.2.0-beta.2` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
 
 The repository bootstrap sets `Invoke-WebRequest -TimeoutSec 60` for each ZIP and checksum request. It also sets `OperationTimeoutSeconds` to 60 when that parameter is supported. That stream read timeout limits inactivity between reads; it is not an overall download deadline. A timeout stops the bootstrap before extraction or execution and removes its temporary directory.
 
@@ -387,6 +387,8 @@ pwsh -NoProfile -File .\scripts\security-posture.ps1
 
 Takes three short CPU load samples and two process samples. Current process activity is calculated from the `TotalProcessorTime` delta divided by elapsed time and logical processor count. A single high CPU sample is not a confirmed warning. Cumulative CPU time remains a separate metric. Process paths, owners, and command lines are not collected.
 
+A successful `Win32_PageFileUsage` query with no records is shown as indeterminate runtime context. It does not establish whether a pagefile was intentionally disabled or configured for a later restart. No allocation, usage amount, or percentage is invented for that empty result. A failed query or invalid zero allocation still creates `PERFORMANCE_PAGEFILE_UNAVAILABLE`. The class describes [pagefile runtime state](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-pagefileusage), rather than configuration intent.
+
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Performance
 pwsh -NoProfile -File .\scripts\performance-snapshot.ps1
@@ -436,6 +438,10 @@ pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 `
 ```
 
 The module only queries `w32tm.exe /query /source` and `w32tm.exe /query /status /verbose`. It does not configure or resynchronize time. Native output is decoded with the current Windows OEM code page.
+
+Each query has a 10-second process deadline, followed when needed by separate bounded cleanup and stream-drain attempts. Windows process-provider delays can extend the total elapsed time. Both output streams are read concurrently; a timeout, read failure, or inherited open pipe preserves available text as partial output and creates an availability warning.
+
+Local-clock detection uses exact English clock names or the invariant `0x4C4F434C` reference ID paired with a quoted `LOCL` or `LOCAL` token on the same line of a complete, successful status query. This recognizes local-clock status without a dictionary of translated source names. A bare numeric ID, zero ID, missing status, or ambiguous text does not establish a local clock or successful synchronization. Microsoft documents the [runtime reference ID](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-w32t/f60ebce0-df96-4c96-b40b-fdbd34a2c936) and a [local-clock status example](https://learn.microsoft.com/en-us/windows-server/networking/windows-time-service/windows-server-2016-improvements). Domain servers and the [VM IC Time Synchronization Provider](https://learn.microsoft.com/en-us/azure/virtual-machines/windows/time-sync) remain valid source context.
 
 ### Storage Status
 

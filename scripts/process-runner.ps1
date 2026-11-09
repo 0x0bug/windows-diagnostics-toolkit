@@ -122,7 +122,11 @@ function Read-WdtCompletedStreamChunks {
     param([Parameter(Mandatory = $true)]$State)
 
     $madeProgress = $false
-    while (-not $State.Complete -and $null -ne $State.Task -and $State.Task.IsCompleted) {
+    # Yield even when a producer can keep every read immediately completed.
+    # The caller must still poll stderr and enforce its process deadline.
+    $chunksRead = 0
+    while (-not $State.Complete -and $null -ne $State.Task -and $State.Task.IsCompleted -and $chunksRead -lt 16) {
+        $chunksRead++
         $madeProgress = $true
         if ($State.Task.IsCanceled) {
             $State.Error = 'Stream read was cancelled.'

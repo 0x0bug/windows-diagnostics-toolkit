@@ -1,7 +1,7 @@
 # Windows Diagnostics Toolkit
 
 [![PowerShell Validation](https://github.com/0x0bug/windows-diagnostics-toolkit/actions/workflows/powershell-validation.yml/badge.svg)](https://github.com/0x0bug/windows-diagnostics-toolkit/actions/workflows/powershell-validation.yml)
-[![Release](https://img.shields.io/badge/release-v0.2.0--beta.1-orange)](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1)
+[![Release](https://img.shields.io/badge/release-v0.2.0--beta.2-orange)](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://github.com/0x0bug/windows-diagnostics-toolkit)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE?logo=powershell)](https://github.com/0x0bug/windows-diagnostics-toolkit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -23,7 +23,7 @@ WDT is useful when you need to:
 - gather evidence without installing an agent or changing system settings;
 - share a redacted report through Privacy Mode.
 
-[Project website](https://wdt.digital/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [`v0.2.0-beta.1` release](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
+[Project website](https://wdt.digital/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [`v0.2.0-beta.2` release](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
 
 ## Why WDT
 
@@ -38,13 +38,13 @@ WDT is useful when you need to:
 
 ## Quick start
 
-`v0.2.0-beta.1` is available as a public prerelease.
+`v0.2.0-beta.2` is available as a public prerelease.
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The fixed-release bootstrap downloads only the `v0.2.0-beta.1` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1). It verifies the ZIP before extraction; if the hash does not match, nothing is extracted or executed. The toolkit runs from a temporary directory and is not installed permanently.
+The fixed-release bootstrap downloads only the `v0.2.0-beta.2` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2). It verifies the ZIP before extraction; if the hash does not match, nothing is extracted or executed. The toolkit runs from a temporary directory and is not installed permanently.
 
 To inspect the bootstrap before running it:
 

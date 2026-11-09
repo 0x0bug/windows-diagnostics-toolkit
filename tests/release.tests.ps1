@@ -25,7 +25,7 @@ Assert-True (Test-Path -LiteralPath $versionPath -PathType Leaf) 'VERSION is mis
 $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
 $semanticPrereleasePattern = '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*$'
 Assert-True ($version -match $semanticPrereleasePattern) 'VERSION is not a valid semantic prerelease version.'
-Assert-Equal '0.2.0-beta.1' $version 'Unexpected release version.'
+Assert-Equal '0.2.0-beta.2' $version 'Unexpected release version.'
 $isolatedRepositoryRoot = Join-Path -Path $temporaryRoot -ChildPath 'repository'
 $distDirectory = Join-Path -Path $isolatedRepositoryRoot -ChildPath 'dist'
 $archiveName = "windows-diagnostics-toolkit-v$version.zip"
@@ -198,7 +198,7 @@ Invoke-WdtBootstrap -NewTemporaryDirectory {
     }
     $wdtVersion = $version
     $wdtArchiveName = $archiveName
-    $wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.1'
+    $wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.2'
     $wdtArchiveUri = "$wdtReleaseBaseUri/$wdtArchiveName"
     $wdtChecksumUri = "$wdtArchiveUri.sha256"
 
@@ -215,7 +215,7 @@ Invoke-WdtBootstrap -NewTemporaryDirectory {
 
     $downloadReferences = @([regex]::Matches($bootstrapSource, '(?i)https?://[^''"\s]+') | ForEach-Object Value)
     Assert-Equal 1 $downloadReferences.Count 'Bootstrap must contain exactly one fixed URL base.'
-    Assert-Equal 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.1' $downloadReferences[0] 'Bootstrap references an unapproved download host or path.'
+    Assert-Equal 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.2' $downloadReferences[0] 'Bootstrap references an unapproved download host or path.'
     Assert-True ($bootstrapSource -notmatch '(?i)(/main/|/master/|raw\.githubusercontent\.com|gist\.github(?:usercontent)?\.com)') 'Bootstrap contains a forbidden branch, raw, or gist download reference.'
     Assert-True ($bootstrapSource -notmatch '(?m)^\s*exit\b') 'Bootstrap must not use exit.'
     Assert-True ($bootstrapSource -notmatch '\bStart-Process\b') 'Bootstrap must launch the child PowerShell process in the current console.'
