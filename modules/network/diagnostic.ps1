@@ -360,11 +360,15 @@ function Get-WinHttpProxy {
     }
 
     try {
-        $output = @(& $netshPath winhttp show proxy 2>&1 | ForEach-Object { Protect-ProxyText -Text ([string]$_) })
+        # Keep raw native details under an explicit source label. Combined-report
+        # privacy can then protect any display language, including error text.
+        $output = @(& $netshPath winhttp show proxy 2>&1 | ForEach-Object {
+                'WinHTTP proxy details: ' + (ConvertTo-WdtSingleLineText -Text (Protect-ProxyText -Text ([string]$_)))
+            })
         if ($LASTEXITCODE -ne 0) {
             return [pscustomobject]@{
                 Output = @($output)
-                Error  = ('netsh.exe exited with code {0}: {1}' -f $LASTEXITCODE, ($output -join ' '))
+                Error  = ('netsh.exe exited with code {0}; {1}' -f $LASTEXITCODE, ($output -join ' '))
             }
         }
 
@@ -376,7 +380,7 @@ function Get-WinHttpProxy {
     catch {
         return [pscustomobject]@{
             Output = @()
-            Error  = $_.Exception.Message
+            Error  = 'WinHTTP proxy details: ' + (ConvertTo-WdtSingleLineText -Text $_.Exception.Message)
         }
     }
 }
@@ -565,10 +569,13 @@ else {
 
 Write-Section 'WinHTTP Proxy'
 if ($null -ne $winHttpProxy.Error) {
+    Write-Host 'Query status: Unavailable'
     Write-Host ('Unavailable: {0}' -f $winHttpProxy.Error)
     Write-WdtFinding -Severity WARN -Code 'NETWORK_WINHTTP_PROXY_UNAVAILABLE' -Message 'WinHTTP proxy settings are unavailable.' -Evidence $winHttpProxy.Error
 }
 else {
+    # Query success does not establish whether a proxy is configured.
+    Write-Host 'Query status: Available'
     foreach ($line in $winHttpProxy.Output) {
         Write-Host $line
     }

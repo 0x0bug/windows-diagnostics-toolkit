@@ -38,7 +38,7 @@ $readmeRaw = Get-Content -LiteralPath $readmePath -Raw
 $readme = Normalize-LineEndings -Text $readmeRaw
 $usage = Normalize-LineEndings -Text (Get-Content -LiteralPath $usagePath -Raw)
 $bootstrapCommand = 'irm https://wdt.digital/run.ps1 | iex'
-$releaseUrl = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta'
+$releaseUrl = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1'
 $inspectionCommand = Normalize-LineEndings -Text @'
 irm https://wdt.digital/run.ps1 -OutFile .\wdt-run.ps1
 notepad .\wdt-run.ps1
@@ -61,8 +61,9 @@ Assert-True ($readme.Contains($bootstrapCommand)) 'README is missing the public 
 Assert-True ($usage.Contains($bootstrapCommand)) 'Usage guide is missing the public beta bootstrap command.'
 Assert-True ($readme.Contains($inspectionCommand)) 'README is missing the bootstrap inspection workflow.'
 Assert-True ($usage.Contains($inspectionCommand)) 'Usage guide is missing the bootstrap inspection workflow.'
-Assert-True ($readme.Contains($releaseUrl)) 'README is missing the v0.1.0-beta prerelease link.'
-Assert-True ($usage.Contains($releaseUrl)) 'Usage guide is missing the v0.1.0-beta prerelease link.'
+Assert-True ($readme.Contains($releaseUrl)) 'README is missing the v0.2.0-beta.1 prerelease link.'
+Assert-True ($usage.Contains($releaseUrl)) 'Usage guide is missing the v0.2.0-beta.1 prerelease link.'
+Assert-True ($readme.Contains('https://img.shields.io/badge/release-v0.2.0--beta.1-orange')) 'README release badge does not match the pinned prerelease.'
 Assert-True ($readme.Contains('SHA-256 verification protects the downloaded release ZIP, not `run.ps1`.')) 'README misstates the checksum trust boundary.'
 Assert-True ($usage.Contains('SHA-256 verification protects the downloaded release ZIP, not `run.ps1`.')) 'Usage guide misstates the checksum trust boundary.'
 foreach ($staleCopy in @('planned `v0.1.0-beta`', 'until that beta is published', 'until the beta is published', 'no beta release ZIP is published yet', 'bootstrap is prepared')) {

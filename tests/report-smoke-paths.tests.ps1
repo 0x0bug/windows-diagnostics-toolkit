@@ -69,3 +69,97 @@ finally {
     Remove-Item -LiteralPath $resolvedFixtureRoot -Recurse -Force
 }
 Write-Host 'Report smoke path regression tests passed.'
+
+# Output readiness must be checked by a real create/write/delete-on-close probe
+# before any live collector. Inject an existing owned path at the probe's path
+# assignment to force an actual CreateNew I/O failure without changing ACLs.
+$repositoryRoot = Split-Path -Parent $PSScriptRoot
+foreach ($helper in @('report-common.ps1', 'module-registry.ps1', 'snapshot-compare.ps1', 'incident.ps1')) {
+    . (Join-Path $repositoryRoot ('scripts\' + $helper))
+}
+$tokens = $null; $errors = $null
+$entrypointAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'), [ref]$tokens, [ref]$errors)
+Assert-Equal 0 @($errors).Count 'Launcher parser errors were found.'
+$outputDefinition = $entrypointAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Initialize-WdtOutputDirectory' }, $true)
+Assert-True ($null -ne $outputDefinition) 'Launcher must share output write preflight across live report actions.'
+foreach ($definition in @($entrypointAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))) {
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$registrySnapshot = Get-WdtModuleRegistry -ModuleRoot (Join-Path $repositoryRoot 'modules')
+$coreOptions = @{}; $toolkitVersion = 'fixture'; $script:preflightCollectorCalls = 0
+function Invoke-DiagnosticScript { $script:preflightCollectorCalls++; throw 'A collector ran before output readiness was checked.' }
+$preflightRoot = Join-Path $systemTemporaryRoot ('wdt-output-preflight-' + [guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $preflightRoot | Out-Null
+try {
+    $readyOutput = Join-Path $preflightRoot 'new-output'
+    Assert-Equal ([IO.Path]::GetFullPath($readyOutput)) (Initialize-WdtOutputDirectory -OutputDirectory $readyOutput) 'Preflight did not return the created filesystem directory.'
+    Assert-Equal 0 @(Get-ChildItem -LiteralPath $readyOutput -Force).Count 'Successful preflight left a probe or final report placeholder.'
+    $sentinelPath = Join-Path $readyOutput 'existing-report.txt'
+    [IO.File]::WriteAllText($sentinelPath, 'existing artifact must survive')
+    Initialize-WdtOutputDirectory -OutputDirectory $readyOutput | Out-Null
+    Assert-Equal 'existing artifact must survive' ([IO.File]::ReadAllText($sentinelPath)) 'Preflight changed an existing user artifact.'
+    Assert-Equal 1 @(Get-ChildItem -LiteralPath $readyOutput -Force).Count 'Repeated preflight left a probe.'
+    $nonFilesystemPath = 'Env:\WDT_PREFLIGHT_' + [guid]::NewGuid().ToString('N')
+    $caught = $null
+    try { Initialize-WdtOutputDirectory -OutputDirectory $nonFilesystemPath | Out-Null } catch { $caught = $_ }
+    Assert-True ($null -ne $caught -and $caught.Exception.Message -like 'Could not prepare OutputDirectory.*') 'Preflight must reject non-filesystem output before creating anything.'
+    Assert-True (-not (Test-Path -LiteralPath $nonFilesystemPath)) 'Preflight created a non-filesystem item.'
+    $preflightErrorRecords = New-Object 'System.Collections.Generic.List[object]'
+    $preflightError = & {
+        $ErrorActionPreference = 'Continue'
+        try {
+            Initialize-WdtOutputDirectory -OutputDirectory $sentinelPath *>&1 | ForEach-Object { $preflightErrorRecords.Add($_) }
+        }
+        catch { $_.Exception.Message }
+    }
+    Assert-True ($preflightError -like 'Could not prepare OutputDirectory.*') 'Directory creation failure did not produce the safe output I/O error.'
+    Assert-Equal 0 $preflightErrorRecords.Count 'Directory creation emitted raw error details before the safe preflight error.'
+    Assert-Equal 'existing artifact must survive' ([IO.File]::ReadAllText($sentinelPath)) 'Directory creation failure changed its existing parent artifact.'
+
+    $probeAssignments = @($outputDefinition.FindAll({ param($node) $node -is [Management.Automation.Language.AssignmentStatementAst] -and $node.Left -is [Management.Automation.Language.VariableExpressionAst] -and $node.Left.VariablePath.UserPath -ceq 'probePath' }, $true))
+    Assert-Equal 1 $probeAssignments.Count 'Preflight must assign its owned probe path once.'
+    $faultHelper = $outputDefinition.Extent.Text.Replace($probeAssignments[0].Extent.Text, '$probePath = Join-Path $resolvedOutputDirectory ''blocked-probe.tmp''')
+    . ([scriptblock]::Create($faultHelper))
+    $blockedProbe = Join-Path $readyOutput 'blocked-probe.tmp'
+    [IO.File]::WriteAllText($blockedProbe, 'occupied probe path must survive')
+    $window = Resolve-WdtIncidentWindow -Symptom AppFailure -At '2025-11-02T10:00:00Z'
+    foreach ($action in @('Report', 'Snapshot', 'Incident')) {
+        $script:preflightCollectorCalls = 0
+        $caught = $null
+        try {
+            if ($action -eq 'Incident') {
+                Invoke-WdtIncident -Window $window -OutputDirectory $readyOutput -PrivacyMode $true -ExportMarkdown $true | Out-Null
+            }
+            else {
+                Invoke-WdtReport -ModuleDefinitions @($registrySnapshot.ById['System']) -CoreOptions $coreOptions -OutputDirectory $readyOutput -SaveSnapshot ($action -eq 'Snapshot') -PrivacyMode $true -ExportMarkdown $true -SuppressConsoleOutput $true | Out-Null
+            }
+        }
+        catch { $caught = $_ }
+        Assert-True ($null -ne $caught) "$action accepted a failing output probe."
+        Assert-True ($caught.Exception.Message -like 'Could not prepare OutputDirectory.*') "$action did not report an output I/O preflight error."
+        Assert-True (-not $caught.Exception.Message.Contains($readyOutput) -and -not $caught.Exception.Message.Contains('blocked-probe')) 'Preflight error exposed raw path/exception details.'
+        Assert-Equal 0 $script:preflightCollectorCalls "$action collected data before discovering the output failure."
+        Assert-Equal 'occupied probe path must survive' ([IO.File]::ReadAllText($blockedProbe)) 'A failed create-only probe overwrote or deleted an existing file.'
+        Assert-Equal 2 @(Get-ChildItem -LiteralPath $readyOutput -Force).Count "$action wrote an artifact after output preflight failed."
+    }
+
+    # Semantic errors take precedence over even a deliberately failing probe.
+    $invalidOutput = Join-Path $preflightRoot 'invalid-selection'
+    $caught = $null
+    try { Invoke-WdtReport -ModuleDefinitions @($registrySnapshot.ById['Network']) -CoreOptions $coreOptions -OutputDirectory $invalidOutput -SaveSnapshot $true | Out-Null } catch { $caught = $_ }
+    Assert-True ($null -ne $caught -and $caught.Exception.Message -notlike 'Could not prepare OutputDirectory.*') 'Snapshot module validation must precede preflight.'
+    Assert-True (-not (Test-Path -LiteralPath $invalidOutput)) 'Invalid snapshot selection created an output directory.'
+    Assert-Equal 0 $script:preflightCollectorCalls 'Invalid snapshot selection invoked a collector.'
+    $invalidOutput = Join-Path $preflightRoot 'invalid-comparison'
+    $caught = $null
+    try { Invoke-WdtSnapshotComparison -BeforePath (Join-Path $preflightRoot 'missing.json') -AfterPath (Join-Path $preflightRoot 'missing.json') -OutputDirectory $invalidOutput | Out-Null } catch { $caught = $_ }
+    Assert-True ($null -ne $caught -and $caught.Exception.Message -notlike 'Could not prepare OutputDirectory.*') 'Offline snapshot validation must precede preflight.'
+    Assert-True (-not (Test-Path -LiteralPath $invalidOutput)) 'Invalid offline input created an output directory.'
+    Assert-Equal 0 $script:preflightCollectorCalls 'Offline snapshot comparison invoked a collector.'
+}
+finally {
+    $resolvedPreflightRoot = [IO.Path]::GetFullPath($preflightRoot)
+    if (-not $resolvedPreflightRoot.StartsWith($systemTemporaryRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe preflight fixture cleanup.' }
+    Remove-Item -LiteralPath $resolvedPreflightRoot -Recurse -Force
+}
+Write-Host 'Output preflight regression tests passed.'

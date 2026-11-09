@@ -3,6 +3,7 @@ param()
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
+. (Join-Path $repositoryRoot 'scripts\report-common.ps1')
 function Assert-True { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message } }
 function Assert-Equal { param($Expected, $Actual, [string]$Message) if ($Expected -ne $Actual) { throw "$Message Expected=$Expected Actual=$Actual" } }
 function Import-TestFunctions {
@@ -391,6 +392,59 @@ $diskUnavailableText = $diskUnavailableOutput -join "`n"
 Assert-True $diskUnavailableText.Contains('Data availability: physical disk status is unavailable.') 'Physical disk source loss must retain its data availability message.'
 Assert-True $diskUnavailableText.Contains('Data availability: volume free-space data is unavailable.') 'Volume source loss must retain its data availability message.'
 Assert-True (-not $diskUnavailableText.Contains('Name         :')) 'Failed disk sources must not print a null disk record.'
+Assert-True $diskUnavailableText.Contains('DISK_DATA_UNAVAILABLE') 'Physical disk source loss must emit a stable availability finding.'
+Assert-True $diskUnavailableText.Contains('VOLUME_DATA_UNAVAILABLE') 'Volume source loss must emit a stable availability finding.'
+
+function Invoke-StorageAvailabilityFixture {
+    param([string]$Mode, [bool]$DiskAvailable = $true, [bool]$VolumeAvailable = $true)
+    $previousProtocol = $env:WDT_FINDING_PROTOCOL
+    $previousNonce = $env:WDT_FINDING_NONCE
+    try {
+        $env:WDT_FINDING_PROTOCOL = '1'; $env:WDT_FINDING_NONCE = ''
+        function Get-Command { [CmdletBinding()] param([string]$Name); if ($Mode -ne 'Empty' -and $Name -in @('Get-PhysicalDisk', 'Get-Volume')) { [pscustomobject]@{Name=$Name} } }
+        function Get-PhysicalDisk {
+            if ($Mode -ne 'Primary') { throw 'Fixture primary disk unavailable.' }
+            if ($DiskAvailable) { [pscustomobject]@{FriendlyName='Fixture disk'; Model='Fixture'; MediaType='SSD'; HealthStatus='Healthy'; Size=1000} }
+        }
+        function Get-Volume {
+            if ($Mode -ne 'Primary') { throw 'Fixture primary volumes unavailable.' }
+            if ($VolumeAvailable) { [pscustomobject]@{DriveLetter='C'; FileSystemLabel='Fixture'; FileSystem='NTFS'; Size=1000; SizeRemaining=500} }
+        }
+        function Get-CimInstance {
+            [CmdletBinding()] param([string]$ClassName, [string]$Filter)
+            if ($Mode -eq 'Empty') { return }
+            if ($Mode -ne 'Fallback') { throw 'Fixture fallback unavailable.' }
+            if ($ClassName -eq 'Win32_DiskDrive' -and $DiskAvailable) { [pscustomobject]@{Caption='Fixture disk'; Model='Fixture'; MediaType='Fixed'; Status='OK'; Size=1000} }
+            if ($ClassName -eq 'Win32_LogicalDisk' -and $VolumeAvailable) { [pscustomobject]@{DeviceID='C:'; VolumeName='Fixture'; FileSystem='NTFS'; Size=1000; FreeSpace=500} }
+        }
+        $lines = @(& (Join-Path $repositoryRoot 'modules\disk\diagnostic.ps1') 6>&1 | ForEach-Object { [string]$_ })
+        return Resolve-WdtDiagnosticResult -FindingNonce '' -Result ([pscustomobject]@{Title='Storage';ExitCode=0;OutputLines=$lines})
+    }
+    finally { $env:WDT_FINDING_PROTOCOL = $previousProtocol; $env:WDT_FINDING_NONCE = $previousNonce }
+}
+foreach ($mode in @('Failed', 'Empty')) {
+    $unavailableStorage = Invoke-StorageAvailabilityFixture $mode
+    $storageSummary = Get-WdtFindingsSummary @($unavailableStorage)
+    Assert-Equal 'WARN' $storageSummary.OverallStatus 'Unavailable storage must not be summarized as MODULE_OK or a health ERROR.'
+    Assert-Equal 2 $storageSummary.WarningCount 'Unavailable disk and volume assessments must each emit exactly one WARN.'
+    Assert-Equal 0 $storageSummary.ErrorCount 'Unavailable storage is not a confirmed health problem.'
+    Assert-Equal 0 $storageSummary.OkModuleCount 'Unavailable storage must not claim MODULE_OK.'
+    foreach ($availabilityFinding in $storageSummary.Items) {
+        Assert-True ($availabilityFinding.Message -match 'assessment.*could not be completed') 'Availability finding must describe the incomplete assessment.'
+        Assert-True ($availabilityFinding.Evidence -match 'Get-(PhysicalDisk|Volume)' -and $availabilityFinding.Evidence -match 'Win32_(DiskDrive|LogicalDisk)') 'Availability finding must identify primary and fallback sources.'
+    }
+}
+foreach ($mode in @('Primary', 'Fallback')) {
+    $healthyStorage = Invoke-StorageAvailabilityFixture $mode
+    Assert-Equal 'MODULE_OK' $healthyStorage.Findings[0].Code 'A successful storage source must not emit an unavailable finding.'
+    Assert-Equal 1 @($healthyStorage.Findings).Count 'Optional missing reliability counters must remain context.'
+    $partialStorage = Invoke-StorageAvailabilityFixture $mode -DiskAvailable $false
+    Assert-Equal 1 @($partialStorage.Findings).Count 'A working volume source must not be marked unavailable with disks.'
+    Assert-Equal 'DISK_DATA_UNAVAILABLE' $partialStorage.Findings[0].Code 'Only the unavailable disk assessment must emit a finding.'
+    $partialStorage = Invoke-StorageAvailabilityFixture $mode -VolumeAvailable $false
+    Assert-Equal 1 @($partialStorage.Findings).Count 'A working disk source must not be marked unavailable with volumes.'
+    Assert-Equal 'VOLUME_DATA_UNAVAILABLE' $partialStorage.Findings[0].Code 'Only the unavailable volume assessment must emit a finding.'
+}
 $storage = Get-StorageReliabilityData $null
 Assert-Equal $false $storage.Available 'Missing reliability counters must be unavailable.'
 Assert-True (-not ($storage.PSObject.Properties.Name -contains 'Error')) 'Unused storage Error field must not return.'

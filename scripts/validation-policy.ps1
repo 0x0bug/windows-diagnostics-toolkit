@@ -779,6 +779,13 @@ function Get-WdtMemberSafetyIssue {
     $isStatic = $MemberAst.Expression -is [System.Management.Automation.Language.TypeExpressionAst]
     if ($isStatic) {
         $typeName = $MemberAst.Expression.TypeName.FullName
+        if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Initialize-WdtOutputDirectory' -and
+            (ConvertTo-WdtNormalizedAstText -Ast $MemberAst) -ceq '[System.IO.FileStream]::new($probePath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None,1,[System.IO.FileOptions]::DeleteOnClose)') { return }
+        if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and
+            $typeName -ceq 'System.Management.Automation.Language.CodeGeneration' -and $member -ceq 'EscapeSingleQuotedStringContent' -and
+            $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -cin @('$ScriptPath', '$argument')) { return }
         if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\snapshot.ps1') -and $typeName -ceq 'System.IO.File' -and $member -ceq 'Open' -and $argumentCount -eq 4) {
             $snapshotFunction=Get-WdtEnclosingFunctionName $MemberAst
             $snapshotForm=ConvertTo-WdtNormalizedAstText -Ast $MemberAst
@@ -894,6 +901,9 @@ function Get-WdtMemberSafetyIssue {
     }
 
     $receiver = if ($MemberAst.Expression -is [System.Management.Automation.Language.VariableExpressionAst]) { $MemberAst.Expression.VariablePath.UserPath } else { '' }
+    if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Initialize-WdtOutputDirectory' -and
+        (ConvertTo-WdtNormalizedAstText -Ast $MemberAst) -cin @('$probeStream.WriteByte(0)', '$probeStream.Flush()', '$probeStream.Dispose()')) { return }
     if (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\snapshot.ps1') {
         $snapshotFunction=Get-WdtEnclosingFunctionName $MemberAst
         $snapshotForm=ConvertTo-WdtNormalizedAstText -Ast $MemberAst

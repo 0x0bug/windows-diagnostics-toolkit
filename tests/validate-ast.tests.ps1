@@ -134,6 +134,33 @@ Assert-Denied 'function Write-WdtSnapshot { $snapshotStream.Write($raw,0,$raw.Le
 Assert-Denied 'function Read-WdtSnapshot { New-Object System.IO.StreamReader -ArgumentList $unrelated,$snapshotEncoding,$false }' '*New-Object type is not in the reviewed safe-type allowlist*' 'scripts\snapshot.ps1'
 Assert-Denied 'function Write-WdtSnapshot { [System.IO.File]::Open($snapshotPath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\fixture.ps1'
 Assert-Allowed 'function Invoke-DiagnosticScript { $process.Start() }' 'scripts\process-runner.ps1'
+foreach ($argument in @('$ScriptPath', '$argument')) {
+    $escape = '[System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent(' + $argument + ')'
+    Assert-Allowed ('function Invoke-DiagnosticScript { ' + $escape + ' }') 'scripts\process-runner.ps1'
+    Assert-Denied ('function Other { ' + $escape + ' }') '*safe allowlist*' 'scripts\process-runner.ps1'
+    Assert-Denied ('function Invoke-DiagnosticScript { ' + $escape + ' }') '*safe allowlist*' 'scripts\fixture.ps1'
+}
+Assert-Denied 'function Invoke-DiagnosticScript { [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($other) }' '*safe allowlist*' 'scripts\process-runner.ps1'
+Assert-Denied 'function Invoke-DiagnosticScript { [System.Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($ScriptPath, $argument) }' '*safe allowlist*' 'scripts\process-runner.ps1'
+$probeOpen = '[System.IO.FileStream]::new($probePath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None,1,[System.IO.FileOptions]::DeleteOnClose)'
+Assert-Allowed ('function Initialize-WdtOutputDirectory { ' + $probeOpen + '; $probeStream.WriteByte(0); $probeStream.Flush(); $probeStream.Dispose() }') 'Invoke-WindowsDiagnostics.ps1'
+foreach ($forbiddenProbeOpen in @(
+    $probeOpen.Replace('$probePath', '$otherPath'),
+    $probeOpen.Replace('::CreateNew', '::Create'),
+    $probeOpen.Replace('::Write', '::ReadWrite'),
+    $probeOpen.Replace('::None', '::Read'),
+    $probeOpen.Replace(',1,', ',4096,'),
+    $probeOpen.Replace('::DeleteOnClose', '::None')
+)) { Assert-Denied ('function Initialize-WdtOutputDirectory { ' + $forbiddenProbeOpen + ' }') '*safe allowlist*' 'Invoke-WindowsDiagnostics.ps1' }
+Assert-Denied ('function Other { ' + $probeOpen + ' }') '*safe allowlist*' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Denied ('function Initialize-WdtOutputDirectory { ' + $probeOpen + ' }') '*safe allowlist*' 'scripts\fixture.ps1'
+foreach ($forbiddenProbeMethod in @('$otherStream.WriteByte(0)', '$otherStream.Flush()', '$otherStream.Dispose()', '$probeStream.WriteByte(1)', '$probeStream.Write($raw,0,$raw.Length)', '$probeStream.Flush($true)')) {
+    Assert-Denied ('function Initialize-WdtOutputDirectory { ' + $forbiddenProbeMethod + ' }') '*safe allowlist*' 'Invoke-WindowsDiagnostics.ps1'
+}
+foreach ($probeMethod in @('$probeStream.WriteByte(0)', '$probeStream.Flush()', '$probeStream.Dispose()')) {
+    Assert-Denied ('function Other { ' + $probeMethod + ' }') '*safe allowlist*' 'Invoke-WindowsDiagnostics.ps1'
+    Assert-Denied ('function Initialize-WdtOutputDirectory { ' + $probeMethod + ' }') '*safe allowlist*' 'scripts\fixture.ps1'
+}
 Assert-Allowed 'function Wait-WdtTuiEvent { [System.Console]::ReadKey($true) }' 'scripts\tui.ps1'
 Assert-Allowed 'function Wait-WdtTuiEvent { [System.Console]::KeyAvailable }' 'scripts\tui.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { Read-Host ''Output directory'' }' 'scripts\tui.ps1'

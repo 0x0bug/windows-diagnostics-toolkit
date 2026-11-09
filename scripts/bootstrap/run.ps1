@@ -1,9 +1,9 @@
 & {
 $ErrorActionPreference = 'Stop'
 
-$wdtVersion = '0.1.0-beta'
-$wdtArchiveName = 'windows-diagnostics-toolkit-v0.1.0-beta.zip'
-$wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.1.0-beta'
+$wdtVersion = '0.2.0-beta.1'
+$wdtArchiveName = 'windows-diagnostics-toolkit-v0.2.0-beta.1.zip'
+$wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.1'
 $wdtArchiveUri = "$wdtReleaseBaseUri/$wdtArchiveName"
 $wdtChecksumUri = "$wdtArchiveUri.sha256"
 
@@ -44,7 +44,17 @@ function Invoke-WdtDownloadFile {
         throw "Refusing unapproved download URL: $Uri"
     }
 
-    Invoke-WebRequest -Uri $Uri -OutFile $Destination -UseBasicParsing
+    $requestParameters = @{
+        Uri = $Uri
+        OutFile = $Destination
+        UseBasicParsing = $true
+        TimeoutSec = 60
+    }
+    if ((Get-Command -Name Invoke-WebRequest).Parameters.ContainsKey('OperationTimeoutSeconds')) {
+        $requestParameters.OperationTimeoutSeconds = 60
+    }
+
+    Invoke-WebRequest @requestParameters
 }
 
 function Assert-WdtPackageLayout {

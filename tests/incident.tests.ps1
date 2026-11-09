@@ -190,6 +190,8 @@ $badData=New-IncidentResults; $badData[0].Data.ModuleId='Events'
 Assert-Throws { New-IncidentFixture -Results $badData } 'API accepted an incompatible module.'
 $secret='https://alice:pw@host.invalid/?token=incident-secret'
 $message='HOST-PRIVATE Alice C:\Users\Alice\private 192.0.2.15 00-11-22-33-44-55 '+$secret+" `````````````r`nSummary observations:`r`n[Fact] injected row"
+$message += "`r`n"+'<Event><Data>The process svchost.exe has initiated the restart of computer HOST-PRIVATE on behalf of user Alice</Data><Data>Alice.smith@example.test</Data><Data>GoogleUpdateTaskUserS-1-5-21-111111111-222222222-333333333-1001Core</Data><Data>tool.exe --api-key=incident-api-secret --access-token=incident-access-secret --client-secret=incident-client-secret --pwd=incident-pwd-secret</Data></Event>'+"`r`nDNS suffix: incident.private.test`r`nDNS search list: branch.incident.private.test`r`nProxy server: incident-proxy.private.test:8080`r`nAuto config URL: https://incident-pac.private.test/private/config.pac"
+$privateValues = @('HOST-PRIVATE','Alice','192.0.2.15','00-11-22-33-44-55',$guid,'incident-secret','alice:pw','smith@example.test','S-1-5-21-','incident-api-secret','incident-access-secret','incident-client-secret','incident-pwd-secret','incident.private.test','incident-proxy.private.test','incident-pac.private.test','/private/config.pac')
 $unicode=-join @([char]0x041F,[char]0x0440,[char]0x0438,[char]0x043B,[char]0x043E,[char]0x0436,[char]0x0435,[char]0x043D,[char]0x0438,[char]0x0435)
 $private=New-IncidentResults -Crashes @((New-IncidentEvidence -ReportId $guid -Component ('HOST-PRIVATE '+$unicode+"`r`ncomponent row") -Message $message))
 $private[0].DataStatus='Partial'; $private[0].DataErrors=@($message); $private[0].Data.Sources[0].Availability='Partial'; $private[0].Data.Sources[0].QueryComplete=$false; $private[0].Data.Sources[0].Error=$message
@@ -197,7 +199,7 @@ $rawBefore=ConvertTo-Json -InputObject $private -Depth 16 -Compress
 $privacyContext=New-WdtRedactionContext -ComputerName HOST-PRIVATE -UserName Alice -UserDomain DOMAIN -UserProfile 'C:\Users\Alice'
 $safe=New-IncidentFixture -Results $private -PrivacyMode $true -Context $privacyContext
 $safeText=(Get-WdtIncidentLines $safe) -join "`n"
-foreach ($raw in @('HOST-PRIVATE','Alice','192.0.2.15','00-11-22-33-44-55',$guid,'incident-secret','alice:pw')) { Assert-True (-not $safeText.Contains($raw)) 'Private data leaked through summaries, timeline, appendix or coverage/errors.' }
+foreach ($raw in $privateValues) { Assert-True (-not $safeText.Contains($raw)) 'Private data leaked through summaries, timeline, appendix or coverage/errors.' }
 Assert-True ($safeText.Contains($unicode)) 'Unicode diagnostic context was lost.'
 Assert-True ($safe.Timeline[0].Label -notmatch '[\r\n]' -and $safe.Observations[0].Text -notmatch '[\r\n]') 'Source newlines split summary/timeline rows.'
 Assert-True ($safe.Evidence[0].Item.Message -match '[\r\n]') 'Presentation normalization destroyed full redacted evidence.'
@@ -238,7 +240,7 @@ foreach ($request in @(
 # privacy before file writes and using the existing dynamic Markdown fence.
 $tokens=$null; $parseErrors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($entrypoint,[ref]$tokens,[ref]$parseErrors)
-foreach ($name in @('Invoke-WdtIncident','Get-WdtUniqueReportPaths','Get-WdtMarkdownFence','Get-CurrentPowerShellPath')) {
+foreach ($name in @('Invoke-WdtIncident','Initialize-WdtOutputDirectory','Get-WdtUniqueReportPaths','Get-WdtMarkdownFence','Get-CurrentPowerShellPath')) {
     $definition=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true))[0]
     . ([scriptblock]::Create($definition.Extent.Text))
 }
@@ -253,7 +255,10 @@ function Invoke-DiagnosticScript {
 }
 $output=Join-Path ([IO.Path]::GetTempPath()) ('wdt-incident-fixture-'+[guid]::NewGuid().ToString('N'))
 try {
-    $result=Invoke-WdtIncident -Window $window -OutputDirectory $output -PrivacyMode $true -ExportMarkdown $true -ModuleTimeoutSeconds 17
+    $result = & {
+        function New-WdtRedactionContext { return $privacyContext }
+        Invoke-WdtIncident -Window $window -OutputDirectory $output -PrivacyMode $true -ExportMarkdown $true -ModuleTimeoutSeconds 17
+    }
     Assert-Equal 3 $script:fixtureInvocation.Count 'Incident did not collect exactly the three selected modules once.'
     Assert-Equal 'Crashes,Events,Updates' ($script:fixtureInvocation.ModuleId -join ',') 'Incident module ordering changed.'
     foreach ($call in $script:fixtureInvocation) { Assert-True ($call.CollectData -and $call.Start -eq $window.StartUtc -and $call.End -eq $window.EndUtc -and $call.Timeout -eq 17) 'Incident window/timeout did not reach the existing runner.' }
@@ -262,6 +267,7 @@ try {
     $md=[IO.File]::ReadAllText($result.MarkdownReportPath,[Text.Encoding]::UTF8)
     Assert-True ($txt.Contains($unicode) -and $md.Contains($unicode)) 'Concrete artifacts lost Unicode.'
     Assert-True (-not $txt.Contains('incident-secret') -and -not $md.Contains('incident-secret')) 'Raw secret reached an artifact.'
+    foreach ($raw in $privateValues) { Assert-True (-not $txt.Contains($raw) -and -not $md.Contains($raw)) 'A private fixture value reached a concrete TXT/Markdown artifact.' }
     $mdLines=[IO.File]::ReadAllLines($result.MarkdownReportPath,[Text.Encoding]::UTF8)
     Assert-Equal '```````text' $mdLines[2] 'Markdown fence did not protect embedded backticks.'
     Assert-Equal '```````' $mdLines[-1] 'Markdown report fence is unbalanced.'

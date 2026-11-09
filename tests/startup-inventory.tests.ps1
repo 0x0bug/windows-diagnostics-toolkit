@@ -193,16 +193,23 @@ try {
     $longSingleSecret = 'FIXTURE_SECRET_' + ('B' * 200)
     $rawDoubleCommand = 'fixture.exe --mode=inspect --token="' + $longDoubleSecret + '"'
     $rawSingleCommand = "fixture.exe --mode=inspect --token='" + $longSingleSecret + "'"
+    $rawApiCommand = 'fixture.exe --mode=inspect --api-key="' + $longDoubleSecret + '"'
+    $rawClientCommand = "fixture.exe --mode=inspect --client-secret='" + $longSingleSecret + "'"
     $startupReportText = @(Write-StartupEntryRows -Inventory ([pscustomobject]@{
                 Entries = @(
                     (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'Double' -Command $rawDoubleCommand),
                     (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'Single' -Command $rawSingleCommand),
-                    (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'Short' -Command 'fixture.exe --token="SHORT_FIXTURE_SECRET" --mode=inspect')
+                    (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'Short' -Command 'fixture.exe --token="SHORT_FIXTURE_SECRET" --mode=inspect'),
+                    (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'ApiKey' -Command $rawApiCommand),
+                    (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'ClientSecret' -Command $rawClientCommand),
+                    (New-TestStartupEntry -State Enabled -SourceType Registry -Location 'HKCU:\Fixture' -Name 'Aliases' -Command 'fixture.exe --pwd="PWD_FIXTURE_SECRET" --access-token=ACCESS_FIXTURE_SECRET --mode=inspect')
                 )
                 Errors = @()
             }) -Limit 10 6>&1 | ForEach-Object { [string]$_ }) -join "`n"
     Assert-True $startupReportText.Contains($rawDoubleCommand) 'Standalone formatting changed the raw double-quoted startup command.'
     Assert-True $startupReportText.Contains($rawSingleCommand) 'Standalone formatting changed the raw single-quoted startup command.'
+    Assert-True $startupReportText.Contains($rawApiCommand) 'Standalone formatting changed the raw quoted api-key command.'
+    Assert-True $startupReportText.Contains($rawClientCommand) 'Standalone formatting changed the raw quoted client-secret command.'
     $entrypointPath = Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'
     $reportTokens = $null
     $reportParseErrors = $null
@@ -235,6 +242,8 @@ try {
             Assert-True (-not $serializedReport.Contains($longSingleSecret)) 'Serialized privacy-mode report leaked the long single-quoted token.'
             Assert-True (-not $serializedReport.Contains('FIXTURE_SECRET_')) 'Serialized privacy-mode report leaked a truncated prefix of a long quoted token.'
             Assert-True (-not $serializedReport.Contains('SHORT_FIXTURE_SECRET')) 'Serialized privacy-mode report leaked the short token.'
+            Assert-True (-not $serializedReport.Contains('PWD_FIXTURE_SECRET')) 'Serialized privacy-mode report leaked a pwd alias.'
+            Assert-True (-not $serializedReport.Contains('ACCESS_FIXTURE_SECRET')) 'Serialized privacy-mode report leaked an access-token alias.'
             Assert-True $serializedReport.Contains('fixture.exe') 'Privacy filtering removed useful startup command context.'
             Assert-True $serializedReport.Contains('--mode=inspect') 'Privacy filtering removed a useful non-secret argument.'
         }

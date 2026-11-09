@@ -318,6 +318,33 @@ function Protect-WdtDiagnosticResults {
     }
 }
 
+function Initialize-WdtOutputDirectory {
+    param([Parameter(Mandatory = $true)][string]$OutputDirectory)
+
+    $ErrorActionPreference = 'Stop'
+    try {
+        $outputProvider = $null; $outputDrive = $null
+        $resolvedOutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory, [ref]$outputProvider, [ref]$outputDrive)
+        if ($outputProvider.Name -ne 'FileSystem') { throw 'OutputDirectory must use the filesystem provider.' }
+        if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) {
+            New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
+        }
+
+        # CreateNew never overwrites an existing artifact. DeleteOnClose keeps
+        # cleanup tied to this owned handle and requires delete permission.
+        $probePath = Join-Path $resolvedOutputDirectory ('.wdt-output-probe-' + [System.Guid]::NewGuid().ToString('N') + '.tmp')
+        $probeStream = $null
+        try {
+            $probeStream = [System.IO.FileStream]::new($probePath,[System.IO.FileMode]::CreateNew,[System.IO.FileAccess]::Write,[System.IO.FileShare]::None,1,[System.IO.FileOptions]::DeleteOnClose)
+            $probeStream.WriteByte(0)
+            $probeStream.Flush()
+        }
+        finally { if ($null -ne $probeStream) { $probeStream.Dispose() } }
+        return $resolvedOutputDirectory
+    }
+    catch { throw 'Could not prepare OutputDirectory. Choose a filesystem folder that allows creating, writing and deleting temporary files.' }
+}
+
 function Get-WdtUniqueReportPaths {
     param(
         [Parameter(Mandatory = $true)][string]$OutputDirectory,
@@ -363,10 +390,7 @@ function Invoke-WdtReport {
         $windowStart=ConvertTo-WdtDataUtcText (([datetimeoffset]$windowEnd).AddDays(-7))
     }
 
-    $resolvedOutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
-    if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) {
-        New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
-    }
+    $resolvedOutputDirectory = Initialize-WdtOutputDirectory -OutputDirectory $OutputDirectory
 
     $reportPaths = Get-WdtUniqueReportPaths -OutputDirectory $resolvedOutputDirectory -ExportMarkdown:$ExportMarkdown
     $textReportPath = $reportPaths.TextPath
@@ -471,7 +495,7 @@ function Invoke-WdtReport {
         $writtenMarkdownPath = $markdownReportPath
     }
 
-    $exitCode = if (($results | Where-Object { $_.ExitCode -ne 0 }).Count -gt 0 -or $snapshotActionFailed) { 1 } else { 0 }
+    $exitCode = if (@($results | Where-Object { $_.ExitCode -ne 0 }).Count -gt 0 -or $snapshotActionFailed) { 1 } else { 0 }
     if ($snapshotActionFailed -and -not $SuppressConsoleOutput) { Write-Warning 'Snapshot collection did not receive a complete valid data protocol. See structured data status and source limitations.' }
     if ($exitCode -ne 0 -and -not $SuppressConsoleOutput) {
         Write-Warning 'One or more diagnostics completed with a non-zero exit code. See the report for details.'
@@ -496,8 +520,7 @@ function Invoke-WdtSnapshotComparison {
     $context=$null
     if ($PrivacyMode -or $before.PrivacyMode -or $after.PrivacyMode) { $context=New-WdtRedactionContext }
     $comparison=Compare-WdtSnapshots -Before $before -After $after -PrivacyMode $PrivacyMode -Context $context
-    $resolvedOutputDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
-    if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) { New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null }
+    $resolvedOutputDirectory=Initialize-WdtOutputDirectory -OutputDirectory $OutputDirectory
     $paths=Get-WdtUniqueReportPaths -OutputDirectory $resolvedOutputDirectory -ExportMarkdown $ExportMarkdown -Prefix 'WindowsDiagnosticsComparison'
     $textReportPath=$paths.TextPath; $markdownReportPath=$paths.MarkdownPath
     $textLines=@(Get-WdtSnapshotComparisonLines -Comparison $comparison)
@@ -514,6 +537,7 @@ function Invoke-WdtIncident {
     param($Window,[string]$OutputDirectory,[bool]$PrivacyMode,[bool]$ExportMarkdown,[int]$ModuleTimeoutSeconds=180)
     $window=Assert-WdtIncidentWindow $Window
     $checks=@(Resolve-WdtModuleSelection -Registry $registrySnapshot -ModuleIds @('Crashes','Events','Updates'))
+    $resolvedOutputDirectory=Initialize-WdtOutputDirectory -OutputDirectory $OutputDirectory
     $started=ConvertTo-WdtDataUtcText ([datetime]::UtcNow)
     $results=New-Object System.Collections.Generic.List[object]
     foreach ($check in $checks) {
@@ -528,8 +552,6 @@ function Invoke-WdtIncident {
     # Only projected diagnostic text reaches disk; captured legacy output stays
     # in memory and is not a source of incident facts or a second report.
     try {
-        $resolvedOutputDirectory=$ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory)
-        if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) { New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null }
         $paths=Get-WdtUniqueReportPaths -OutputDirectory $resolvedOutputDirectory -ExportMarkdown $ExportMarkdown -Prefix 'WindowsDiagnosticsIncident'
         $textReportPath=$paths.TextPath; $markdownReportPath=$paths.MarkdownPath
         [System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)

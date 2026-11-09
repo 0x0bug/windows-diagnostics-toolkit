@@ -192,6 +192,74 @@ finally {
 }
 
 $fixtureText = $fixtureOutput -join "`n"
+
+# Test the actual WinHTTP collector with synthetic native output. The source tag
+# must protect every display language, including arbitrary labels and errors.
+. (Join-Path $repositoryRoot 'scripts\report-common.ps1')
+$networkTokens = $null
+$networkErrors = $null
+$networkAst = [System.Management.Automation.Language.Parser]::ParseFile($networkScript, [ref]$networkTokens, [ref]$networkErrors)
+Assert-True -Condition (@($networkErrors).Count -eq 0) -Message 'Network module did not parse for WinHTTP privacy fixtures.'
+foreach ($name in @('Protect-ProxyText', 'Get-WinHttpProxy')) {
+    $definition = $networkAst.Find({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name }, $true)
+    Assert-True -Condition ($null -ne $definition) -Message "Missing WinHTTP collector function: $name"
+    . ([scriptblock]::Create($definition.Extent.Text))
+}
+$localizedLabel = -join @([char]0x041F,[char]0x0440,[char]0x043E,[char]0x043A,[char]0x0441,[char]0x0438)
+$winHttpFixtures = @(
+    @{ Lines = @('Current WinHTTP proxy settings:', 'Proxy Server(s) : proxy.en.private.test:8080', 'Bypass List : *.en.private.test'); ExitCode = 0 },
+    @{ Lines = @($localizedLabel + ' : proxy.ru.private.test:9090', $localizedLabel + ' : *.ru.private.test'); ExitCode = 0 },
+    @{ Lines = @('arbitrary unknown-language label : proxy.other.private.test:7070', 'Direct access (no proxy server).'); ExitCode = 0 },
+    @{ Lines = @($localizedLabel + " : proxy.error.private.test:6060`r`ncontinuation private-error-detail"); ExitCode = 5 }
+)
+foreach ($fixture in $winHttpFixtures) {
+    $proxyResult = & {
+        function Resolve-WdtSystemExecutablePath { param($FileName); return 'Invoke-FixtureNetsh' }
+        function Invoke-FixtureNetsh {
+            param($Mode, $Action, $Setting)
+            Assert-True -Condition ($Mode -eq 'winhttp' -and $Action -eq 'show' -and $Setting -eq 'proxy') -Message 'WinHTTP fixture changed the native query.'
+            $global:LASTEXITCODE = $fixture.ExitCode
+            $fixture.Lines
+        }
+        Get-WinHttpProxy
+    }
+    foreach ($line in $proxyResult.Output) {
+        Assert-True -Condition ($line -match '^WinHTTP proxy details: ') -Message 'A raw WinHTTP line is missing the language-independent source tag.'
+    }
+    $rawProxyText = (@($proxyResult.Output) + @($proxyResult.Error)) -join "`n"
+    Assert-True -Condition ($rawProxyText.Contains('private.test') -or $rawProxyText.Contains('no proxy server')) -Message 'Ordinary WinHTTP output lost its original diagnostic details.'
+    $proxyContext = New-WdtRedactionContext -ComputerName '' -UserName '' -UserDomain '' -UserProfile ''
+    $safeProxyText = Protect-WdtText -Text $rawProxyText -Context $proxyContext
+    Assert-True -Condition ($safeProxyText -notmatch 'private\.test|private-error-detail|no proxy server') -Message 'Localized WinHTTP details leaked from output or source Error.'
+    if ($fixture.ExitCode -ne 0) {
+        Assert-True -Condition $safeProxyText.Contains('netsh.exe exited with code 5') -Message 'Privacy masking hid the technical WinHTTP exit code.'
+        $marker = ConvertTo-WdtFindingMarker -Severity WARN -Code NETWORK_WINHTTP_PROXY_UNAVAILABLE -Message 'WinHTTP proxy settings are unavailable.' -Evidence $proxyResult.Error -FindingNonce ''
+        $finding = ConvertFrom-WdtFindingLine -Line $marker -FindingNonce ''
+        $safeEvidence = Protect-WdtText -Text $finding.Evidence -Context $proxyContext
+        Assert-True -Condition ($safeEvidence -notmatch 'private\.test|private-error-detail') -Message 'Localized WinHTTP failure details leaked from finding Evidence.'
+        $crlfError = "Query status: Unavailable`r`n" + $proxyResult.Error + "`r`nDNS / www.microsoft.com: NotTested"
+        $safeCrlfError = Protect-WdtText -Text $crlfError -Context $proxyContext
+        Assert-True -Condition ($safeCrlfError -notmatch 'private\.test|private-error-detail' -and $safeCrlfError.Contains("netsh.exe exited with code 5; WinHTTP proxy details: <ID-") -and $safeCrlfError.EndsWith("`r`nDNS / www.microsoft.com: NotTested")) -Message 'CRLF WinHTTP Error masking must protect only the details and preserve the following line.'
+    }
+}
+$throwingProxy = & {
+    function Resolve-WdtSystemExecutablePath { param($FileName); return 'Invoke-FixtureNetsh' }
+    function Invoke-FixtureNetsh { throw "localized proxy.catch.private.test`r`nprivate-catch-continuation" }
+    Get-WinHttpProxy
+}
+$safeCatch = Protect-WdtText -Text $throwingProxy.Error -Context (New-WdtRedactionContext -ComputerName '' -UserName '' -UserDomain '' -UserProfile '')
+Assert-True -Condition ($safeCatch -notmatch 'proxy\.catch\.private\.test|private-catch-continuation') -Message 'WinHTTP exception details bypassed source-aware privacy masking.'
+$missingProxy = & {
+    function Resolve-WdtSystemExecutablePath { param($FileName); return $null }
+    Get-WinHttpProxy
+}
+Assert-True -Condition ($missingProxy.Error -eq 'netsh.exe is unavailable.' -and @($missingProxy.Output).Count -eq 0) -Message 'Missing netsh must retain its explicit unavailable state.'
+Assert-True -Condition ((Protect-WdtText -Text $missingProxy.Error -Context (New-WdtRedactionContext -ComputerName '' -UserName '' -UserDomain '' -UserProfile '')) -eq 'netsh.exe is unavailable.') -Message 'Privacy masking must retain the known netsh-unavailable reason.'
+$global:LASTEXITCODE = 0
+
+$safeFixtureNetwork = Protect-WdtText -Text $fixtureText -Context (New-WdtRedactionContext -ComputerName '' -UserName '' -UserDomain '' -UserProfile '')
+Assert-True -Condition ($safeFixtureNetwork -notmatch '(?m)^DNS (?:suffix|search list)\s+: fixture\.example|^Proxy server\s+: .*proxy\.fixture|^Auto config URL\s*:\s*.*proxy\.fixture') -Message 'Collected DNS/proxy/PAC settings leaked in Privacy Mode.'
+Assert-True -Condition $safeFixtureNetwork.Contains('DNS / fixture.example: Resolved') -Message 'Privacy masking removed the independently configured public probe.'
 $destinations = @([System.Text.RegularExpressions.Regex]::Matches($fixtureText, '(?m)^Destination\s+:\s*(.+)$') | ForEach-Object { $_.Groups[1].Value })
 Assert-True -Condition ($destinations.Count -eq 30) -Message 'The route output must contain no more than 30 routes.'
 Assert-True -Condition ($destinations[0] -eq '0.0.0.0/0' -and $destinations[1] -eq '::/0') -Message 'Default routes must be listed before non-default routes and sorted by effective metric.'
@@ -208,6 +276,7 @@ foreach ($code in @('NETWORK_ADAPTERS_UNAVAILABLE', 'NETWORK_ROUTES_UNAVAILABLE'
 }
 Assert-True -Condition ($unavailableText -notmatch '"Severity":"ERROR"') -Message 'Unavailable network sources must not create ERROR findings.'
 Assert-True -Condition $unavailableText.Contains('Overall reachability: NotTested') -Message 'Disabled external tests must report NotTested.'
+Assert-True -Condition $unavailableText.Contains('Query status: Unavailable') -Message 'A failed WinHTTP query must retain canonical availability in the text report.'
 foreach ($probeLabel in @('DNS /', 'TCP HTTPS /', 'Optional ICMP /')) {
     Assert-True -Condition (-not $unavailableText.Contains($probeLabel)) -Message ("Disabled external tests unexpectedly ran probe: {0}" -f $probeLabel)
 }

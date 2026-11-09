@@ -1,7 +1,7 @@
 # Windows Diagnostics Toolkit
 
 [![PowerShell Validation](https://github.com/0x0bug/windows-diagnostics-toolkit/actions/workflows/powershell-validation.yml/badge.svg)](https://github.com/0x0bug/windows-diagnostics-toolkit/actions/workflows/powershell-validation.yml)
-[![Release](https://img.shields.io/badge/release-v0.1.0--beta-orange)](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta)
+[![Release](https://img.shields.io/badge/release-v0.2.0--beta.1-orange)](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1)
 [![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://github.com/0x0bug/windows-diagnostics-toolkit)
 [![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE?logo=powershell)](https://github.com/0x0bug/windows-diagnostics-toolkit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
@@ -23,7 +23,7 @@ WDT is useful when you need to:
 - gather evidence without installing an agent or changing system settings;
 - share a redacted report through Privacy Mode.
 
-[Project website](https://wdt.digital/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [`v0.1.0-beta` release](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
+[Project website](https://wdt.digital/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [`v0.2.0-beta.1` release](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
 
 ## Why WDT
 
@@ -38,13 +38,13 @@ WDT is useful when you need to:
 
 ## Quick start
 
-`v0.1.0-beta` is available as a public prerelease.
+`v0.2.0-beta.1` is available as a public prerelease.
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The fixed-release bootstrap downloads only the `v0.1.0-beta` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.1.0-beta). It verifies the ZIP before extraction; if the hash does not match, nothing is extracted or executed. The toolkit runs from a temporary directory and is not installed permanently.
+The fixed-release bootstrap downloads only the `v0.2.0-beta.1` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1). It verifies the ZIP before extraction; if the hash does not match, nothing is extracted or executed. The toolkit runs from a temporary directory and is not installed permanently.
 
 To inspect the bootstrap before running it:
 
@@ -79,7 +79,7 @@ If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not install
 
 ## What happens during a run
 
-The source checkout also supports opt-in structured snapshots for System,
+WDT supports opt-in structured snapshots for System,
 Crashes, Events, and Updates, and offline comparison of two saved snapshots:
 
 ```powershell
@@ -96,7 +96,7 @@ show unavailable or incomplete sources. Changes and event counts alone do not
 establish a regression, resolution, or cause. See the [snapshot workflow and
 limitations](docs/usage.md#structured-snapshots-and-offline-comparison).
 
-The source checkout can also investigate an approximate incident time:
+WDT can also investigate an approximate incident time:
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -IncidentSymptom AppFailure -IncidentAt '2026-11-02T14:30:00+02:00' -PrivacyMode -ExportMarkdown -OutputDirectory C:\WdtReports
@@ -235,6 +235,8 @@ Choose a report directory explicitly when needed:
 
 Each module has an independent 180-second timeout by default. Change it with `-ModuleTimeoutSeconds`. A timed-out or failed module is reported as partial or unavailable while results from other modules are preserved.
 
+Before live report, snapshot or incident collection, WDT checks the output folder by creating, writing one fixed nonsensitive byte to, and automatically deleting its own unique temporary probe. The folder must allow file creation, writing and deletion. This checks current access; later filesystem failures can still prevent report writes.
+
 See the [usage guide](docs/usage.md) for all parameters, standalone module commands, classification semantics, and troubleshooting.
 
 ## Share reports safely
@@ -255,7 +257,9 @@ Privacy Mode replaces identifying values with stable per-report tokens such as:
 <ID-1>
 ```
 
-Process, application, and dump-file names remain visible because they are diagnostically useful. Proxy credentials and sensitive URL query values are removed from combined reports even when Privacy Mode is disabled.
+Recognizable process, application, and dump-file names remain visible because they are diagnostically useful. Ambiguous names without a file extension may be redacted to protect identities. Proxy credentials and sensitive URL query values are removed from combined reports even when Privacy Mode is disabled.
+
+Privacy Mode also protects complete email addresses, DNS suffix/search-list values, and proxy/PAC configuration values. WinHTTP native output and errors use the `WinHTTP proxy details:` prefix so their payload can be protected regardless of the Windows display language. The separate `Query status` reports whether collection succeeded; it does not establish whether a proxy is configured. These configuration tokens represent opaque values, not linked identities across reports. Public DNS and HTTPS probe targets remain visible.
 
 Review every report before publishing it. Privacy Mode cannot guarantee removal of arbitrary sensitive text embedded in Windows Event Log messages. Standalone module output is raw and local; Privacy Mode applies to combined reports generated by `Invoke-WindowsDiagnostics.ps1`.
 

@@ -5,6 +5,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 . (Join-Path $repositoryRoot 'scripts\report-common.ps1')
 . (Join-Path $repositoryRoot 'scripts\process-runner.ps1')
+. (Join-Path $repositoryRoot 'scripts\module-registry.ps1')
 function Assert-True { param([bool]$Condition, [string]$Message) if (-not $Condition) { throw $Message } }
 function Assert-Equal { param($Expected, $Actual, [string]$Message) if ($Expected -ne $Actual) { throw "$Message Expected=$Expected Actual=$Actual" } }
 
@@ -44,12 +45,93 @@ Assert-Equal $false $failedSummary.Success 'Failed cleanup must be explicit.'
 
 $powerShellPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
 $fixtureStarted = Get-Date
-$fixtureRoot = Join-Path $env:TEMP ('wdt-runtime-' + [guid]::NewGuid().ToString('N'))
+$runtimeTemporaryRoot = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd('\') + '\'
+$fixtureRoot = Join-Path $runtimeTemporaryRoot ('wdt-runtime-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixtureRoot -Force | Out-Null
 $heldChildPid = $null
 $timeoutChildPid = $null
 $timeoutRootPid = $null
 try {
+    # Run the real report aggregator and CLI with child scripts that actually
+    # exit unsuccessfully; findings alone must not change execution success.
+    foreach ($definition in @($entrypointAst.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))) {
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+    $toolkitVersion = 'fixture'
+    $exitFixture = Join-Path $fixtureRoot 'module-exit.ps1'
+    $exitSource = @'
+param([int]$Code=0, [string]$CommonPath, [switch]$HealthError)
+. $CommonPath
+Write-Output 'synthetic module output'
+if ($HealthError) { Write-WdtFinding -Severity ERROR -Code FIXTURE_HEALTH_ERROR -Message 'Synthetic health finding.' }
+exit $Code
+'@
+    [IO.File]::WriteAllText($exitFixture, $exitSource, [Text.Encoding]::UTF8)
+    foreach ($failedModules in @(0, 1, 2)) {
+        $definitions = @(for ($moduleIndex = 0; $moduleIndex -lt 2; $moduleIndex++) {
+            [pscustomobject]@{ Id=('Fixture' + $moduleIndex); Title=('Fixture ' + $moduleIndex); EntryPoint=$exitFixture; OptionBindings=@{}; DefaultArguments=@('-Code', $(if ($moduleIndex -lt $failedModules) { '7' } else { '0' }), '-CommonPath', (Join-Path $repositoryRoot 'scripts\report-common.ps1')) }
+        })
+        $reportResult = Invoke-WdtReport -ModuleDefinitions $definitions -CoreOptions @{} -OutputDirectory (Join-Path $fixtureRoot ('report-' + $failedModules)) -SuppressConsoleOutput $true
+        Assert-Equal $(if ($failedModules -eq 0) { 0 } else { 1 }) $reportResult.ExitCode "Report exit code was wrong for $failedModules failed modules."
+        $reportText = [IO.File]::ReadAllText($reportResult.TextReportPath)
+        Assert-Equal $failedModules ([regex]::Matches($reportText, 'Execution: NonZeroExit').Count) 'Report lost actual child failure statuses.'
+        Assert-Equal $failedModules ([regex]::Matches($reportText, '(?m)^Exit code: [1-9][0-9]*\r?$').Count) 'Report lost nonzero child process exit codes.'
+    }
+    $healthDefinition = [pscustomobject]@{ Id='Health'; Title='Health'; EntryPoint=$exitFixture; OptionBindings=@{}; DefaultArguments=@('-CommonPath', (Join-Path $repositoryRoot 'scripts\report-common.ps1'), '-HealthError') }
+    $healthReport = Invoke-WdtReport -ModuleDefinitions @($healthDefinition) -CoreOptions @{} -OutputDirectory (Join-Path $fixtureRoot 'health-only') -SuppressConsoleOutput $true
+    Assert-Equal 0 $healthReport.ExitCode 'An ERROR finding from a successful child must not fail report execution.'
+    Assert-Equal 1 $healthReport.ErrorCount 'The successful child health finding disappeared from the report.'
+
+    $cliRoot = Join-Path $fixtureRoot 'cli-repository'
+    New-Item -ItemType Directory -Path $cliRoot | Out-Null
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'), (Join-Path $repositoryRoot 'VERSION') -Destination $cliRoot
+    Copy-Item -LiteralPath (Join-Path $repositoryRoot 'scripts'), (Join-Path $repositoryRoot 'modules') -Destination $cliRoot -Recurse
+    foreach ($failedModules in @(0, 1, 2)) {
+        $moduleIndex = 0
+        foreach ($moduleName in @('system', 'security')) {
+            $code = if ($moduleIndex -lt $failedModules) { 7 } else { 0 }
+            [IO.File]::WriteAllText((Join-Path $cliRoot ('modules\' + $moduleName + '\diagnostic.ps1')), ('Write-Output ''synthetic CLI child''; exit ' + $code), [Text.Encoding]::UTF8)
+            $moduleIndex++
+        }
+        $cliOutput = Join-Path $fixtureRoot ('cli-' + $failedModules)
+        $cliResult = Invoke-DiagnosticScript 'CLI exit regression' (Join-Path $cliRoot 'Invoke-WindowsDiagnostics.ps1') $powerShellPath $cliRoot 30 @('-System', '-Security', '-OutputDirectory', $cliOutput)
+        Assert-Equal $(if ($failedModules -eq 0) { 0 } else { 1 }) $cliResult.ExitCode "CLI exit code was wrong for $failedModules failed modules."
+        $cliReports = @(Get-ChildItem -LiteralPath $cliOutput -Filter 'WindowsDiagnosticsReport-*.txt' -File)
+        Assert-Equal 1 $cliReports.Count 'CLI execution did not preserve exactly one report.'
+        Assert-Equal $failedModules ([regex]::Matches([IO.File]::ReadAllText($cliReports[0].FullName), 'Execution: NonZeroExit').Count) 'CLI report did not preserve child failures.'
+    }
+    [IO.File]::WriteAllText((Join-Path $cliRoot 'modules\system\diagnostic.ps1'), ". `$PSScriptRoot\..\..\scripts\report-common.ps1; Write-WdtFinding -Severity ERROR -Code CLI_HEALTH_ERROR -Message 'Synthetic health finding.'", [Text.Encoding]::UTF8)
+    $healthCliOutput = Join-Path $fixtureRoot 'cli-health-only'
+    $healthCli = Invoke-DiagnosticScript 'CLI health finding' (Join-Path $cliRoot 'Invoke-WindowsDiagnostics.ps1') $powerShellPath $cliRoot 30 @('-System', '-OutputDirectory', $healthCliOutput)
+    Assert-Equal 0 $healthCli.ExitCode 'An ERROR health finding must not fail the CLI.'
+    Assert-True (([IO.File]::ReadAllText(@(Get-ChildItem -LiteralPath $healthCliOutput -Filter '*.txt' -File)[0].FullName)).Contains('CLI_HEALTH_ERROR')) 'CLI health finding was not written.'
+
+    # All CLI fixtures remain synthetic even if a future validation regression
+    # accidentally dispatches a module. A marker proves no collector was run.
+    foreach ($moduleDirectory in @(Get-ChildItem -LiteralPath (Join-Path $cliRoot 'modules') -Directory)) {
+        $modulePath = Join-Path $moduleDirectory.FullName 'diagnostic.ps1'
+        $moduleTokens = $null; $moduleErrors = $null
+        $moduleAst = [Management.Automation.Language.Parser]::ParseFile($modulePath, [ref]$moduleTokens, [ref]$moduleErrors)
+        $moduleParameters = if ($null -ne $moduleAst.ParamBlock) { $moduleAst.ParamBlock.Extent.Text } else { 'param()' }
+        $markerSource = $moduleParameters + "`n[IO.File]::WriteAllText((Join-Path `$PSScriptRoot '..\..\collector-called.txt'), 'called')"
+        [IO.File]::WriteAllText($modulePath, $markerSource, [Text.Encoding]::UTF8)
+    }
+    $invalidRequests = @(
+        @('-Module', 'MissingModule'),
+        @('-SaveSnapshot'),
+        @('-SaveSnapshot', '-Network'),
+        @('-IncidentSymptom', 'AppFailure'),
+        @('-IncidentSymptom', 'AppFailure', '-IncidentAt', '2025-11-02T10:00:00Z', '-System'),
+        @('-BeforeSnapshot', 'missing.json')
+    )
+    for ($invalidIndex = 0; $invalidIndex -lt $invalidRequests.Count; $invalidIndex++) {
+        $invalidOutput = Join-Path $fixtureRoot ('invalid-cli-' + $invalidIndex)
+        $invalidCli = Invoke-DiagnosticScript 'Invalid CLI' (Join-Path $cliRoot 'Invoke-WindowsDiagnostics.ps1') $powerShellPath $cliRoot 10 (@($invalidRequests[$invalidIndex]) + @('-OutputDirectory', $invalidOutput))
+        Assert-True ($invalidCli.ExitCode -ne 0) 'Invalid CLI options were accepted.'
+        Assert-True (-not (Test-Path -LiteralPath $invalidOutput)) 'Invalid CLI options created output before semantic validation.'
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $cliRoot 'collector-called.txt'))) 'Invalid CLI options invoked a collector.'
+    }
+
     $streamFixture = Join-Path $fixtureRoot 'stream.ps1'
     [IO.File]::WriteAllText($streamFixture, "Write-Output 'out'; [Console]::Error.WriteLine('err')", [Text.Encoding]::UTF8)
     $missingExecutable = Join-Path $fixtureRoot 'missing-powershell.exe'
@@ -120,6 +202,50 @@ Write-Output 'progress-output-ok'
     Assert-Equal 0 @($progressResult.ErrorLines).Count 'PowerShell progress records must not leak into stderr/report errors.'
     Assert-True (-not (($progressResult.ErrorLines -join "`n") -match '#< CLIXML|<Objs\b')) 'Serialized CLIXML progress must not appear in report errors.'
 
+    $informationFixture = Join-Path $fixtureRoot 'information-stream.ps1'
+    $informationSource = @'
+param([int]$Code=0)
+. '__COMMON__'
+. '__DATA__'
+$text = 'stream-' + (-join @([char]0x041F,[char]0x0440,[char]0x0438,[char]0x0432,[char]0x0435,[char]0x0442,[char]0x96EA))
+Write-Host ('host-' + $text)
+Write-Information ('information-' + $text) -InformationAction Continue
+Write-Warning ('warning-' + $text)
+Write-Error ('error-' + $text) -ErrorAction Continue
+Write-Output ('output-' + $text)
+[Console]::Error.WriteLine('stderr-' + $text)
+Write-WdtFinding -Severity WARN -Code STREAM_FINDING -Message ('finding-' + $text)
+if ((Get-WdtDataRequest).Enabled) {
+    $source = New-WdtDataSource -Id os -Kind Configuration -Scope 'Win32_OperatingSystem.Version.BuildNumber' -Coverage CurrentState
+    $fact = New-WdtDataFact -Id f1 -Type OsVersion -Key windows-version -Values @{Version='10.0';Build='26000'} -Comparison Configuration -SourceIds @('os')
+    Write-WdtDiagnosticData (New-WdtDiagnosticData -ModuleId System -Sources @($source) -Facts @($fact))
+}
+exit $Code
+'@
+    $informationSource = $informationSource.Replace('__COMMON__', (Join-Path $repositoryRoot 'scripts\report-common.ps1').Replace("'", "''")).Replace('__DATA__', (Join-Path $repositoryRoot 'scripts\diagnostic-data.ps1').Replace("'", "''"))
+    [IO.File]::WriteAllText($informationFixture, $informationSource, [Text.Encoding]::UTF8)
+    $streamText = 'stream-' + (-join @([char]0x041F,[char]0x0440,[char]0x0438,[char]0x0432,[char]0x0435,[char]0x0442,[char]0x96EA))
+    # Both command transports map a nonzero script exit to the shell's 1.
+    foreach ($code in @(0,1,2)) {
+        $informationResult = Invoke-DiagnosticScript 'InformationStream' $informationFixture $powerShellPath $repositoryRoot 10 @('-Code', [string]$code) -CollectData -ModuleId System
+        Assert-Equal $(if ($code -eq 0) { 0 } else { 1 }) $informationResult.ExitCode 'Information-stream capture changed the shell exit code.'
+        Assert-Equal $(if ($code -eq 0) { 'Success' } else { 'NonZeroExit' }) $informationResult.Status 'Information-stream capture changed execution status.'
+        Assert-Equal $(if ($code -eq 0) { 'Complete' } else { 'Partial' }) $informationResult.Completeness 'Information-stream capture changed execution completeness.'
+        Assert-True $informationResult.OutputComplete 'Information-stream capture failed to drain a stream.'
+        $allStreamText = (@($informationResult.OutputLines) + @($informationResult.ErrorLines)) -join "`n"
+        Assert-True ($allStreamText -notmatch '#< CLIXML|<Objs\b') 'Information, warning, and error records must remain readable text rather than serialized CLIXML.'
+        foreach ($prefix in @('host-','information-','output-')) {
+            Assert-Equal 1 @($informationResult.OutputLines | Where-Object { $_ -ceq ($prefix + $streamText) }).Count "Information-stream capture lost or duplicated $prefix text or Unicode."
+        }
+        Assert-True ($allStreamText.Contains('warning-' + $streamText)) 'PowerShell warning text was lost.'
+        Assert-True (($informationResult.ErrorLines -join '').Contains('error-' + $streamText)) 'Nonterminating PowerShell error text must remain readable in stderr after joining display wraps.'
+        Assert-True ($informationResult.ErrorLines -contains ('stderr-' + $streamText)) 'Native stderr text or Unicode was lost.'
+        Assert-Equal 1 @($informationResult.Findings | Where-Object { $_.Code -ceq 'STREAM_FINDING' }).Count 'Information-stream capture lost the authenticated finding.'
+        Assert-Equal $(if ($code -eq 0) { 'Available' } else { 'Partial' }) $informationResult.DataStatus 'Information-stream capture changed structured data status.'
+        Assert-Equal '26000' $informationResult.Data.Facts[0].Values.Build 'Information-stream capture lost structured protocol data.'
+        Assert-True (($informationResult | ConvertTo-Json -Depth 12) -notmatch '@@WDT_(?:FINDING|DATA)@@[A-Fa-f0-9]{32}:') 'Active nonce protocol frames leaked from the resolved result.'
+    }
+
     $largeStreamFixture = Join-Path $fixtureRoot 'large-streams.ps1'
     $largeStreamSource = @'
 1..4000 | ForEach-Object {
@@ -167,10 +293,12 @@ Write-Output ('FIXTURE_DATA_COUNT=' + `$fixtureData.Count)
     Assert-True ((($findingResult | ConvertTo-Json -Depth 8) -notmatch '@@WDT_FINDING@@[A-Fa-f0-9]{32}:')) ('The active finding nonce must not remain in the resolved result or user-facing errors. ' + $findingDebug)
 
     $argumentFixture = Join-Path $fixtureRoot 'arguments.ps1'
-    $argumentSource = "param([string]`$Value1, [string]`$Value2, [string]`$Value3, [string]`$Value4, [string]`$Value5, [string]`$Value6, [string]`$Value7, [string]`$Value8)`r`nforeach (`$value in @(`$Value1, `$Value2, `$Value3, `$Value4, `$Value5, `$Value6, `$Value7, `$Value8)) {`r`n    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$value))`r`n}"
-    [IO.File]::WriteAllText($argumentFixture, $argumentSource, [Text.Encoding]::UTF8)
     $unicodeValue = 'Unicode: ' + (-join @([char]0x041F, [char]0x0440, [char]0x0438, [char]0x0432, [char]0x0435, [char]0x0442, [char]0x0020, [char]0x96EA))
-    $argumentValues = @('', 'plain value', $unicodeValue, 'double"quote', 'trailing\', "single'quote", '$dollar; & ampersand', 'back`tick')
+    $argumentValues = @('', 'plain value', $unicodeValue, 'double"quote', 'trailing\', "single'quote", '$dollar; & ampersand', 'back`tick', 'odd\"quote', 'even\\"quote', 'run\\\"quote', '$(Write-Output injected); & `literal', "CR`r`nLF")
+    $argumentParameters = @(1..$argumentValues.Count | ForEach-Object { '[string]$Value' + $_ }) -join ', '
+    $argumentVariables = @(1..$argumentValues.Count | ForEach-Object { '$Value' + $_ }) -join ', '
+    $argumentSource = "param($argumentParameters)`r`nforeach (`$value in @($argumentVariables)) {`r`n    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$value))`r`n}"
+    [IO.File]::WriteAllText($argumentFixture, $argumentSource, [Text.Encoding]::UTF8)
     $scriptArguments = @()
     for ($argumentIndex = 0; $argumentIndex -lt $argumentValues.Count; $argumentIndex++) {
         $scriptArguments += '-Value' + ($argumentIndex + 1)
@@ -182,6 +310,28 @@ Write-Output ('FIXTURE_DATA_COUNT=' + `$fixtureData.Count)
     Assert-Equal $expectedArguments.Count $argumentResult.OutputLines.Count 'The argument fixture returned an unexpected number of values.'
     for ($argumentIndex = 0; $argumentIndex -lt $expectedArguments.Count; $argumentIndex++) {
         Assert-Equal $expectedArguments[$argumentIndex] $argumentResult.OutputLines[$argumentIndex] "Argument $argumentIndex did not round-trip exactly."
+    }
+
+    # PowerShell also treats smart single quotes as string delimiters. Exercise
+    # each in a real script path and argument, including inert command text.
+    foreach ($quoteCode in @(0x0027, 0x2018, 0x2019, 0x201A, 0x201B)) {
+        $quote = [string][char]$quoteCode
+        $quotedFixture = Join-Path $fixtureRoot ('quote' + $quote + 'fixture.ps1')
+        $quotedSource = @'
+param([string]$Value, [string]$Other)
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($PSCommandPath))
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Value))
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Other))
+'@
+        [IO.File]::WriteAllText($quotedFixture, $quotedSource, [Text.Encoding]::UTF8)
+        $literal = 'literal' + $quote + '; Write-Output QUOTE_TEXT_EXECUTED; #' + $quote + ' tail'
+        $quoted = Invoke-DiagnosticScript 'Quoted literal' $quotedFixture $powerShellPath $repositoryRoot 10 @('-Value', $literal, '-Other', 'after quote')
+        Assert-Equal 'Success' $quoted.Status ('Quote U+{0:X4} broke a child script path or argument.' -f $quoteCode)
+        Assert-Equal 3 @($quoted.OutputLines).Count 'Quoted argument text executed or changed output cardinality.'
+        $quotedValues = @($quotedFixture, $literal, 'after quote')
+        for ($quoteIndex = 0; $quoteIndex -lt $quotedValues.Count; $quoteIndex++) {
+            Assert-Equal ([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($quotedValues[$quoteIndex]))) $quoted.OutputLines[$quoteIndex] 'A quoted path or argument did not round-trip literally.'
+        }
     }
 
     $heldFixture = Join-Path $fixtureRoot 'held.ps1'
@@ -241,7 +391,9 @@ finally {
             Stop-Process -Id $fixturePid -Force -ErrorAction SilentlyContinue
         }
     }
-    Remove-Item -LiteralPath $fixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
+    $resolvedFixtureRoot = [IO.Path]::GetFullPath($fixtureRoot)
+    if (-not $resolvedFixtureRoot.StartsWith($runtimeTemporaryRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe process runner fixture cleanup.' }
+    Remove-Item -LiteralPath $resolvedFixtureRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Write-Host 'Process runner tests passed.'
