@@ -2,325 +2,78 @@
 
 [![PowerShell Validation](https://github.com/0x0bug/windows-diagnostics-toolkit/actions/workflows/powershell-validation.yml/badge.svg)](https://github.com/0x0bug/windows-diagnostics-toolkit/actions/workflows/powershell-validation.yml)
 [![Release](https://img.shields.io/badge/release-v0.2.0--beta.2-orange)](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2)
-[![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)](https://github.com/0x0bug/windows-diagnostics-toolkit)
-[![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE?logo=powershell)](https://github.com/0x0bug/windows-diagnostics-toolkit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
-[![No telemetry](https://img.shields.io/badge/telemetry-none-2ea44f)](SECURITY.md)
 
-<p align="center">
-  <img src="https://wdt.digital/assets/tui-wide-real.png" alt="Windows Diagnostics Toolkit interactive Wide dashboard" width="100%">
-</p>
+Read-only Windows diagnostics for PowerShell. WDT collects system state and recent failure evidence into a local support report, with a findings summary and optional Privacy Mode.
 
-**One command. One local Windows support report. No automatic fixes, telemetry, or report uploads.**
-
-Windows Diagnostics Toolkit (WDT) is an open-source PowerShell toolkit for the first-pass diagnosis of Windows 10 and Windows 11 systems. It collects high-signal system, security, performance, network, storage, crash, service, Event Log, time-sync, and Windows Update context into a readable local report.
-
-WDT is useful when you need to:
-
-- collect consistent diagnostic context before troubleshooting;
-- prepare a report for a system administrator or support engineer;
-- compare several Windows machines using the same checks;
-- gather evidence without installing an agent or changing system settings;
-- share a redacted report through Privacy Mode.
-
-[Project website](https://wdt.digital/) · [Usage guide](docs/usage.md) · [Anonymized report example](docs/report-example.md) · [`v0.2.0-beta.2` release](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
-
-## Why WDT
-
-| Property | What it means |
-| --- | --- |
-| Read-only by design | Production diagnostics collect state; they do not repair or reconfigure Windows |
-| Local-first | Reports stay on the machine unless you choose to share them |
-| Findings summary | Results are grouped as `OK`, `WARN`, or `ERROR` before the detailed evidence |
-| No installation | No installer, service, agent, or third-party PowerShell module is required |
-| Shareable output | TXT output is built in; Markdown and Privacy Mode are available |
-| Broad compatibility | Windows PowerShell 5.1 and PowerShell 7 are supported |
+[Website](https://wdt.digital/) · [Report example](docs/report-example.md) · [Report a problem](https://github.com/0x0bug/windows-diagnostics-toolkit/issues/new/choose)
 
 ## Quick start
 
-`v0.2.0-beta.2` is available as a public prerelease.
+Requires Windows 10/11 and Windows PowerShell 5.1 or PowerShell 7+. No third-party modules; administrator rights are optional.
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The fixed-release bootstrap downloads only the `v0.2.0-beta.2` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2). It verifies the ZIP before extraction; if the hash does not match, nothing is extracted or executed. The toolkit runs from a temporary directory and is not installed permanently.
+The bootstrap downloads the fixed `v0.2.0-beta.2` release, verifies the ZIP's SHA-256, and runs it from a temporary folder without installation.
 
-To inspect the bootstrap before running it:
-
-```powershell
-irm https://wdt.digital/run.ps1 -OutFile .\wdt-run.ps1
-notepad .\wdt-run.ps1
-.\wdt-run.ps1
-```
-
-SHA-256 verification protects the downloaded release ZIP, not `run.ps1`. The `irm | iex` form still requires trust in the bootstrap served by GitHub Pages. Inspect it first on sensitive systems.
-
-### Clone and inspect the complete source
-
-```powershell
-git clone https://github.com/0x0bug/windows-diagnostics-toolkit.git
-cd windows-diagnostics-toolkit
-.\Invoke-WindowsDiagnostics.ps1
-```
+SHA-256 verification protects the downloaded release ZIP, not `run.ps1`. Inspect the bootstrap first on sensitive systems; see [installation and source review](docs/usage.md#installation).
 
 Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default.
 
-If Windows PowerShell reports that script execution is disabled, use this process-only launch command:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\Invoke-WindowsDiagnostics.ps1
-```
-
-The one-run execution-policy bypass applies only to the new PowerShell process. It does not change the machine-wide or current-user execution policy.
-
-If PowerShell reports that `pwsh` is not recognized, PowerShell 7 is not installed or is not available on `PATH`; installing PowerShell 7 is optional because WDT supports the built-in Windows PowerShell 5.1 command above.
-
-## What happens during a run
-
-WDT supports opt-in structured snapshots for System,
-Crashes, Events, and Updates, and offline comparison of two saved snapshots:
-
-```powershell
-.\Invoke-WindowsDiagnostics.ps1 -Module System,Crashes,Events,Updates -SaveSnapshot -PrivacyMode -OutputDirectory C:\WdtReports
-.\Invoke-WindowsDiagnostics.ps1 -BeforeSnapshot C:\WdtReports\before.json -AfterSnapshot C:\WdtReports\after.json -OutputDirectory C:\WdtReports
-```
-
-Use the actual generated snapshot paths for `before.json` and `after.json`.
-JSON is written only with `-SaveSnapshot`; ordinary reports and the TUI retain
-their existing defaults. Snapshots use a seven-day history window while current
-configuration and Get-HotFix inventory describe collection time. Comparison
-reports distinguish inventory changes from windowed evidence observations and
-show unavailable or incomplete sources. Changes and event counts alone do not
-establish a regression, resolution, or cause. See the [snapshot workflow and
-limitations](docs/usage.md#structured-snapshots-and-offline-comparison).
-
-WDT can also investigate an approximate incident time:
-
-```powershell
-.\Invoke-WindowsDiagnostics.ps1 -IncidentSymptom AppFailure -IncidentAt '2026-11-02T14:30:00+02:00' -PrivacyMode -ExportMarkdown -OutputDirectory C:\WdtReports
-```
-
-Choose `AppFailure` or `UnexpectedRestart`. The default window is 30 minutes
-before and after the supplied time, which requires an explicit offset or `Z`.
-The incident TXT/optional Markdown report links recognized signals, a timeline,
-source evidence and coverage limitations. Updates remain temporal context;
-ordering alone does not establish cause. See the [incident workflow](docs/usage.md#incident-investigation-by-symptom-and-time).
-
-1. WDT discovers the reviewed built-in diagnostic modules.
-2. Each selected module runs in a separate child PowerShell process with an independent timeout.
-3. Results are normalized into a combined findings summary and detailed evidence sections.
-4. WDT writes the report locally and displays its path and completion status.
-
-Default output depends on launch mode:
-
-| Mode | Default report directory |
-| --- | --- |
-| Interactive TUI | `.\WindowsDiagnosticsReports` |
-| Command-line mode | Current working directory |
-
-Use `-OutputDirectory` to override the default in either mode.
-
-Generated filenames:
-
-```text
-WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.txt
-WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.md
-```
-
-When report generation succeeds, WDT writes TXT even if some selected modules are partial or unavailable. Markdown export is optional in command-line mode and enabled by default in the interactive TUI.
-
 ## What it checks
 
-| Area | Diagnostic context |
+| Module | Evidence collected |
 | --- | --- |
-| System | Windows version, CPU, memory, GPU, uptime, and system drive |
-| Security | Microsoft Defender, Windows Firewall, Secure Boot, TPM, and BitLocker status |
-| Performance | Memory, short CPU samples, pagefile, and process activity snapshots |
-| Network | Adapters, routes, gateway, DNS, proxy context, TCP reachability, and optional ICMP |
-| Time | Windows Time service, timezone, clock, source, status, and optional events |
-| Storage | Windows-reported storage state, available reliability counters, and free space |
-| Crashes | Application crashes, hangs, WER, BugChecks, Reliability Monitor, and dump metadata |
-| Event Log | Grouped recent high-signal System and Application events |
-| Services | Services, startup entries, and scheduled tasks with conservative classification |
-| Windows Update | Installed updates, reboot indicators, services, and grouped failures |
+| System | Windows, hardware, memory and uptime |
+| Security | Defender, Firewall, Secure Boot, TPM and BitLocker |
+| Performance | CPU, memory, pagefile and process activity |
+| Network | Adapters, DNS, routes, proxy and reachability |
+| Time | Clock, timezone and Windows Time source/status |
+| Disk | Storage state, reliability counters and free space |
+| Crashes | Application failures, hangs, BugChecks and dump metadata |
+| Events | Grouped System and Application events |
+| Services | Services, startup entries and scheduled tasks |
+| Updates | Installed updates, failures and reboot indicators |
 
-The Network module can perform external DNS, TCP, and ICMP probes against the configured targets. It does not upload the report or send an HTTP request. Use `-NoExternalNetworkTests` to disable external probes while retaining local adapter, route, gateway, and proxy collection.
+Reports use TXT with optional Markdown. Advanced workflows include [JSON snapshots and offline comparison](docs/usage.md#structured-snapshots-and-offline-comparison) and [incident timelines](docs/usage.md#incident-investigation-by-symptom-and-time).
 
-WDT does not treat every stopped service or every Critical/Error event as proof of a fault. Findings are created only where the available evidence meets the module's documented classification rules.
-
-## Interactive TUI
-
-The dashboard lets you select diagnostics, toggle Privacy Mode and Markdown export, choose an output directory, run collection, and return to the menu without restarting the script.
-
-| Key | Action |
-| --- | --- |
-| `Up` / `Down` | Move through menu items |
-| `Space` | Toggle the selected diagnostic or option |
-| `Enter` | Run the highlighted action |
-| `A` | Select all diagnostics |
-| `R` | Restore the recommended selection |
-| `Esc` | Exit |
-
-The interface adapts to the terminal size and preserves the current selection:
-
-| Layout | Minimum terminal size | Behavior |
-| --- | ---: | --- |
-| Wide | `110x28` | Full two-column dashboard and large logo |
-| WideShort | `110x22` | Two columns with a compact header |
-| Normal | `60x25` | Single-column interface |
-| Compact | `40x18` | Scrollable viewport |
-| TooSmall | below `40x18` | Resize prompt |
-
-A terminal around `120x30` or larger is recommended for the full dashboard.
-
-### Unicode and ASCII logo modes
-
-In automatic mode, the Wide dashboard uses the Unicode block logo when output is interactive and UTF-8. PowerShell sessions using an OEM encoding such as `cp866`, redirected output, and unsupported hosts receive the printable ASCII fallback.
-
-Override the logo selection for the current PowerShell process:
-
-```powershell
-$env:WDT_TUI_LOGO = 'auto'
-$env:WDT_TUI_LOGO = 'unicode'
-$env:WDT_TUI_LOGO = 'ascii'
-```
-
-`unicode` is still blocked for redirected output. Remove the override with:
-
-```powershell
-Remove-Item Env:WDT_TUI_LOGO -ErrorAction SilentlyContinue
-```
-
-### Result screen
-
-After collection completes, WDT shows the elapsed time, report paths, collection completeness, and the number of `WARN` and `ERROR` findings.
-
-<p align="center">
-  <img src="https://wdt.digital/assets/tui-result-real.png" alt="Windows Diagnostics Toolkit completed diagnostics screen" width="100%">
-</p>
-
-A `WARN` means the toolkit found a condition worth reviewing. It does not mean the collection failed. Module execution failures and diagnostic findings are reported separately.
+![WDT interactive diagnostics dashboard](https://wdt.digital/assets/tui-wide-real.png)
 
 ## Command-line mode
 
-Use `-All`, `-Module`, or individual module switches to skip the TUI:
+From an extracted release or a [source checkout](docs/usage.md#installation):
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
-.\Invoke-WindowsDiagnostics.ps1 -Module System,Network
-.\Invoke-WindowsDiagnostics.ps1 -Module Events,Updates
-.\Invoke-WindowsDiagnostics.ps1 -System -Security -Network
-.\Invoke-WindowsDiagnostics.ps1 -Network -NoExternalNetworkTests
+.\Invoke-WindowsDiagnostics.ps1 -Module System,Network -NoExternalNetworkTests -OutputDirectory .\reports
 ```
 
-`-Module` accepts built-in manifest IDs without regard to case. Duplicate IDs are removed, and modules execute in registry order. It can be combined with the individual compatibility switches.
-
-With `-All`, `-Module`, or one or more legacy module switches it runs directly in command-line mode.
-
-Windows PowerShell 5.1 non-interactive example:
+For built-in Windows PowerShell, including when script execution is disabled:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
   -File .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
 ```
 
-Choose a report directory explicitly when needed:
+The bypass applies only to this process. TUI reports default to `.\WindowsDiagnosticsReports`; CLI reports default to the current directory. Set `-OutputDirectory` to choose another folder.
 
-```powershell
-.\Invoke-WindowsDiagnostics.ps1 -System -Network -Disk `
-  -OutputDirectory .\reports
-```
+## Privacy and safety
 
-Each module has an independent 180-second timeout by default. Change it with `-ModuleTimeoutSeconds`. A timed-out or failed module is reported as partial or unavailable while results from other modules are preserved.
+WDT writes local reports without changing Windows configuration. There are no automatic fixes, telemetry, or report uploads. Network checks can perform DNS, TCP and ICMP probes; use `-NoExternalNetworkTests` to disable external probes.
 
-Before live report, snapshot or incident collection, WDT checks the output folder by creating, writing one fixed nonsensitive byte to, and automatically deleting its own unique temporary probe. The folder must allow file creation, writing and deletion. This checks current access; later filesystem failures can still prevent report writes.
+Privacy Mode redacts common identifiers in combined reports. Standalone output is raw. Review reports before sharing: arbitrary sensitive text in Event Log messages may remain.
 
-See the [usage guide](docs/usage.md) for all parameters, standalone module commands, classification semantics, and troubleshooting.
-
-## Share reports safely
-
-Enable Privacy Mode before attaching a report to an issue, forum post, chat, or support request:
-
-```powershell
-.\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
-```
-
-Privacy Mode replaces identifying values with stable per-report tokens such as:
-
-```text
-<HOST-1>
-<USER-1>
-<IP-1>
-<MAC-1>
-<ID-1>
-```
-
-Recognizable process, application, and dump-file names remain visible because they are diagnostically useful. Ambiguous names without a file extension may be redacted to protect identities. Proxy credentials and sensitive URL query values are removed from combined reports even when Privacy Mode is disabled.
-
-Privacy Mode also protects complete email addresses, DNS suffix/search-list values, and proxy/PAC configuration values. WinHTTP native output and errors use the `WinHTTP proxy details:` prefix so their payload can be protected regardless of the Windows display language. The separate `Query status` reports whether collection succeeded; it does not establish whether a proxy is configured. These configuration tokens represent opaque values, not linked identities across reports. Public DNS and HTTPS probe targets remain visible.
-
-Review every report before publishing it. Privacy Mode cannot guarantee removal of arbitrary sensitive text embedded in Windows Event Log messages. Standalone module output is raw and local; Privacy Mode applies to combined reports generated by `Invoke-WindowsDiagnostics.ps1`.
-
-## Safety and trust model
-
-Diagnostic modules do not modify Windows configuration: network settings, disks or volumes, registry, services, scheduled tasks, Windows Update, firewall, DNS, routing, or power settings. WDT does write report files to the selected output directory. The bootstrap also creates a temporary package directory and removes it through a `finally` cleanup path when the bootstrap finishes.
-
-Repository validation includes:
-
-- strict module manifest and package-containment checks;
-- PowerShell parser validation;
-- an AST-based guard against dangerous or mutating commands in package scripts;
-- narrow allowlists for reviewed diagnostic-only native process calls;
-- checks for generated reports, logs, temporary files, and backups left in the repository;
-- tests in PowerShell 7 and Windows PowerShell 5.1.
-
-These controls reduce accidental scope expansion; they are not a formal proof of safety. Review the source before running any administrative tool on a sensitive machine.
-
-## Requirements and limitations
-
-- Windows 10 or Windows 11
-- Windows PowerShell 5.1 or PowerShell 7+
-- No third-party runtime dependencies
-- Administrator rights are optional
-
-Some Windows data sources expose less detail without elevation. WDT records unavailable data and continues where possible. Standard-user execution is not itself a failure.
-
-WDT is a collection and triage tool, not a repair utility, antivirus product, complete SMART/NVMe diagnostic, packet capture system, or substitute for expert incident response.
-
-## Development
-
-Run repository validation with PowerShell 7:
-
-```powershell
-pwsh -NoProfile -File .\scripts\validate.ps1
-```
-
-Or with Windows PowerShell 5.1:
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate.ps1
-```
-
-GitHub Actions runs validation, dependency-free tests, and a live report smoke test on pull requests and pushes to `main`. After a successful push to `main`, the release job builds and checks the versioned ZIP in both PowerShell engines before publishing a new prerelease. Existing published releases are preserved.
-
-See the [release verification guide](docs/release-verification.md) for package checks and the Windows client compatibility checklist. CI uses `windows-latest`; this does not separately verify every Windows 10/11, display-language, terminal, or privilege combination.
-
-Contributor documentation:
-
-- [Built-in module authoring](docs/module-authoring.md)
-- [Contributing](CONTRIBUTING.md)
-- [Security policy](SECURITY.md)
-- [Code of Conduct](CODE_OF_CONDUCT.md)
+Findings and collection status are separate: a warning is not an execution failure, and missing data is not proof of a healthy system. See [findings and exit codes](docs/usage.md#findings-and-exit-codes).
 
 ## Documentation
 
-- [Detailed usage](docs/usage.md)
-- [Anonymized TXT and Markdown report](docs/report-example.md)
-- [Project website](https://wdt.digital/)
-- [Issue tracker](https://github.com/0x0bug/windows-diagnostics-toolkit/issues)
-
-## License
-
-MIT. See [LICENSE](LICENSE).
+| Guide | Contents |
+| --- | --- |
+| [Usage guide](docs/usage.md) | TUI controls, options, module reference and troubleshooting |
+| [Built-in module authoring](docs/module-authoring.md) | Module manifests, data contracts and safety checks |
+| [Contributing](CONTRIBUTING.md) | Development, validation and pull requests |
+| [Security policy](SECURITY.md) | Trust boundaries, privacy and vulnerability reporting |
+| [Release verification](docs/release-verification.md) | Packaging, delivery and client compatibility checklist |
+| [Code of Conduct](CODE_OF_CONDUCT.md) | Community guidelines |

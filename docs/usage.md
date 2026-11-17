@@ -319,6 +319,14 @@ WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.txt
 WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.md
 ```
 
+Before live report, snapshot or incident collection, WDT checks the output folder
+by creating, writing one fixed nonsensitive byte to, and automatically deleting
+its own unique temporary probe. The folder must allow file creation, writing and
+deletion. This checks current access; later filesystem failures can still prevent
+report writes. Successful report generation writes TXT even when some selected
+modules are partial or unavailable. Markdown is optional in CLI mode and enabled
+by default in the TUI.
+
 See [Built-in Diagnostic Module Authoring](module-authoring.md) for the trusted package and manifest contract.
 
 ## Privacy Mode
@@ -338,6 +346,14 @@ Privacy Mode centrally redacts captured module output, findings, headers, and re
 - `<ID-1>` for a SID, GUID, or device identifier
 
 The token map resets for each report. Recognizable process names, application names, and dump-file names remain visible for diagnostic context. Ambiguous names without a file extension may be redacted to protect identities. Privacy Mode cannot guarantee removal of arbitrary sensitive text embedded in Windows Event Log messages. Review every report before publishing it.
+
+Privacy Mode also protects complete email addresses, DNS suffix/search-list
+values, and proxy/PAC configuration values. WinHTTP native output and errors use
+the `WinHTTP proxy details:` prefix so their payload can be protected regardless
+of the Windows display language. The separate `Query status` reports whether
+collection succeeded; it does not establish whether a proxy is configured.
+Configuration tokens represent opaque values, not linked identities across
+reports. Public DNS and HTTPS probe targets remain visible.
 
 Combined reports always replace proxy URL credentials and sensitive query values with `<REDACTED>`, including when Privacy Mode is disabled.
 
