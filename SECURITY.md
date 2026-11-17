@@ -23,3 +23,17 @@ Use `-PrivacyMode` before sharing a combined report and review the generated fil
 ## Scope
 
 The toolkit is intended to remain read-only, local, dependency-free, and free of telemetry or upload behavior. A change that violates those boundaries should be treated as a security concern.
+
+## Validation and scope boundaries
+
+Repository validation checks module manifests, package containment, PowerShell
+syntax and an AST-based policy against mutating commands. Reviewed native
+diagnostic calls use narrow allowlists. The regression suites exercise both
+Windows PowerShell 5.1 and PowerShell 7. These controls reduce accidental scope
+expansion; they are not a formal proof of safety.
+
+Diagnostics do not reconfigure disks, registry, services, scheduled tasks,
+Windows Update, firewall, DNS, routes or power settings. Report writes and the
+output-folder access probe are local filesystem operations. The bootstrap also
+creates a temporary package directory and removes it when it finishes. Review
+source before running administrative tools on sensitive systems.

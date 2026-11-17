@@ -31,6 +31,15 @@ Use `-Module <Id>` for the general CLI selector. Existing individual switches an
 
 Never attach a raw personal diagnostic report to an issue. Generate a combined report with `-PrivacyMode`, review it manually, and remove any remaining data you do not want to publish.
 
+## Documentation
+
+Keep README as a short entry point: purpose, requirements, quick start, module
+overview, common commands and essential privacy/trust boundaries. Put parameter
+reference, TUI details, troubleshooting and advanced workflows in `docs/usage.md`;
+keep security and release procedures in their dedicated guides. Link new features
+from README instead of copying their full instructions into it. Documentation
+checks should preserve this split without requiring reference text in README.
+
 ## Pull request description
 
 Include:
