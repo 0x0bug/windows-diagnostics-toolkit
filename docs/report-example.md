@@ -125,7 +125,7 @@ Size       : 930.00 GB
 Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\services\diagnostic.ps1
 Exit code: 0
 
-== Services With Actionable Exit Codes ==
+== Confirmed Service Problems ==
 Name        : ExampleService
 DisplayName : Example Service
 State       : Stopped
