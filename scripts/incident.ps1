@@ -21,49 +21,21 @@ function Resolve-WdtIncidentWindow {
     catch { throw 'Invalid incident request. Use AppFailure or UnexpectedRestart, ISO 8601 time with Z or an offset, and a positive total window of at most 30 days.' }
 }
 
-function Get-WdtIncidentReportIdentity {
-    param($Value)
-    $identity=[guid]::Empty
-    if ([System.Guid]::TryParse([string]$Value,[ref]$identity) -and $identity -ne [guid]::Empty) { return $identity.ToString('D') }
-    return $null
-}
-
-function Get-WdtIncidentRecordIdentity {
-    param($Item)
-    if ($Item.TimePrecision -ne 'Instant' -or [string]::IsNullOrWhiteSpace($Item.LogName) -or [string]::IsNullOrWhiteSpace($Item.Provider) -or $null -eq $Item.EventId -or $Item.RecordId -notmatch '^[0-9]+$') { return $null }
-    $record=([string]$Item.RecordId).TrimStart('0')
-    if ($record.Length -eq 0) { return $null }
-    return ConvertTo-Json -InputObject @($Item.LogName.ToLowerInvariant(),$Item.Provider.ToLowerInvariant(),$Item.EventId,$record,(ConvertTo-WdtDataUtcText $Item.TimestampUtc)) -Compress
-}
-
-function Test-WdtIncidentKnownText {
-    param($Value)
-    return -not ([string]::IsNullOrWhiteSpace([string]$Value) -or ([string]$Value).Trim() -in @('Unknown','Unknown application'))
-}
-
-function Test-WdtIncidentFailureCompatible {
-    param($Left,$Right)
-    return $Left.Kind -eq $Right.Kind -and
-        (Test-WdtIncidentKnownText $Left.Component) -and (Test-WdtIncidentKnownText $Right.Component) -and
-        $Left.Component.Trim() -ieq $Right.Component.Trim() -and
-        (-not (Test-WdtIncidentKnownText $Left.FailureCode) -or -not (Test-WdtIncidentKnownText $Right.FailureCode) -or $Left.FailureCode -ieq $Right.FailureCode)
-}
-
 function Test-WdtIncidentGroupLink {
     param($Left,$Right,[string]$Mode)
-    $leftIds=@($Left | ForEach-Object { Get-WdtIncidentReportIdentity $_.Item.ReportId } | Sort-Object -Unique)
-    $rightIds=@($Right | ForEach-Object { Get-WdtIncidentReportIdentity $_.Item.ReportId } | Sort-Object -Unique)
+    $leftIds=@($Left | ForEach-Object { Get-WdtFailureReportIdentity $_.Item.ReportId } | Sort-Object -Unique)
+    $rightIds=@($Right | ForEach-Object { Get-WdtFailureReportIdentity $_.Item.ReportId } | Sort-Object -Unique)
     if (@($leftIds+$rightIds | Sort-Object -Unique).Count -gt 1) { return $false }
     if ($Mode -eq 'Report') { foreach ($a in $Left) {
         foreach ($b in $Right) {
             if ($a.Item.Kind -in @('Crash','Hang','BugCheck') -and $b.Item.Kind -in @('Crash','Hang','BugCheck')) {
-                if (-not (Test-WdtIncidentFailureCompatible $a.Item $b.Item)) { return $false }
+                if (-not (Test-WdtFailureCompatible $a.Item $b.Item)) { return $false }
             }
         }
     } }
     if ($Mode -eq 'Report') {
         foreach ($a in $Left) { foreach ($b in $Right) {
-            if ($null -ne $a.ReportIdentity -and $a.ReportIdentity -eq $b.ReportIdentity -and $a.Item.Kind -in @('Crash','Hang','BugCheck') -and (Test-WdtIncidentFailureCompatible $a.Item $b.Item)) { return $true }
+            if ($null -ne $a.ReportIdentity -and $a.ReportIdentity -eq $b.ReportIdentity -and $a.Item.Kind -in @('Crash','Hang','BugCheck') -and (Test-WdtFailureCompatible $a.Item $b.Item)) { return $true }
         } }
         return $false
     }
@@ -120,7 +92,7 @@ function New-WdtIncident {
         } }
         foreach ($item in $module.Data.Evidence) {
             $linkedFacts=@(); if ($factRefs.ContainsKey($item.Id)) { $linkedFacts=@($factRefs[$item.Id].ToArray()) }
-            $record=[pscustomobject]@{Ref=($module.ModuleId+'/'+$item.Id);ModuleId=$module.ModuleId;Item=$item;Facts=$linkedFacts;RecordIdentity=(Get-WdtIncidentRecordIdentity $item);ReportIdentity=(Get-WdtIncidentReportIdentity $item.ReportId);Date=$null;DateReason=$null}
+            $record=[pscustomobject]@{Ref=($module.ModuleId+'/'+$item.Id);ModuleId=$module.ModuleId;Item=$item;Facts=$linkedFacts;RecordIdentity=(Get-WdtEventRecordIdentity $item);ReportIdentity=(Get-WdtFailureReportIdentity $item.ReportId);Date=$null;DateReason=$null}
             if ($item.Kind -eq 'HotFix') {
                 if ($item.TimePrecision -eq 'Day') {
                     if ([datetimeoffset]$item.TimestampUtc -lt $end -and [datetimeoffset]$item.EndUtc -gt $start) { $record.DateReason='Known day uncertainty interval overlaps the requested window; no exact installation time.'; $dateRecords.Add($record) }
@@ -219,7 +191,7 @@ function New-WdtIncident {
             if ($right.Count -eq 0) { continue }
             $ids=@(@($left+$right) | ForEach-Object ReportIdentity | Where-Object { $null -ne $_ } | Sort-Object -Unique)
             if ($ids.Count -gt 1) { continue }
-            if (Test-WdtIncidentFailureCompatible $left[0].Item $right[0].Item) { $ordered[$i].AmbiguousWith+= $ordered[$j].Id; $ordered[$j].AmbiguousWith+= $ordered[$i].Id }
+            if (Test-WdtFailureCompatible $left[0].Item $right[0].Item) { $ordered[$i].AmbiguousWith+= $ordered[$j].Id; $ordered[$j].AmbiguousWith+= $ordered[$i].Id }
         }
     }
 

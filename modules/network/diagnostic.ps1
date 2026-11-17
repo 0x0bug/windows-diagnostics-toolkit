@@ -193,7 +193,7 @@ function Get-AdapterConfiguration {
                 MacAddress    = Join-ValuesOrNone -Values $adapter.MacAddress
                 IPv4          = Join-ValuesOrNone -Values $ipConfig.IPv4Address.IPAddress
                 IPv6          = Join-ValuesOrNone -Values $ipConfig.IPv6Address.IPAddress
-                Gateway       = Join-ValuesOrNone -Values $ipConfig.IPv4DefaultGateway.NextHop
+                Gateway       = Join-ValuesOrNone -Values (@($ipConfig.IPv4DefaultGateway.NextHop) + @($ipConfig.IPv6DefaultGateway.NextHop))
                 DnsServers    = Join-ValuesOrNone -Values $ipConfig.DNSServer.ServerAddresses
                 Dhcp          = $dhcpState
                 DhcpServer    = $dhcpServer
@@ -272,8 +272,9 @@ function Get-NetworkRoutes {
             }
 
             return [pscustomobject]@{
-                Routes = Get-DisplayNetworkRoutes -Routes $routes.ToArray()
-                Error  = $null
+                Routes   = Get-DisplayNetworkRoutes -Routes $routes.ToArray()
+                Complete = $true
+                Error    = $null
             }
         }
         catch {
@@ -299,16 +300,18 @@ function Get-NetworkRoutes {
                 })
         }
 
-        Write-WdtFinding -Severity WARN -Code 'NETWORK_ROUTES_PRIMARY_UNAVAILABLE' -Message 'Get-NetRoute is unavailable; CIM route data was used.' -Evidence $netRouteError
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_ROUTES_PRIMARY_UNAVAILABLE' -Message 'Get-NetRoute is unavailable; only IPv4 routes were collected by CIM.' -Evidence $netRouteError
         return [pscustomobject]@{
-            Routes = Get-DisplayNetworkRoutes -Routes $routes.ToArray()
-            Error  = $null
+            Routes   = Get-DisplayNetworkRoutes -Routes $routes.ToArray()
+            Complete = $false
+            Error    = $null
         }
     }
     catch {
         return [pscustomobject]@{
-            Routes = @()
-            Error  = ('{0} CIM fallback failed: {1}' -f $netRouteError, $_.Exception.Message)
+            Routes   = @()
+            Complete = $false
+            Error    = ('{0} CIM fallback failed: {1}' -f $netRouteError, $_.Exception.Message)
         }
     }
 }
@@ -480,17 +483,19 @@ function Test-TcpEndpointConnection {
 function Get-NetworkReachabilityClassification {
     param(
         [bool]$HasAdapter,
-        [ValidateSet('Present', 'Absent', 'Unavailable')][string]$DefaultRouteState,
+        [ValidateSet('Present', 'Absent', 'Partial', 'Unavailable')][string]$DefaultRouteState,
         [string]$DnsStatus,
         [string]$TcpStatus,
         [bool]$ExternalTestsEnabled,
         [ValidateSet('Available', 'Partial', 'Unavailable')][string]$AdapterInventoryState = 'Available'
     )
     if (-not $ExternalTestsEnabled) { return 'NotTested' }
-    if ($TcpStatus -eq 'Reachable' -and $DnsStatus -match '^Resolved') { return 'Reachable' }
+    if ($TcpStatus -eq 'Reachable') {
+        if ($DnsStatus -match '^Resolved:') { return 'Reachable' }
+        return 'BlockedOrFiltered'
+    }
     if (($AdapterInventoryState -eq 'Available' -and -not $HasAdapter) -or $DefaultRouteState -eq 'Absent') { return 'Unreachable' }
-    if ($TcpStatus -eq 'Reachable') { return 'BlockedOrFiltered' }
-    if ($DnsStatus -match '^Resolved' -and $TcpStatus -match '^(Unreachable|BlockedOrFiltered)') { return 'BlockedOrFiltered' }
+    if ($DnsStatus -match '^Resolved:' -and $TcpStatus -match '^(Unreachable|BlockedOrFiltered)') { return 'BlockedOrFiltered' }
     if ($DnsStatus -match '^Failed' -and $TcpStatus -match '^Unreachable') { return 'Unreachable' }
     return 'Indeterminate'
 }
@@ -540,8 +545,11 @@ if ($null -ne $routeResult.Error) {
     Write-WdtFinding -Severity WARN -Code 'NETWORK_ROUTES_UNAVAILABLE' -Message 'Active route information is unavailable.' -Evidence $routeResult.Error
 }
 elseif ($routeResult.Routes.Count -eq 0) {
-    Write-Host 'No active routes were found.'
-    Write-WdtFinding -Severity WARN -Code 'NETWORK_NO_ACTIVE_ROUTE' -Message 'No active routes were found.'
+    if ($routeResult.Complete) {
+        Write-Host 'No active routes were found.'
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_NO_ACTIVE_ROUTE' -Message 'No active routes were found.'
+    }
+    else { Write-Host 'No active IPv4 routes were found. IPv6 route data is unavailable.' }
 }
 else {
     foreach ($route in $routeResult.Routes) {
@@ -595,8 +603,8 @@ if ($gateways) {
     }
 }
 elseif ($adapterResult.Available -and $adapterResult.Complete) {
-    Write-Host 'No IPv4 gateway detected.'
-    Write-WdtFinding -Severity WARN -Code 'NETWORK_NO_GATEWAY' -Message 'No IPv4 default gateway was detected.'
+    Write-Host 'No IPv4 or IPv6 gateway detected.'
+    Write-WdtFinding -Severity WARN -Code 'NETWORK_NO_GATEWAY' -Message 'No IPv4 or IPv6 default gateway was detected.'
 }
 
 Write-Section 'External Network Tests'
@@ -619,6 +627,9 @@ $defaultRouteState = if ($null -ne $routeResult.Error) {
 }
 elseif (@($routeResult.Routes | Where-Object { $_.IsDefaultRoute }).Count -gt 0) {
     'Present'
+}
+elseif (-not $routeResult.Complete) {
+    'Partial'
 }
 else {
     'Absent'

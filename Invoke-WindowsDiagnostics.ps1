@@ -323,9 +323,7 @@ function Initialize-WdtOutputDirectory {
 
     $ErrorActionPreference = 'Stop'
     try {
-        $outputProvider = $null; $outputDrive = $null
-        $resolvedOutputDirectory = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($OutputDirectory, [ref]$outputProvider, [ref]$outputDrive)
-        if ($outputProvider.Name -ne 'FileSystem') { throw 'OutputDirectory must use the filesystem provider.' }
+        $resolvedOutputDirectory = Resolve-WdtFilesystemPath -Path $OutputDirectory
         if (-not (Test-Path -LiteralPath $resolvedOutputDirectory -PathType Container)) {
             New-Item -ItemType Directory -Path $resolvedOutputDirectory -Force | Out-Null
         }
@@ -502,14 +500,17 @@ function Invoke-WdtReport {
     }
 
     return [pscustomobject]@{
-        ExitCode           = $exitCode
-        TextReportPath     = $textReportPath
-        MarkdownReportPath = $writtenMarkdownPath
-        SnapshotPath       = $snapshotPath
-        WarningCount       = $findingsSummary.WarningCount
-        ErrorCount         = $findingsSummary.ErrorCount
-        SelectedCount      = $selectedChecks.Count
-        ElapsedTime        = ((Get-Date) - $startedAt)
+        ExitCode                  = $exitCode
+        Completeness              = $collectionCompleteness
+        TextReportPath            = $textReportPath
+        MarkdownReportPath        = $writtenMarkdownPath
+        DisplayTextReportPath     = $displayTextReportPath
+        DisplayMarkdownReportPath = if ($ExportMarkdown) { $displayMarkdownReportPath } else { $null }
+        SnapshotPath              = $snapshotPath
+        WarningCount              = $findingsSummary.WarningCount
+        ErrorCount                = $findingsSummary.ErrorCount
+        SelectedCount             = $selectedChecks.Count
+        ElapsedTime               = ((Get-Date) - $startedAt)
     }
 }
 

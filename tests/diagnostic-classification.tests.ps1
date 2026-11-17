@@ -367,7 +367,18 @@ Assert-Equal 'Unreachable' (Get-NetworkReachabilityClassification $false 'Absent
 Assert-Equal 'NotTested' (Get-NetworkReachabilityClassification $false 'Unavailable' 'NotTested' 'NotTested' $false) 'Disabled external tests must be explicit.'
 Assert-True ((Test-TcpEndpointConnection 'not a uri').StartsWith('Indeterminate:')) 'Invalid endpoint must be indeterminate.'
 
-Import-TestFunctions (Join-Path $repositoryRoot 'modules\performance\diagnostic.ps1') @('Get-ProcessCpuActivity')
+Import-TestFunctions (Join-Path $repositoryRoot 'modules\performance\diagnostic.ps1') @('Get-ProcessCpuActivity','Get-MemorySnapshot')
+$missingMemory = & {
+    function Get-CimInstance { [pscustomobject]@{TotalVisibleMemorySize=1000; FreePhysicalMemory=$null} }
+    Get-MemorySnapshot
+}
+Assert-Equal $null $missingMemory.AvailablePercent 'Missing free memory must not become zero percent.'
+Assert-True (-not [string]::IsNullOrWhiteSpace($missingMemory.Error)) 'The reason for unavailable memory must be retained.'
+$zeroMemory = & {
+    function Get-CimInstance { [pscustomobject]@{TotalVisibleMemorySize=1000; FreePhysicalMemory=0} }
+    Get-MemorySnapshot
+}
+Assert-True ($null -ne $zeroMemory.AvailablePercent -and $zeroMemory.AvailablePercent -eq 0) 'A real zero must remain a reported measurement.'
 $activity = @(Get-ProcessCpuActivity @([pscustomobject]@{Id=1;Name='old';CpuTime=10;StartTime=[datetime]'2024-01-01'}) @([pscustomobject]@{Id=1;Name='new';CpuTime=12;StartTime=[datetime]'2024-01-01'}) 1 4)
 Assert-Equal 0 $activity.Count 'Same PID with a different process name must not match.'
 
@@ -396,7 +407,7 @@ Assert-True $diskUnavailableText.Contains('DISK_DATA_UNAVAILABLE') 'Physical dis
 Assert-True $diskUnavailableText.Contains('VOLUME_DATA_UNAVAILABLE') 'Volume source loss must emit a stable availability finding.'
 
 function Invoke-StorageAvailabilityFixture {
-    param([string]$Mode, [bool]$DiskAvailable = $true, [bool]$VolumeAvailable = $true)
+    param([string]$Mode, [bool]$DiskAvailable = $true, [bool]$VolumeAvailable = $true, [Nullable[int]]$FreeSpace = 500)
     $previousProtocol = $env:WDT_FINDING_PROTOCOL
     $previousNonce = $env:WDT_FINDING_NONCE
     try {
@@ -408,14 +419,14 @@ function Invoke-StorageAvailabilityFixture {
         }
         function Get-Volume {
             if ($Mode -ne 'Primary') { throw 'Fixture primary volumes unavailable.' }
-            if ($VolumeAvailable) { [pscustomobject]@{DriveLetter='C'; FileSystemLabel='Fixture'; FileSystem='NTFS'; Size=1000; SizeRemaining=500} }
+            if ($VolumeAvailable) { [pscustomobject]@{DriveLetter='C'; FileSystemLabel='Fixture'; FileSystem='NTFS'; Size=1000; SizeRemaining=$FreeSpace} }
         }
         function Get-CimInstance {
             [CmdletBinding()] param([string]$ClassName, [string]$Filter)
             if ($Mode -eq 'Empty') { return }
             if ($Mode -ne 'Fallback') { throw 'Fixture fallback unavailable.' }
             if ($ClassName -eq 'Win32_DiskDrive' -and $DiskAvailable) { [pscustomobject]@{Caption='Fixture disk'; Model='Fixture'; MediaType='Fixed'; Status='OK'; Size=1000} }
-            if ($ClassName -eq 'Win32_LogicalDisk' -and $VolumeAvailable) { [pscustomobject]@{DeviceID='C:'; VolumeName='Fixture'; FileSystem='NTFS'; Size=1000; FreeSpace=500} }
+            if ($ClassName -eq 'Win32_LogicalDisk' -and $VolumeAvailable) { [pscustomobject]@{DeviceID='C:'; VolumeName='Fixture'; FileSystem='NTFS'; Size=1000; FreeSpace=$FreeSpace} }
         }
         $lines = @(& (Join-Path $repositoryRoot 'modules\disk\diagnostic.ps1') 6>&1 | ForEach-Object { [string]$_ })
         return Resolve-WdtDiagnosticResult -FindingNonce '' -Result ([pscustomobject]@{Title='Storage';ExitCode=0;OutputLines=$lines})
@@ -435,6 +446,11 @@ foreach ($mode in @('Failed', 'Empty')) {
     }
 }
 foreach ($mode in @('Primary', 'Fallback')) {
+    $unknownSpace = Invoke-StorageAvailabilityFixture $mode -FreeSpace $null
+    Assert-True (($unknownSpace.OutputLines -join "`n").Contains('Free percent : Unknown')) 'Missing free space must be visible as unknown.'
+    Assert-True ($unknownSpace.Findings.Code -notcontains 'VOLUME_LOW_FREE_SPACE') 'Missing free space must not create a false finding.'
+    $zeroSpace = Invoke-StorageAvailabilityFixture $mode -FreeSpace 0
+    Assert-True ($zeroSpace.Findings.Code -contains 'VOLUME_LOW_FREE_SPACE') 'A full volume must still create a low-space finding.'
     $healthyStorage = Invoke-StorageAvailabilityFixture $mode
     Assert-Equal 'MODULE_OK' $healthyStorage.Findings[0].Code 'A successful storage source must not emit an unavailable finding.'
     Assert-Equal 1 @($healthyStorage.Findings).Count 'Optional missing reliability counters must remain context.'

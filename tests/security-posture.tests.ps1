@@ -72,6 +72,37 @@ foreach ($code in @('SECURITY_DEFENDER_UNAVAILABLE', 'SECURITY_FIREWALL_UNAVAILA
 }
 Assert-True -Condition ($unavailableText -notmatch '"Severity":"ERROR"') -Message 'Unavailable security sources must not create ERROR findings.'
 
+$partialBitLocker = @(& {
+        function Get-Command { [CmdletBinding()] param([string]$Name); return $null }
+        function Get-CimInstance {
+            [CmdletBinding()]
+            param([string]$ClassName, [string]$Namespace)
+            if ($ClassName -eq 'Win32_EncryptableVolume') {
+                foreach ($volume in @('Fixture A','Fixture B','Fixture C')) { [pscustomobject]@{DeviceID=$volume} }
+            }
+        }
+        function Invoke-CimMethod {
+            [CmdletBinding()]
+            param($InputObject, [string]$MethodName)
+            if ($MethodName -eq 'GetProtectionStatus') {
+                if ($InputObject.DeviceID -eq 'Fixture B') { throw 'Fixture protection query failed.' }
+                return [pscustomobject]@{ReturnValue=0; ProtectionStatus=1}
+            }
+            switch ($InputObject.DeviceID) {
+                'Fixture A' { [pscustomobject]@{ReturnValue=2150694912; ConversionStatus=0} }
+                'Fixture B' { [pscustomobject]@{ReturnValue=0; ConversionStatus=4} }
+                'Fixture C' { [pscustomobject]@{ReturnValue=0; ConversionStatus=5} }
+            }
+        }
+        $env:WDT_FINDING_PROTOCOL = '1'
+        try { & $securityScript 6>&1 | ForEach-Object { [string]$_ } }
+        finally { $env:WDT_FINDING_PROTOCOL = $previousProtocolMode }
+    }) -join "`n"
+Assert-True -Condition ($partialBitLocker -match 'GetConversionStatus: Unexpected CIM return code: 2150694912') -Message 'A failed conversion query must retain its return code.'
+Assert-True -Condition ($partialBitLocker -match 'GetProtectionStatus: Fixture protection query failed') -Message 'A failed protection query must retain its reason.'
+Assert-True -Condition ($partialBitLocker -match 'Volume status\s+: EncryptionPaused' -and $partialBitLocker -match 'Volume status\s+: DecryptionPaused') -Message 'Paused conversion states must remain readable across volumes.'
+Assert-True -Condition ($partialBitLocker.Contains('SECURITY_BITLOCKER_PARTIAL') -and $partialBitLocker -notmatch 'SECURITY_BITLOCKER_NOT_PROTECTED|SECURITY_BITLOCKER_UNAVAILABLE') -Message 'CIM errors must be reported without claiming a protection state or dropping other volumes.'
+
 $temporaryRoot = if (-not [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     [System.IO.Path]::GetFullPath($env:RUNNER_TEMP)
 }

@@ -145,7 +145,8 @@ function Test-WdtAllowedDotSource {
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\module-registry.ps1' },
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\report-common.ps1' },
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\process-runner.ps1' },
-        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\tui.ps1' }
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\tui.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\tui.ps1'; Target = 'scripts\report-common.ps1' },
         [pscustomobject]@{ Caller = 'scripts\process-runner.ps1'; Target = 'scripts\diagnostic-data.ps1' },
         [pscustomobject]@{ Caller = 'modules\time\diagnostic.ps1'; Target = 'scripts\process-runner.ps1' },
         [pscustomobject]@{ Caller = 'scripts\diagnostic-data.ps1'; Target = 'scripts\report-common.ps1' }

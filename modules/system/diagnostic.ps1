@@ -147,10 +147,9 @@ if ($null -ne $systemDisk) {
     Write-Host ('Size          : {0}' -f (Format-Bytes -Bytes $systemDisk.Size))
     Write-Host ('Free space    : {0}' -f (Format-Bytes -Bytes $systemDisk.FreeSpace))
 
-    if ($systemDisk.Size -gt 0) {
-        $freePercent = ($systemDisk.FreeSpace / $systemDisk.Size) * 100
-        Write-Host ('Free percent  : {0:N1}%' -f $freePercent)
-    }
+    $freePercent = Get-WdtAvailablePercent -Available $systemDisk.FreeSpace -Total $systemDisk.Size
+    $freePercentText = if ($null -eq $freePercent) { 'Unknown' } else { '{0:N1}%' -f $freePercent }
+    Write-Host ('Free percent  : {0}' -f $freePercentText)
 }
 else {
     Write-Host 'System drive details: unavailable'

@@ -753,6 +753,25 @@ function ConvertFrom-WdtFindingLine {
     return New-WdtFindingObject -Module '' -Severity $severity -Code $code -Message $message -Evidence $evidence
 }
 
+function Resolve-WdtFilesystemPath {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $provider = $null
+    $drive = $null
+    $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path, [ref]$provider, [ref]$drive)
+    if ($provider.Name -ne 'FileSystem') { throw 'OutputDirectory must use the filesystem provider.' }
+    return $resolvedPath
+}
+
+function Get-WdtAvailablePercent {
+    param([Nullable[double]]$Available, [Nullable[double]]$Total)
+
+    if ($null -eq $Available -or $null -eq $Total -or $Total -le 0 -or $Available -lt 0 -or $Available -gt $Total) {
+        return $null
+    }
+    return ($Available / $Total) * 100
+}
+
 function Resolve-WdtDiagnosticResult {
     param(
         [Parameter(Mandatory = $true)]$Result,
@@ -779,6 +798,9 @@ function Resolve-WdtDiagnosticResult {
 
     if ($Result.ExitCode -ne 0) {
         $findings.Add((New-WdtFindingObject -Module $Result.Title -Severity 'ERROR' -Code 'MODULE_EXECUTION_FAILED' -Message 'The diagnostic completed with a non-zero exit code.' -Evidence ('ExitCode={0}' -f $Result.ExitCode)))
+    }
+    elseif ($Result.PSObject.Properties['OutputComplete'] -and -not $Result.OutputComplete -and -not ($findings.Severity -contains 'ERROR')) {
+        $findings.Add((New-WdtFindingObject -Module $Result.Title -Severity 'WARN' -Code 'MODULE_OUTPUT_INCOMPLETE' -Message 'The diagnostic exited successfully, but some output could not be captured.'))
     }
 
     if ($findings.Count -eq 0) {

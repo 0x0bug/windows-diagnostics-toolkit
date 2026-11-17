@@ -114,11 +114,7 @@ function Get-VolumeInfo {
             foreach ($volume in $volumes) {
                 $size = $volume.Size
                 $free = $volume.SizeRemaining
-                $freePercent = $null
-
-                if ($size -gt 0) {
-                    $freePercent = ($free / $size) * 100
-                }
+                $freePercent = Get-WdtAvailablePercent -Available $free -Total $size
 
                 [pscustomobject]@{
                     DriveLetter = "$($volume.DriveLetter):"
@@ -140,11 +136,7 @@ function Get-VolumeInfo {
             ForEach-Object {
                 $size = $_.Size
                 $free = $_.FreeSpace
-                $freePercent = $null
-
-                if ($size -gt 0) {
-                    $freePercent = ($free / $size) * 100
-                }
+                $freePercent = Get-WdtAvailablePercent -Available $free -Total $size
 
                 [pscustomobject]@{
                     DriveLetter = $_.DeviceID

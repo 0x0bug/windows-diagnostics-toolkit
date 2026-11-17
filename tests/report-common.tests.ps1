@@ -492,4 +492,11 @@ foreach ($fixture in $markdownFixtures) {
     }
 }
 
+$partialResult = Resolve-WdtDiagnosticResult -Result ([pscustomobject]@{
+    Title='Partial Fixture'; OutputLines=@('partial context'); ExitCode=0; OutputComplete=$false
+}) -FindingNonce ''
+if ($partialResult.ExitCode -ne 0 -or $partialResult.Findings.Count -ne 1 -or
+    $partialResult.Findings[0].Code -ne 'MODULE_OUTPUT_INCOMPLETE' -or $partialResult.Findings[0].Severity -ne 'WARN') {
+    throw 'Incomplete output must be visible without changing a successful exit to a process failure.'
+}
 Write-Host 'Report common tests passed.'

@@ -188,6 +188,7 @@ exit $Code
         Assert-Equal 0 $captureResult.ExitCode "$captureFailure stream capture failure changed the process exit code."
         Assert-Equal $false $captureResult.OutputComplete "$captureFailure stream capture failure must mark captured output incomplete."
         Assert-Equal 'Partial' $captureResult.Completeness "$captureFailure stream capture failure must make completeness partial."
+        Assert-Equal 'MODULE_OUTPUT_INCOMPLETE' $captureResult.Findings[0].Code "$captureFailure stream capture failure must appear in the findings."
         Assert-True (($captureResult.ErrorLines -join "`n").Contains('Stream read')) "$captureFailure stream capture failure details were not retained."
         Assert-True (-not (($captureResult.ErrorLines -join "`n").Contains('stream drain did not finish'))) "$captureFailure stream capture failure must not be mislabeled as a drain timeout."
     }

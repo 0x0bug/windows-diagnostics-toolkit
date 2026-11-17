@@ -284,7 +284,7 @@ jobs:
           $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
           .\tests\release-package.tests.ps1 -ArchivePath "dist/windows-diagnostics-toolkit-v$version.zip" -SourceRoot $PWD.Path
 
-      - name: Publish prerelease and verify uploaded assets
+      - name: Publish prerelease
         if: steps.release.outputs.publish == 'true'
         shell: pwsh
         env:
@@ -303,14 +303,42 @@ jobs:
           [IO.File]::WriteAllText($notesPath, $notes, [Text.UTF8Encoding]::new($false))
           gh release create $tag $archivePath $checksumPath --target $env:GITHUB_SHA --prerelease --title "Windows Diagnostics Toolkit $tag" --notes-file $notesPath
           if ($LASTEXITCODE -ne 0) { throw 'Prerelease publication failed.' }
+          "Published $tag from $env:GITHUB_SHA; SHA-256: $expectedHash" >> $env:GITHUB_STEP_SUMMARY
+
+      - name: Verify published assets
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          WDT_NEW_RELEASE: ${{ steps.release.outputs.publish }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          $tag = 'v' + $version
+          $archiveName = "windows-diagnostics-toolkit-v$version.zip"
+          $checksumName = "$archiveName.sha256"
           $downloadDirectory = Join-Path $env:RUNNER_TEMP ('wdt-published-' + [guid]::NewGuid().ToString('N'))
           try {
-            gh release download $tag --pattern $archiveName --pattern "$archiveName.sha256" --dir $downloadDirectory
+            gh release download $tag --pattern $archiveName --pattern $checksumName --dir $downloadDirectory
             if ($LASTEXITCODE -ne 0) { throw 'Could not download the published assets for verification.' }
-            if ((Get-FileHash -LiteralPath (Join-Path $downloadDirectory $archiveName) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedHash) { throw 'Published ZIP differs from the tested package.' }
-            if ((Get-FileHash -LiteralPath (Join-Path $downloadDirectory "$archiveName.sha256") -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $checksumPath -Algorithm SHA256).Hash) { throw 'Published checksum file differs from the tested file.' }
+
+            $publishedArchive = Join-Path $downloadDirectory $archiveName
+            $publishedChecksum = Join-Path $downloadDirectory $checksumName
+            $checksumText = (Get-Content -LiteralPath $publishedChecksum -Raw).Trim()
+            $checksumPattern = '^(?<Hash>[0-9a-fA-F]{64})  ' + [regex]::Escape($archiveName) + '$'
+            if ($checksumText -cnotmatch $checksumPattern) { throw 'The published checksum file has an invalid format or archive name.' }
+            $expectedHash = $Matches.Hash.ToLowerInvariant()
+            $actualHash = (Get-FileHash -LiteralPath $publishedArchive -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualHash -cne $expectedHash) { throw 'The published ZIP does not match the published checksum.' }
+
+            if ($env:WDT_NEW_RELEASE -eq 'true') {
+              $localArchive = Join-Path dist $archiveName
+              $localChecksum = Join-Path dist $checksumName
+              if ((Get-FileHash -LiteralPath $localArchive -Algorithm SHA256).Hash.ToLowerInvariant() -cne $actualHash) { throw 'Published ZIP differs from the tested package.' }
+              if ((Get-FileHash -LiteralPath $publishedChecksum -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $localChecksum -Algorithm SHA256).Hash) { throw 'Published checksum file differs from the tested file.' }
+            }
+            "Verified published assets for $tag; SHA-256: $actualHash" >> $env:GITHUB_STEP_SUMMARY
           }
           finally {
             if (Test-Path -LiteralPath $downloadDirectory) { Remove-Item -LiteralPath $downloadDirectory -Recurse -Force }
           }
-          "Published $tag from $env:GITHUB_SHA; SHA-256: $expectedHash" >> $env:GITHUB_STEP_SUMMARY

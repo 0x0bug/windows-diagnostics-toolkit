@@ -117,6 +117,34 @@ function Test-WdtDataInWindow {
     return (($null -eq $StartUtc -or $time -ge [datetimeoffset]$StartUtc) -and ($null -eq $EndUtc -or $time -lt [datetimeoffset]$EndUtc))
 }
 
+function Get-WdtFailureReportIdentity {
+    param($Value)
+    $identity=[guid]::Empty
+    if ([System.Guid]::TryParse([string]$Value,[ref]$identity) -and $identity -ne [guid]::Empty) { return $identity.ToString('D') }
+    return $null
+}
+
+function Get-WdtEventRecordIdentity {
+    param($Item)
+    if ($Item.TimePrecision -ne 'Instant' -or [string]::IsNullOrWhiteSpace($Item.LogName) -or [string]::IsNullOrWhiteSpace($Item.Provider) -or $null -eq $Item.EventId -or $Item.RecordId -notmatch '^[0-9]+$') { return $null }
+    $record=([string]$Item.RecordId).TrimStart('0')
+    if ($record.Length -eq 0) { return $null }
+    return ConvertTo-Json -InputObject @($Item.LogName.ToLowerInvariant(),$Item.Provider.ToLowerInvariant(),$Item.EventId,$record,(ConvertTo-WdtDataUtcText $Item.TimestampUtc)) -Compress
+}
+
+function Test-WdtFailureKnownText {
+    param($Value)
+    return -not ([string]::IsNullOrWhiteSpace([string]$Value) -or ([string]$Value).Trim() -in @('Unknown','Unknown application'))
+}
+
+function Test-WdtFailureCompatible {
+    param($Left,$Right)
+    return $Left.Kind -eq $Right.Kind -and
+        (Test-WdtFailureKnownText $Left.Component) -and (Test-WdtFailureKnownText $Right.Component) -and
+        $Left.Component.Trim() -ieq $Right.Component.Trim() -and
+        (-not (Test-WdtFailureKnownText $Left.FailureCode) -or -not (Test-WdtFailureKnownText $Right.FailureCode) -or $Left.FailureCode -ieq $Right.FailureCode)
+}
+
 function ConvertTo-WdtDataMessage {
     param([AllowNull()][string]$Message)
     if ([string]::IsNullOrEmpty($Message)) { return $null }

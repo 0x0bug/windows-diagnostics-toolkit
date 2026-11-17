@@ -5,7 +5,10 @@ PowerShell 7 and Windows PowerShell 5.1 on `windows-latest`. A successful push
 to `main` may publish the version in `VERSION` only after validation succeeds.
 The release job builds one ZIP, verifies its checksum and packaged source bytes,
 and runs the actual extracted package in both engines before publication.
-Published releases are never overwritten by this workflow.
+Every successful push verifies the published ZIP against its published SHA-256,
+including when a release already exists. For new releases, it also compares
+both uploaded files to the tested local artifacts. Existing release files are
+kept intact.
 
 ## Package and website handoff
 

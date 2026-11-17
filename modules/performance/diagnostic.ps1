@@ -87,16 +87,17 @@ function Write-PerformanceFindings {
 function Get-MemorySnapshot {
     try {
         $operatingSystem = Get-CimInstance -ClassName 'Win32_OperatingSystem' -ErrorAction Stop
-        $totalKilobytes = [double]$operatingSystem.TotalVisibleMemorySize
-        $freeKilobytes = [double]$operatingSystem.FreePhysicalMemory
-        if ($totalKilobytes -le 0) {
-            throw 'Win32_OperatingSystem reported no visible memory.'
+        $totalKilobytes = $operatingSystem.TotalVisibleMemorySize
+        $freeKilobytes = $operatingSystem.FreePhysicalMemory
+        $availablePercent = Get-WdtAvailablePercent -Available $freeKilobytes -Total $totalKilobytes
+        if ($null -eq $availablePercent) {
+            throw 'Win32_OperatingSystem did not report valid total and available memory.'
         }
 
         return [pscustomobject]@{
             TotalBytes       = $totalKilobytes * 1KB
             AvailableBytes   = $freeKilobytes * 1KB
-            AvailablePercent = ($freeKilobytes / $totalKilobytes) * 100
+            AvailablePercent = $availablePercent
             Error            = $null
         }
     }
