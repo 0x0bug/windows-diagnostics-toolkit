@@ -222,3 +222,95 @@ jobs:
           if ($reports.Count -lt 1) {
             throw 'Smoke test did not create a TXT report.'
           }
+
+  publish:
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: wdt-prerelease-publication
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout validated source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Check unpublished version
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          if ($version -notmatch '^\d+\.\d+\.\d+-[0-9A-Za-z.-]+$') { throw 'Only prerelease versions can be published.' }
+          $tag = 'v' + $version
+          $releasesJson = gh api "repos/$env:GITHUB_REPOSITORY/releases" --paginate --slurp
+          if ($LASTEXITCODE -ne 0) { throw 'Could not list published releases.' }
+          $releases = @($releasesJson | ConvertFrom-Json | ForEach-Object { $_ } | ForEach-Object { $_ })
+          if (@($releases | Where-Object { $_.tag_name -ceq $tag }).Count -gt 0) {
+            'publish=false' >> $env:GITHUB_OUTPUT
+            Write-Host "Preserving existing release $tag."
+          }
+          else {
+            $refsJson = gh api "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/$tag"
+            if ($LASTEXITCODE -ne 0) { throw 'Could not inspect release tags.' }
+            if (@($refsJson | ConvertFrom-Json | Where-Object { $_.ref -ceq "refs/tags/$tag" }).Count -gt 0) { throw 'An unpublished tag already exists; inspect it before creating a release.' }
+            if (-not (Test-Path -LiteralPath "docs/releases/$version.md" -PathType Leaf)) { throw 'Release notes are missing.' }
+            'publish=true' >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Build release ZIP and checksum
+        if: steps.release.outputs.publish == 'true'
+        shell: pwsh
+        run: .\scripts\build-release.ps1
+
+      - name: Verify actual package with PowerShell 7
+        if: steps.release.outputs.publish == 'true'
+        shell: pwsh
+        run: |
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          .\tests\release-package.tests.ps1 -ArchivePath "dist/windows-diagnostics-toolkit-v$version.zip" -SourceRoot $PWD.Path
+
+      - name: Verify actual package with Windows PowerShell 5.1
+        if: steps.release.outputs.publish == 'true'
+        shell: powershell
+        run: |
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          .\tests\release-package.tests.ps1 -ArchivePath "dist/windows-diagnostics-toolkit-v$version.zip" -SourceRoot $PWD.Path
+
+      - name: Publish prerelease and verify uploaded assets
+        if: steps.release.outputs.publish == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (Get-Content -LiteralPath VERSION -Raw).Trim()
+          $tag = 'v' + $version
+          $archiveName = "windows-diagnostics-toolkit-v$version.zip"
+          $archivePath = Join-Path dist $archiveName
+          $checksumPath = "$archivePath.sha256"
+          $expectedHash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $notesPath = Join-Path $env:RUNNER_TEMP 'wdt-release-notes.md'
+          $notes = (Get-Content -LiteralPath "docs/releases/$version.md" -Raw) + "`n## Release integrity`n`nSHA-256 ($archiveName): $expectedHash`n`nSource commit: $env:GITHUB_SHA`n"
+          [IO.File]::WriteAllText($notesPath, $notes, [Text.UTF8Encoding]::new($false))
+          gh release create $tag $archivePath $checksumPath --target $env:GITHUB_SHA --prerelease --title "Windows Diagnostics Toolkit $tag" --notes-file $notesPath
+          if ($LASTEXITCODE -ne 0) { throw 'Prerelease publication failed.' }
+          $downloadDirectory = Join-Path $env:RUNNER_TEMP ('wdt-published-' + [guid]::NewGuid().ToString('N'))
+          try {
+            gh release download $tag --pattern $archiveName --pattern "$archiveName.sha256" --dir $downloadDirectory
+            if ($LASTEXITCODE -ne 0) { throw 'Could not download the published assets for verification.' }
+            if ((Get-FileHash -LiteralPath (Join-Path $downloadDirectory $archiveName) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expectedHash) { throw 'Published ZIP differs from the tested package.' }
+            if ((Get-FileHash -LiteralPath (Join-Path $downloadDirectory "$archiveName.sha256") -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $checksumPath -Algorithm SHA256).Hash) { throw 'Published checksum file differs from the tested file.' }
+          }
+          finally {
+            if (Test-Path -LiteralPath $downloadDirectory) { Remove-Item -LiteralPath $downloadDirectory -Recurse -Force }
+          }
+          "Published $tag from $env:GITHUB_SHA; SHA-256: $expectedHash" >> $env:GITHUB_STEP_SUMMARY

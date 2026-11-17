@@ -147,6 +147,7 @@ function Test-WdtAllowedDotSource {
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\process-runner.ps1' },
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\tui.ps1' }
         [pscustomobject]@{ Caller = 'scripts\process-runner.ps1'; Target = 'scripts\diagnostic-data.ps1' },
+        [pscustomobject]@{ Caller = 'modules\time\diagnostic.ps1'; Target = 'scripts\process-runner.ps1' },
         [pscustomobject]@{ Caller = 'scripts\diagnostic-data.ps1'; Target = 'scripts\report-common.ps1' }
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\snapshot-compare.ps1' },
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\snapshot.ps1' },
@@ -325,14 +326,30 @@ function Test-WdtAllowedW32tmProcessShape {
     if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1')) { return $false }
 
     $functionAst = Get-WdtEnclosingFunctionAst -Ast $Ast
-    if ($null -eq $functionAst -or $functionAst.Name -cne 'Invoke-W32tmQuery') { return $false }
+    if ($null -eq $functionAst -or $functionAst.Name -cne 'Invoke-W32tmQuery' -or $null -eq $functionAst.Body.ParamBlock) { return $false }
+    if ((ConvertTo-WdtNormalizedAstText -Ast $functionAst.Body.ParamBlock) -cne 'param( [Parameter(Mandatory = $true)][ValidateSet(''Source'', ''Status'')][string]$Query, [ValidateRange(1, 60)][int]$TimeoutSeconds = 10 )') { return $false }
 
     $expectedCommands = @(
-        "Resolve-WdtSystemExecutablePath -FileName 'w32tm.exe'",
         'Get-WdtOemEncoding',
+        'New-Object System.Collections.Generic.List[string]',
         'New-Object System.Diagnostics.Process',
         'New-Object System.Diagnostics.ProcessStartInfo',
-        'New-WdtW32tmResult -Stdout $stdout -Stderr $stderr -ExitCode $exitCode'
+        'New-WdtStreamCaptureState -Reader $process.StandardError',
+        'New-WdtStreamCaptureState -Reader $process.StandardOutput',
+        'New-WdtW32tmResult -ExitCode $null -CaptureError ''w32tm.exe is unavailable.'' -OutputComplete $false',
+        'New-WdtW32tmResult -Stdout $stdout -Stderr $stderr -ExitCode $exitCode -CaptureError ($errors -join ''; '') -OutputComplete $outputComplete',
+        'Read-WdtCompletedStreamChunks -State $stderrState',
+        'Read-WdtCompletedStreamChunks -State $stderrState',
+        'Read-WdtCompletedStreamChunks -State $stderrState',
+        'Read-WdtCompletedStreamChunks -State $stdoutState',
+        'Read-WdtCompletedStreamChunks -State $stdoutState',
+        'Read-WdtCompletedStreamChunks -State $stdoutState',
+        'Resolve-WdtSystemExecutablePath -FileName ''w32tm.exe''',
+        'Select-Object -First 5',
+        'Select-Object -First 5',
+        'Start-Sleep -Milliseconds 10',
+        'Stop-WdtProcessTree -RootProcess $process -CleanupTimeoutMilliseconds 2000',
+        'Stop-WdtProcessTree -RootProcess $process -CleanupTimeoutMilliseconds 2000'
     ) | Sort-Object
     $actualCommands = @($functionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.CommandAst] }, $true) |
             ForEach-Object { ConvertTo-WdtNormalizedAstText -Ast $_ } | Sort-Object)
@@ -342,15 +359,22 @@ function Test-WdtAllowedW32tmProcessShape {
     }
 
     $expectedAssignments = @(
+        '$cleanup = Stop-WdtProcessTree -RootProcess $process -CleanupTimeoutMilliseconds 2000',
+        '$cleanup = Stop-WdtProcessTree -RootProcess $process -CleanupTimeoutMilliseconds 2000',
         '$commandPath = Resolve-WdtSystemExecutablePath -FileName ''w32tm.exe''',
+        '$drainStopwatch = [System.Diagnostics.Stopwatch]::StartNew()',
+        '$errors = New-Object System.Collections.Generic.List[string]',
+        '$exitCode = $null',
         '$exitCode = $process.ExitCode',
         '$oemEncoding = Get-WdtOemEncoding',
+        '$outputComplete = $processExited -and $null -ne $stdoutState -and $null -ne $stderrState -and $stdoutState.Complete -and $stderrState.Complete -and $errors.Count -eq 0',
         '$process = $null',
         '$process = New-Object System.Diagnostics.Process',
         '$process.StartInfo = $startInfo',
-        '$stderr = $stderrReader.ReadToEnd()',
-        '$stderrReader = $null',
-        '$stderrReader = $process.StandardError',
+        '$processExited = $false',
+        '$processExited = $process.WaitForExit(25)',
+        '$processStarted = $false',
+        '$processStarted = $true',
         '$startInfo = New-Object System.Diagnostics.ProcessStartInfo',
         '$startInfo.Arguments = if ($Query -eq ''Source'') { ''/query /source'' } else { ''/query /status /verbose'' }',
         '$startInfo.CreateNoWindow = $true',
@@ -360,9 +384,15 @@ function Test-WdtAllowedW32tmProcessShape {
         '$startInfo.StandardErrorEncoding = $oemEncoding',
         '$startInfo.StandardOutputEncoding = $oemEncoding',
         '$startInfo.UseShellExecute = $false',
-        '$stdout = $stdoutReader.ReadToEnd()',
-        '$stdoutReader = $null',
-        '$stdoutReader = $process.StandardOutput'
+        '$stderr = if ($null -eq $stderrState) { '''' } else { $stderrState.Text.ToString() }',
+        '$stderrProgress = Read-WdtCompletedStreamChunks -State $stderrState',
+        '$stderrState = $null',
+        '$stderrState = New-WdtStreamCaptureState -Reader $process.StandardError',
+        '$stdout = if ($null -eq $stdoutState) { '''' } else { $stdoutState.Text.ToString() }',
+        '$stdoutProgress = Read-WdtCompletedStreamChunks -State $stdoutState',
+        '$stdoutState = $null',
+        '$stdoutState = New-WdtStreamCaptureState -Reader $process.StandardOutput',
+        '$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()'
     ) | Sort-Object
     $actualAssignments = @($functionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true) |
             ForEach-Object { ConvertTo-WdtNormalizedAstText -Ast $_ } | Sort-Object)
@@ -372,20 +402,45 @@ function Test-WdtAllowedW32tmProcessShape {
     }
 
     $expectedMemberCalls = @(
+        '[string]::IsNullOrWhiteSpace([string]$state.Error)',
         '[string]::IsNullOrWhiteSpace($commandPath)',
+        '[System.Diagnostics.Stopwatch]::StartNew()',
+        '[System.Diagnostics.Stopwatch]::StartNew()',
+        '$drainStopwatch.Stop()',
+        '$errors.Add(''Captured output is incomplete because stream drain did not finish within 2 seconds.'')',
+        '$errors.Add((''Failed to close a stream reader: {0}'' -f $_.Exception.Message))',
+        '$errors.Add((''Failed to dispose the child process handle: {0}'' -f $_.Exception.Message))',
+        '$errors.Add((''Process-tree cleanup failed: {0}'' -f $_.Exception.Message))',
+        '$errors.Add((''Process-tree cleanup failed: {0}'' -f $_.Exception.Message))',
+        '$errors.Add((''Process-tree cleanup was incomplete: {0}'' -f (($cleanup.Errors | Select-Object -First 5) -join ''; '')))',
+        '$errors.Add((''Process-tree cleanup was incomplete: {0}'' -f (($cleanup.Errors | Select-Object -First 5) -join ''; '')))',
+        '$errors.Add((''w32tm.exe exceeded timeout of {0} second(s).'' -f $TimeoutSeconds))',
+        '$errors.Add([string]$state.Error)',
+        '$errors.Add($_.Exception.Message)',
         '$process.Dispose()',
         '$process.Start()',
-        '$process.WaitForExit()',
-        '$stderrReader.Dispose()',
-        '$stderrReader.ReadToEnd()',
-        '$stdoutReader.Dispose()',
-        '$stdoutReader.ReadToEnd()'
+        '$process.WaitForExit(25)',
+        '$state.Reader.Dispose()',
+        '$stderrState.Text.ToString()',
+        '$stdoutState.Text.ToString()',
+        '$stopwatch.Stop()'
     ) | Sort-Object
     $actualMemberCalls = @($functionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.InvokeMemberExpressionAst] }, $true) |
             ForEach-Object { ConvertTo-WdtNormalizedAstText -Ast $_ } | Sort-Object)
     if ($actualMemberCalls.Count -ne $expectedMemberCalls.Count) { return $false }
     for ($index = 0; $index -lt $expectedMemberCalls.Count; $index++) {
         if ($actualMemberCalls[$index] -cne $expectedMemberCalls[$index]) { return $false }
+    }
+
+    $expectedLoops = @(
+        '-not $processExited -and $stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds',
+        '(-not $stdoutState.Complete -or -not $stderrState.Complete) -and $drainStopwatch.ElapsedMilliseconds -lt 2000'
+    ) | Sort-Object
+    $actualLoops = @($functionAst.FindAll({ param($node) $node -is [System.Management.Automation.Language.WhileStatementAst] }, $true) |
+            ForEach-Object { ConvertTo-WdtNormalizedAstText -Ast $_.Condition } | Sort-Object)
+    if ($actualLoops.Count -ne $expectedLoops.Count) { return $false }
+    for ($index = 0; $index -lt $expectedLoops.Count; $index++) {
+        if ($actualLoops[$index] -cne $expectedLoops[$index]) { return $false }
     }
 
     return $true
@@ -696,6 +751,11 @@ function Get-WdtCommandSafetyIssue {
         return New-WdtSafetyIssue $CommandAst 'Dynamic command invocation is not allowed in production scripts. Only approved internal callbacks are permitted.'
     }
     $leaf = Split-Path -Leaf ($rawName -replace '/', '\\')
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
+        $leaf -in @('New-WdtStreamCaptureState','Read-WdtCompletedStreamChunks','Stop-WdtProcessTree')) {
+        if (Test-WdtAllowedW32tmProcessShape -Ast $CommandAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot) { return }
+        return New-WdtSafetyIssue $CommandAst 'Process capture helpers are only allowed in the exact reviewed w32tm query.'
+    }
     if ($rawName -match '^[A-Za-z0-9_.-]+\\[A-Za-z][A-Za-z0-9]*-[A-Za-z][A-Za-z0-9]*$') {
         return New-WdtSafetyIssue $CommandAst 'Module-qualified PowerShell commands are not allowed in production scripts.'
     }
@@ -861,6 +921,9 @@ function Get-WdtMemberSafetyIssue {
         if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and
             (($typeName -eq 'System.Diagnostics.Process' -and $member -eq 'GetProcessById' -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -or
              ($typeName -eq 'System.Diagnostics.Stopwatch' -and $member -eq 'StartNew' -and (Get-WdtEnclosingFunctionName $MemberAst) -in @('Invoke-DiagnosticScript', 'Stop-WdtProcessTree')))) { return }
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
+            $typeName -ceq 'System.Diagnostics.Stopwatch' -and $member -ceq 'StartNew' -and $argumentCount -eq 0 -and
+            (Test-WdtAllowedW32tmProcessShape -Ast $MemberAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot)) { return }
         if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
             $typeName -eq 'Security.Principal.WindowsIdentity' -and $member -eq 'GetCurrent' -and
             (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport') { return }
@@ -947,7 +1010,8 @@ function Get-WdtMemberSafetyIssue {
         (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-W32tmQuery' -and
         (Test-WdtAllowedW32tmProcessShape -Ast $MemberAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot) -and
         (($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0) -or
-            ($member -eq 'Dispose' -and $receiver -in @('process', 'stdoutReader', 'stderrReader') -and $argumentCount -eq 0))) {
+            ($member -eq 'Dispose' -and $MemberAst.Expression.Extent.Text -cin @('$process', '$state.Reader') -and $argumentCount -eq 0) -or
+            ($member -eq 'Stop' -and $receiver -cin @('stopwatch', 'drainStopwatch') -and $argumentCount -eq 0))) {
         return
     }
 
@@ -1037,7 +1101,11 @@ function Get-WdtSafetyIssues {
         $helperErrors = $null
         $helperAst = [System.Management.Automation.Language.Parser]::ParseFile($helperPath, [ref]$helperTokens, [ref]$helperErrors)
         if (@($helperErrors).Count -eq 0) {
-            $localFunctionNames += @($helperAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
+            $importedFunctionNames = @($helperAst.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true) | ForEach-Object { $_.Name })
+            if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and (Test-WdtProcessRunnerPath $helperPath $RepositoryRoot)) {
+                $importedFunctionNames = @($importedFunctionNames | Where-Object { $_ -cin @('New-WdtStreamCaptureState','Read-WdtCompletedStreamChunks','Stop-WdtProcessTree') })
+            }
+            $localFunctionNames += $importedFunctionNames
         }
     }
     $localFunctionNames = @($localFunctionNames | Sort-Object -Unique)

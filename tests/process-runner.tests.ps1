@@ -13,6 +13,22 @@ Assert-Equal 'Complete' (Get-WdtExecutionCompleteness Success $true) 'Complete s
 Assert-Equal 'Partial' (Get-WdtExecutionCompleteness Success $false) 'Incomplete success classification failed.'
 foreach ($status in @('NonZeroExit','Timeout')) { Assert-Equal 'Partial' (Get-WdtExecutionCompleteness $status) "$status classification failed." }
 foreach ($status in @('LaunchError','Cancelled')) { Assert-Equal 'Unavailable' (Get-WdtExecutionCompleteness $status) "$status classification failed." }
+
+# A hot stream must yield to the other stream and the process deadline even
+# when every read completes synchronously.
+$captureBytes = [Text.Encoding]::UTF8.GetBytes(('x' * (4096 * 40)))
+$captureStream = New-Object IO.MemoryStream -ArgumentList (,$captureBytes)
+$captureReader = New-Object IO.StreamReader -ArgumentList $captureStream
+try {
+    $captureState = New-WdtStreamCaptureState $captureReader
+    [void](Read-WdtCompletedStreamChunks $captureState)
+    Assert-True (-not $captureState.Complete) 'One capture poll must not drain an arbitrarily hot stream to EOF.'
+    Assert-True ($captureState.Text.Length -le (4096 * 16)) 'One capture poll exceeded its bounded chunk budget.'
+    while (-not $captureState.Complete) { [void](Read-WdtCompletedStreamChunks $captureState) }
+    Assert-Equal $captureBytes.Length $captureState.Text.Length 'Bounded polling lost captured text.'
+}
+finally { $captureReader.Dispose(); $captureStream.Dispose() }
+
 $tokens = $null; $parseErrors = $null
 $entrypointAst = [Management.Automation.Language.Parser]::ParseFile((Join-Path $repositoryRoot 'Invoke-WindowsDiagnostics.ps1'), [ref]$tokens, [ref]$parseErrors)
 $collectionDefinition = $entrypointAst.Find({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Get-WdtCollectionCompleteness' }, $true)

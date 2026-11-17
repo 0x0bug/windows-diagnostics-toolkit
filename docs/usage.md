@@ -107,7 +107,7 @@ switches, `-Interactive`, snapshot options, or network probe options. Invalid
 combinations are rejected before collection or directory creation. Existing
 ordinary CLI, TUI, standalone launchers and pinned beta bootstrap retain their
 behavior. Snapshots, offline comparison, and incident reports are included in
-`v0.2.0-beta.1`; earlier release packages are unchanged.
+`v0.2.0-beta.1` and later; earlier release packages are unchanged.
 
 The command writes `WindowsDiagnosticsIncident-<timestamp>-<GUID>.txt` and, with
 `-ExportMarkdown`, matching Markdown. It creates no incident JSON. Privacy is
@@ -159,13 +159,13 @@ Administrator rights are optional. Some Windows data sources expose less detail 
 
 ## Installation
 
-The public `v0.2.0-beta.1` prerelease is available through the fixed-release bootstrap:
+The public `v0.2.0-beta.2` prerelease is available through the fixed-release bootstrap:
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The bootstrap downloads the `v0.2.0-beta.1` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.1). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
+The bootstrap downloads the `v0.2.0-beta.2` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
 
 The repository bootstrap sets `Invoke-WebRequest -TimeoutSec 60` for each ZIP and checksum request. It also sets `OperationTimeoutSeconds` to 60 when that parameter is supported. That stream read timeout limits inactivity between reads; it is not an overall download deadline. A timeout stops the bootstrap before extraction or execution and removes its temporary directory.
 
@@ -276,7 +276,7 @@ After collection completes, the result screen displays:
   <img src="https://wdt.digital/assets/tui-result-real.png" alt="Windows Diagnostics Toolkit result screen after collection" width="100%">
 </p>
 
-`WARN` represents diagnostic state that deserves review. It does not change the process exit code. A non-zero exit code means a module failed to execute.
+`WARN` represents diagnostic state that deserves review. It does not change the process exit code. A non-zero exit code indicates an execution, output I/O, or requested structured-data failure; it is not a diagnosis of Windows health.
 
 ## Command-line mode
 
@@ -315,8 +315,8 @@ Reports are written to the current directory unless an explicit directory is pro
 Generated filenames:
 
 ```text
-WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.txt
-WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
+WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.txt
+WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.md
 ```
 
 See [Built-in Diagnostic Module Authoring](module-authoring.md) for the trusted package and manifest contract.
@@ -355,11 +355,11 @@ Findings and collection metadata use these meanings:
 - `Partial`: the module started but timed out or returned a non-zero exit code;
 - `Indeterminate`: available signals do not justify a positive or negative diagnosis.
 
-Module completeness in this release is execution-only: `Success` maps to `Complete`; non-zero exit and timeout map to `Partial`; launch error and cancellation map to `Unavailable`. It does not infer source availability from finding-code names. Overall collection is `Unavailable` only when every module is unavailable, `Complete` only when every module succeeds, and `Partial` otherwise.
+Module completeness describes execution and output capture: `Success` with complete captured output maps to `Complete`; successful execution with incomplete output, non-zero exit, and timeout map to `Partial`; launch error and cancellation map to `Unavailable`. It does not infer source availability from finding-code names. Overall collection is `Unavailable` only when every module is unavailable, `Complete` only when every module is complete, and `Partial` otherwise. A completed process does not establish that every Windows data source was available.
 
 Overall severity follows `ERROR` > `WARN` > `OK`.
 
-Finding severity does not determine the wrapper exit code. The wrapper returns a non-zero exit code when one or more diagnostic modules fail to execute.
+Finding severity does not determine the wrapper exit code. Module execution failures return a non-zero code. A requested snapshot or incident action also fails when its required machine-data protocol is missing or damaged, even if the child process exited successfully. Valid unavailable source data remains explicit and does not by itself mean execution failed. Invalid arguments and output read/write failures also fail the action. An ordinary text report can therefore have `Partial` captured output with a successful child exit; inspect completeness as well as the exit code.
 
 Internal finding protocol markers are removed before TXT and Markdown reports are written.
 
@@ -386,6 +386,8 @@ pwsh -NoProfile -File .\scripts\security-posture.ps1
 ### Performance Snapshot
 
 Takes three short CPU load samples and two process samples. Current process activity is calculated from the `TotalProcessorTime` delta divided by elapsed time and logical processor count. A single high CPU sample is not a confirmed warning. Cumulative CPU time remains a separate metric. Process paths, owners, and command lines are not collected.
+
+A successful `Win32_PageFileUsage` query with no records is shown as indeterminate runtime context. It does not establish whether a pagefile was intentionally disabled or configured for a later restart. No allocation, usage amount, or percentage is invented for that empty result. A failed query or invalid zero allocation still creates `PERFORMANCE_PAGEFILE_UNAVAILABLE`. The class describes [pagefile runtime state](https://learn.microsoft.com/en-us/windows/win32/cimwin32prov/win32-pagefileusage), rather than configuration intent.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Performance
@@ -436,6 +438,10 @@ pwsh -NoProfile -File .\scripts\time-sync-diagnostics.ps1 `
 ```
 
 The module only queries `w32tm.exe /query /source` and `w32tm.exe /query /status /verbose`. It does not configure or resynchronize time. Native output is decoded with the current Windows OEM code page.
+
+Each query has a 10-second process deadline, followed when needed by separate bounded cleanup and stream-drain attempts. Windows process-provider delays can extend the total elapsed time. Both output streams are read concurrently; a timeout, read failure, or inherited open pipe preserves available text as partial output and creates an availability warning.
+
+Local-clock detection uses exact English clock names or the invariant `0x4C4F434C` reference ID paired with a quoted `LOCL` or `LOCAL` token on the same line of a complete, successful status query. This recognizes local-clock status without a dictionary of translated source names. A bare numeric ID, zero ID, missing status, or ambiguous text does not establish a local clock or successful synchronization. Microsoft documents the [runtime reference ID](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-w32t/f60ebce0-df96-4c96-b40b-fdbd34a2c936) and a [local-clock status example](https://learn.microsoft.com/en-us/windows-server/networking/windows-time-service/windows-server-2016-improvements). Domain servers and the [VM IC Time Synchronization Provider](https://learn.microsoft.com/en-us/azure/virtual-machines/windows/time-sync) remain valid source context.
 
 ### Storage Status
 

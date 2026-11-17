@@ -25,7 +25,7 @@ Assert-True (Test-Path -LiteralPath $versionPath -PathType Leaf) 'VERSION is mis
 $version = (Get-Content -LiteralPath $versionPath -Raw).Trim()
 $semanticPrereleasePattern = '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)-(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*$'
 Assert-True ($version -match $semanticPrereleasePattern) 'VERSION is not a valid semantic prerelease version.'
-Assert-Equal '0.2.0-beta.1' $version 'Unexpected release version.'
+Assert-Equal '0.2.0-beta.2' $version 'Unexpected release version.'
 $isolatedRepositoryRoot = Join-Path -Path $temporaryRoot -ChildPath 'repository'
 $distDirectory = Join-Path -Path $isolatedRepositoryRoot -ChildPath 'dist'
 $archiveName = "windows-diagnostics-toolkit-v$version.zip"
@@ -45,7 +45,7 @@ New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 try {
     # The build script writes to the repository containing itself. Stage its release
     # inputs in this unique temporary checkout so the real dist directory is untouched.
-    foreach ($relativePath in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'modules', 'scripts', 'README.md', 'LICENSE', 'SECURITY.md', 'docs\usage.md', 'docs\report-example.md')) {
+    foreach ($relativePath in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'modules', 'scripts', 'README.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs')) {
         $sourcePath = Join-Path -Path $repositoryRoot -ChildPath $relativePath
         $destinationPath = Join-Path -Path $isolatedRepositoryRoot -ChildPath $relativePath
         $destinationParent = Split-Path -Parent $destinationPath
@@ -97,7 +97,7 @@ try {
         $archive.Dispose()
     }
 
-    foreach ($requiredFile in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'README.md', 'LICENSE', 'SECURITY.md', 'docs/usage.md', 'docs/report-example.md', 'scripts/build-release.ps1')) {
+    foreach ($requiredFile in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'README.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs/usage.md', 'docs/report-example.md', 'docs/module-authoring.md', 'docs/release-verification.md', ('docs/releases/' + $version + '.md'), 'scripts/build-release.ps1')) {
         Assert-True ($entries -contains $requiredFile) "Archive is missing: $requiredFile"
     }
     foreach ($requiredDirectory in @('modules/', 'scripts/')) {
@@ -109,6 +109,8 @@ try {
     }
     Assert-Equal 0 @($entries | Where-Object { $_ -match '(^|/)(WindowsDiagnostics(?:Report|Comparison|Incident)-.*\.(txt|md)|WindowsDiagnosticsSnapshot-.*\.json|.*\.(tmp|temp))$' }).Count 'Archive contains generated reports, snapshots, or temporary files.'
     Assert-True ($entries -contains 'VERSION') 'Archive has an extra top-level wrapper directory.'
+
+    & (Join-Path $PSScriptRoot 'release-package.tests.ps1') -ArchivePath $archivePath -SourceRoot $isolatedRepositoryRoot
 
     $extractedRoot = Join-Path -Path $temporaryRoot -ChildPath 'extracted'
     Expand-Archive -LiteralPath $archivePath -DestinationPath $extractedRoot
@@ -198,7 +200,7 @@ Invoke-WdtBootstrap -NewTemporaryDirectory {
     }
     $wdtVersion = $version
     $wdtArchiveName = $archiveName
-    $wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.1'
+    $wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.2'
     $wdtArchiveUri = "$wdtReleaseBaseUri/$wdtArchiveName"
     $wdtChecksumUri = "$wdtArchiveUri.sha256"
 
@@ -215,7 +217,7 @@ Invoke-WdtBootstrap -NewTemporaryDirectory {
 
     $downloadReferences = @([regex]::Matches($bootstrapSource, '(?i)https?://[^''"\s]+') | ForEach-Object Value)
     Assert-Equal 1 $downloadReferences.Count 'Bootstrap must contain exactly one fixed URL base.'
-    Assert-Equal 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.1' $downloadReferences[0] 'Bootstrap references an unapproved download host or path.'
+    Assert-Equal 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.2' $downloadReferences[0] 'Bootstrap references an unapproved download host or path.'
     Assert-True ($bootstrapSource -notmatch '(?i)(/main/|/master/|raw\.githubusercontent\.com|gist\.github(?:usercontent)?\.com)') 'Bootstrap contains a forbidden branch, raw, or gist download reference.'
     Assert-True ($bootstrapSource -notmatch '(?m)^\s*exit\b') 'Bootstrap must not use exit.'
     Assert-True ($bootstrapSource -notmatch '\bStart-Process\b') 'Bootstrap must launch the child PowerShell process in the current console.'

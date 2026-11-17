@@ -140,7 +140,13 @@ function Get-PagefileSnapshot {
     try {
         $pagefiles = @(Get-CimInstance -ClassName 'Win32_PageFileUsage' -ErrorAction Stop)
         if ($pagefiles.Count -eq 0) {
-            throw 'No pagefile usage records were returned.'
+            return [pscustomobject]@{
+                AllocatedMegabytes = $null
+                UsedMegabytes      = $null
+                UsedPercent        = $null
+                RecordCount        = 0
+                Error              = $null
+            }
         }
 
         $allocatedMegabytes = [double](($pagefiles | Measure-Object -Property AllocatedBaseSize -Sum).Sum)
@@ -153,6 +159,7 @@ function Get-PagefileSnapshot {
             AllocatedMegabytes = $allocatedMegabytes
             UsedMegabytes      = $usedMegabytes
             UsedPercent        = ($usedMegabytes / $allocatedMegabytes) * 100
+            RecordCount        = $pagefiles.Count
             Error              = $null
         }
     }
@@ -161,6 +168,7 @@ function Get-PagefileSnapshot {
             AllocatedMegabytes = $null
             UsedMegabytes      = $null
             UsedPercent        = $null
+            RecordCount        = $null
             Error              = $_.Exception.Message
         }
     }
@@ -315,6 +323,9 @@ function Invoke-PerformanceSnapshot {
     Write-Section 'Pagefile Usage'
     if ($null -ne $pagefile.Error) {
         Write-Host ('Unavailable: {0}' -f $pagefile.Error)
+    }
+    elseif ($pagefile.RecordCount -eq 0) {
+        Write-Host 'No pagefile usage records were returned; usage assessment is indeterminate.'
     }
     else {
         Write-Host ('Allocated : {0:N0} MB' -f $pagefile.AllocatedMegabytes)

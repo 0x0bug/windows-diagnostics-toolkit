@@ -12,6 +12,7 @@ param(
 $ErrorActionPreference = 'Stop'
 
 . $PSScriptRoot\..\..\scripts\report-common.ps1
+. $PSScriptRoot\..\..\scripts\process-runner.ps1
 
 function Write-Section {
     param([Parameter(Mandatory = $true)][string]$Title)
@@ -102,22 +103,28 @@ function ConvertFrom-WdtOemBytes {
 }
 
 function New-WdtW32tmResult {
-    param([string]$Stdout, [string]$Stderr, [int]$ExitCode)
+    param(
+        [string]$Stdout,
+        [string]$Stderr,
+        [Nullable[int]]$ExitCode,
+        [string]$CaptureError,
+        [bool]$OutputComplete = $true
+    )
 
     $output = @($Stdout -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if ($ExitCode -ne 0) {
+    $errors = @()
+    if (-not [string]::IsNullOrWhiteSpace($CaptureError)) { $errors += $CaptureError }
+    if ($null -ne $ExitCode -and $ExitCode -ne 0) {
         $errorDetail = if ([string]::IsNullOrWhiteSpace($Stderr)) { $Stdout.Trim() } else { $Stderr.Trim() }
-        return [pscustomobject]@{
-            Output   = @($output)
-            Error    = ('w32tm.exe exited with code {0}: {1}' -f $ExitCode, $errorDetail)
-            ExitCode = $ExitCode
-        }
+        $errors += ('w32tm.exe exited with code {0}: {1}' -f $ExitCode, $errorDetail)
     }
+    elseif (-not [string]::IsNullOrWhiteSpace($Stderr)) { $errors += $Stderr.Trim() }
 
     return [pscustomobject]@{
-        Output   = @($output)
-        Error    = $(if ([string]::IsNullOrWhiteSpace($Stderr)) { $null } else { $Stderr.Trim() })
-        ExitCode = $ExitCode
+        Output         = @($output)
+        Error          = $(if ($errors.Count -eq 0) { $null } else { $errors -join '; ' })
+        ExitCode       = $ExitCode
+        OutputComplete = $OutputComplete
     }
 }
 
@@ -139,20 +146,24 @@ function Resolve-WdtSystemExecutablePath {
 }
 
 function Invoke-W32tmQuery {
-    param([Parameter(Mandatory = $true)][ValidateSet('Source', 'Status')][string]$Query)
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet('Source', 'Status')][string]$Query,
+        [ValidateRange(1, 60)][int]$TimeoutSeconds = 10
+    )
 
     $commandPath = Resolve-WdtSystemExecutablePath -FileName 'w32tm.exe'
     if ([string]::IsNullOrWhiteSpace($commandPath)) {
-        return [pscustomobject]@{
-            Output   = @()
-            Error    = 'w32tm.exe is unavailable.'
-            ExitCode = $null
-        }
+        return New-WdtW32tmResult -ExitCode $null -CaptureError 'w32tm.exe is unavailable.' -OutputComplete $false
     }
 
     $process = $null
-    $stdoutReader = $null
-    $stderrReader = $null
+    $processStarted = $false
+    $processExited = $false
+    $stdoutState = $null
+    $stderrState = $null
+    $exitCode = $null
+    $errors = New-Object System.Collections.Generic.List[string]
+    $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     try {
         $oemEncoding = Get-WdtOemEncoding
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -168,26 +179,69 @@ function Invoke-W32tmQuery {
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $startInfo
         [void]$process.Start()
-        $stdoutReader = $process.StandardOutput
-        $stderrReader = $process.StandardError
-        $stdout = $stdoutReader.ReadToEnd()
-        $stderr = $stderrReader.ReadToEnd()
-        $process.WaitForExit()
-        $exitCode = $process.ExitCode
-        return New-WdtW32tmResult -Stdout $stdout -Stderr $stderr -ExitCode $exitCode
+        $processStarted = $true
+        $stdoutState = New-WdtStreamCaptureState -Reader $process.StandardOutput
+        $stderrState = New-WdtStreamCaptureState -Reader $process.StandardError
+        while (-not $processExited -and $stopwatch.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
+            [void](Read-WdtCompletedStreamChunks -State $stdoutState)
+            [void](Read-WdtCompletedStreamChunks -State $stderrState)
+            $processExited = $process.WaitForExit(25)
+        }
+
+        if (-not $processExited) {
+            $errors.Add(('w32tm.exe exceeded timeout of {0} second(s).' -f $TimeoutSeconds))
+            try {
+                $cleanup = Stop-WdtProcessTree -RootProcess $process -CleanupTimeoutMilliseconds 2000
+                if (-not $cleanup.Success) { $errors.Add(('Process-tree cleanup was incomplete: {0}' -f (($cleanup.Errors | Select-Object -First 5) -join '; '))) }
+            }
+            catch { $errors.Add(('Process-tree cleanup failed: {0}' -f $_.Exception.Message)) }
+        }
+        else { $exitCode = $process.ExitCode }
+
+        $drainStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        while ((-not $stdoutState.Complete -or -not $stderrState.Complete) -and $drainStopwatch.ElapsedMilliseconds -lt 2000) {
+            $stdoutProgress = Read-WdtCompletedStreamChunks -State $stdoutState
+            $stderrProgress = Read-WdtCompletedStreamChunks -State $stderrState
+            if (-not $stdoutProgress -and -not $stderrProgress) { Start-Sleep -Milliseconds 10 }
+        }
+        $drainStopwatch.Stop()
+        [void](Read-WdtCompletedStreamChunks -State $stdoutState)
+        [void](Read-WdtCompletedStreamChunks -State $stderrState)
+        if (-not $stdoutState.Complete -or -not $stderrState.Complete) {
+            $errors.Add('Captured output is incomplete because stream drain did not finish within 2 seconds.')
+        }
     }
     catch {
-        return [pscustomobject]@{
-            Output   = @()
-            Error    = $_.Exception.Message
-            ExitCode = $null
+        $errors.Add($_.Exception.Message)
+        if ($processStarted -and -not $processExited) {
+            try {
+                $cleanup = Stop-WdtProcessTree -RootProcess $process -CleanupTimeoutMilliseconds 2000
+                if (-not $cleanup.Success) { $errors.Add(('Process-tree cleanup was incomplete: {0}' -f (($cleanup.Errors | Select-Object -First 5) -join '; '))) }
+            }
+            catch { $errors.Add(('Process-tree cleanup failed: {0}' -f $_.Exception.Message)) }
         }
     }
     finally {
-        if ($null -ne $stdoutReader) { $stdoutReader.Dispose() }
-        if ($null -ne $stderrReader) { $stderrReader.Dispose() }
-        if ($null -ne $process) { $process.Dispose() }
+        $stopwatch.Stop()
+        foreach ($state in @($stdoutState, $stderrState)) {
+            if ($null -ne $state) {
+                try { $state.Reader.Dispose() }
+                catch { $errors.Add(('Failed to close a stream reader: {0}' -f $_.Exception.Message)) }
+            }
+        }
+        if ($null -ne $process) {
+            try { $process.Dispose() }
+            catch { $errors.Add(('Failed to dispose the child process handle: {0}' -f $_.Exception.Message)) }
+        }
     }
+
+    foreach ($state in @($stdoutState, $stderrState)) {
+        if ($null -ne $state -and -not [string]::IsNullOrWhiteSpace([string]$state.Error)) { $errors.Add([string]$state.Error) }
+    }
+    $stdout = if ($null -eq $stdoutState) { '' } else { $stdoutState.Text.ToString() }
+    $stderr = if ($null -eq $stderrState) { '' } else { $stderrState.Text.ToString() }
+    $outputComplete = $processExited -and $null -ne $stdoutState -and $null -ne $stderrState -and $stdoutState.Complete -and $stderrState.Complete -and $errors.Count -eq 0
+    return New-WdtW32tmResult -Stdout $stdout -Stderr $stderr -ExitCode $exitCode -CaptureError ($errors -join '; ') -OutputComplete $outputComplete
 }
 
 function Get-TimeServiceEvents {
@@ -222,13 +276,18 @@ function Get-TimeServiceEvents {
 }
 
 function Test-LocalClockSource {
-    param([AllowEmptyString()][string]$Source)
+    param([AllowEmptyString()][string]$Source, [string[]]$StatusOutput = @())
 
-    if ([string]::IsNullOrWhiteSpace($Source)) {
-        return $false
+    if ($Source.Trim() -match '^(?i:Local (?:CMOS )?Clock|Free-running System Clock)$') { return $true }
+
+    # MS-W32T exposes the runtime reference ID; MS-SNTP defines LOCL.
+    # w32tm prints a quoted clock name for this ID. Requiring the pair avoids
+    # confusing the same numeric IPv4 reference (76.79.67.76) with a clock.
+    $referenceLines = @($StatusOutput | Where-Object { $_ -match '^\s*[^:]+:\s*0x[0-9A-Fa-f]{8}(?:\s|$)' })
+    if ($referenceLines.Count -eq 1) {
+        return $referenceLines[0] -match '^\s*[^:]+:\s*0x4C4F434C\s+\([^\r\n()]*"(?:LOCL|LOCAL)"\s*\)\s*$'
     }
-
-    return $Source -match '(?i)\b(Local (CMOS )?Clock|Free-running System Clock)\b'
+    return $false
 }
 
 Write-Host 'Windows Diagnostics Toolkit - Time Sync Diagnostics'
@@ -283,19 +342,31 @@ else {
 
 Write-Section 'Time Source'
 if ($null -ne $sourceQuery.Error) {
+    if ($sourceQuery.Output.Count -gt 0) {
+        Write-Host 'Partial output:'
+        foreach ($line in $sourceQuery.Output) { Write-Host $line }
+    }
     Write-Host ('Unavailable: {0}' -f $sourceQuery.Error)
     Write-WdtFinding -Severity WARN -Code 'TIME_SOURCE_UNAVAILABLE' -Message 'The configured Windows Time source is unavailable.' -Evidence $sourceQuery.Error
 }
 else {
     $source = ($sourceQuery.Output -join ' ').Trim()
     Write-Host ('Source: {0}' -f $source)
-    if (Test-LocalClockSource -Source $source) {
+    $statusEvidence = if ($null -eq $statusQuery.Error -and $statusQuery.ExitCode -eq 0 -and $statusQuery.OutputComplete) { @($statusQuery.Output) } else { @() }
+    if ([string]::IsNullOrWhiteSpace($source)) {
+        Write-WdtFinding -Severity WARN -Code 'TIME_SOURCE_UNAVAILABLE' -Message 'The Windows Time source query returned no output.'
+    }
+    elseif (Test-LocalClockSource -Source $source -StatusOutput $statusEvidence) {
         Write-WdtFinding -Severity WARN -Code 'TIME_SOURCE_LOCAL_CLOCK' -Message 'Windows Time is using a local clock source.' -Evidence $source
     }
 }
 
 Write-Section 'W32tm Status'
 if ($null -ne $statusQuery.Error) {
+    if ($statusQuery.Output.Count -gt 0) {
+        Write-Host 'Partial output:'
+        foreach ($line in $statusQuery.Output) { Write-Host $line }
+    }
     Write-Host ('Unavailable: {0}' -f $statusQuery.Error)
     Write-WdtFinding -Severity WARN -Code 'TIME_STATUS_UNAVAILABLE' -Message 'Detailed Windows Time status is unavailable.' -Evidence $statusQuery.Error
 }
