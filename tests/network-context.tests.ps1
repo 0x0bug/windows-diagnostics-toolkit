@@ -67,10 +67,11 @@ try {
             }
 
             function Get-NetIPConfiguration {
+                $ipv4Gateway = if (-not $UseCimIPv4Routes) { [pscustomobject]@{ NextHop = '192.0.2.1' } }
                 [pscustomobject]@{
                     IPv4Address        = @([pscustomobject]@{ IPAddress = '192.0.2.10' })
                     IPv6Address        = @([pscustomobject]@{ IPAddress = '2001:db8::10' })
-                    IPv4DefaultGateway = if (-not $UseCimIPv4Routes) { [pscustomobject]@{ NextHop = '192.0.2.1' } }
+                    IPv4DefaultGateway = $ipv4Gateway
                     IPv6DefaultGateway = [pscustomobject]@{ NextHop = '2001:db8::1' }
                     DNSServer          = [pscustomobject]@{ ServerAddresses = @('192.0.2.53') }
                 }
