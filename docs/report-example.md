@@ -1,6 +1,6 @@
 # Support Report Example
 
-This page shows anonymized excerpts from the TXT and Markdown reports created by:
+This page shows illustrative anonymized excerpts of the TXT and Markdown report format produced by:
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -All -PrivacyMode -ExportMarkdown
@@ -12,11 +12,14 @@ Privacy Mode assigns stable typed tokens within one report and resets the token 
 
 ```text
 Windows Diagnostics Toolkit - Support Report
+Toolkit version : 0.2.0-beta.2
 Created at    : 2026-07-12 10:15:30 +02:00
 Computer name : <HOST-1>
 Mode          : read-only
 Privacy mode  : enabled
-Output        : <USER-1>\WindowsDiagnosticsReport-20260712-101530.txt
+Elevation     : Standard user
+Collection completeness: Complete
+Output        : <USER-1>\WindowsDiagnosticsReport-20260712-101530-0123456789abcdef0123456789abcdef.txt
 Selected      : System Information, Security Posture, Performance Snapshot, Network Check, Time Sync Diagnostics, Disk Health, Crash and Hang Diagnostics, Event Log Check, Services Check, Windows Update Check
 
 == Findings Summary ==
@@ -27,7 +30,7 @@ OK modules     : 7
 
 [WARN] Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED - One or more BitLocker volumes are not protected.
 [WARN] Time Sync Diagnostics / TIME_SOURCE_LOCAL_CLOCK - Windows Time is using a local clock source.
-[WARN] Services Check / SERVICE_STATE_ISSUES - One or more services need attention.
+[WARN] Services Check / SERVICE_EXIT_CODE_NONZERO - 1 service(s) report an actionable non-zero service exit code. Evidence: ExampleService=Stopped (Auto), ExitCode=1067
 [OK] System Information - No findings.
 [OK] Performance Snapshot - No findings.
 [OK] Network Check - No findings.
@@ -89,8 +92,8 @@ DHCP        : Enabled
 
 == WinINET Proxy ==
 Enabled        : Enabled
-Proxy server   : https=<REDACTED>@proxy.example.invalid:8443
-Auto config URL: https://proxy.example.invalid/config.pac?token=<REDACTED>
+Proxy server   : <ID-1>
+Auto config URL: <ID-2>
 
 == Time Sync Diagnostics ==
 Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\time\diagnostic.ps1
@@ -122,11 +125,12 @@ Size       : 930.00 GB
 Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\services\diagnostic.ps1
 Exit code: 0
 
-== Automatic Services Not Running ==
+== Services With Actionable Exit Codes ==
 Name        : ExampleService
 DisplayName : Example Service
 State       : Stopped
 StartMode   : Auto
+ExitCode    : 1067
 
 == Windows Update Check ==
 Command: powershell.exe -NoProfile -ExecutionPolicy Bypass -File modules\updates\diagnostic.ps1
@@ -142,11 +146,14 @@ Indicators found: None
 ````markdown
 # Windows Diagnostics Toolkit - Support Report
 
+- Toolkit version: `0.2.0-beta.2`
 - Created at: `2026-07-12 10:15:30 +02:00`
 - Computer name: `<HOST-1>`
 - Mode: `read-only`
 - Privacy mode: `enabled`
-- TXT report: `<USER-1>\WindowsDiagnosticsReport-20260712-101530.txt`
+- Elevation: `Standard user`
+- Collection completeness: `Complete`
+- TXT report: `<USER-1>\WindowsDiagnosticsReport-20260712-101530-0123456789abcdef0123456789abcdef.txt`
 - Selected: `System Information, Security Posture, Performance Snapshot, Network Check, Time Sync Diagnostics, Disk Health, Crash and Hang Diagnostics, Event Log Check, Services Check, Windows Update Check`
 
 ## Findings Summary
@@ -158,7 +165,7 @@ Indicators found: None
 
 - `[WARN]` **Security Posture / SECURITY_BITLOCKER_NOT_PROTECTED** - One or more BitLocker volumes are not protected.
 - `[WARN]` **Time Sync Diagnostics / TIME_SOURCE_LOCAL_CLOCK** - Windows Time is using a local clock source.
-- `[WARN]` **Services Check / SERVICE_STATE_ISSUES** - One or more services need attention.
+- `[WARN]` **Services Check / SERVICE_EXIT_CODE_NONZERO** - 1 service(s) report an actionable non-zero service exit code. Evidence: ExampleService=Stopped (Auto), ExitCode=1067
 - `[OK]` **System Information** - No findings.
 - `[OK]` **Performance Snapshot** - No findings.
 - `[OK]` **Network Check** - No findings.
@@ -196,4 +203,4 @@ Source: Local CMOS Clock
 ```
 ````
 
-The real report includes the complete output for every selected module. Always review the generated file before posting it publicly.
+The real report includes execution status, duration, completeness, and available output for every selected module. These excerpts omit some fields and sections. An automatic service being stopped alone remains indeterminate; this example's warning requires the actionable exit code. Privacy Mode protects complete proxy/PAC values with opaque ID tokens, not just embedded credentials. Always review the generated file before posting it publicly.

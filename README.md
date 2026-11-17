@@ -125,8 +125,8 @@ Use `-OutputDirectory` to override the default in either mode.
 Generated filenames:
 
 ```text
-WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.txt
-WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
+WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.txt
+WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.md
 ```
 
 When report generation succeeds, WDT writes TXT even if some selected modules are partial or unavailable. Markdown export is optional in command-line mode and enabled by default in the interactive TUI.
@@ -303,7 +303,9 @@ Or with Windows PowerShell 5.1:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\validate.ps1
 ```
 
-GitHub Actions runs validation, dependency-free tests, and a live report smoke test on pull requests and pushes to `main`.
+GitHub Actions runs validation, dependency-free tests, and a live report smoke test on pull requests and pushes to `main`. After a successful push to `main`, the release job builds and checks the versioned ZIP in both PowerShell engines before publishing a new prerelease. Existing published releases are preserved.
+
+See the [release verification guide](docs/release-verification.md) for package checks and the Windows client compatibility checklist. CI uses `windows-latest`; this does not separately verify every Windows 10/11, display-language, terminal, or privilege combination.
 
 Contributor documentation:
 

@@ -45,7 +45,7 @@ New-Item -ItemType Directory -Path $temporaryRoot -Force | Out-Null
 try {
     # The build script writes to the repository containing itself. Stage its release
     # inputs in this unique temporary checkout so the real dist directory is untouched.
-    foreach ($relativePath in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'modules', 'scripts', 'README.md', 'LICENSE', 'SECURITY.md', 'docs\usage.md', 'docs\report-example.md')) {
+    foreach ($relativePath in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'modules', 'scripts', 'README.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs')) {
         $sourcePath = Join-Path -Path $repositoryRoot -ChildPath $relativePath
         $destinationPath = Join-Path -Path $isolatedRepositoryRoot -ChildPath $relativePath
         $destinationParent = Split-Path -Parent $destinationPath
@@ -97,7 +97,7 @@ try {
         $archive.Dispose()
     }
 
-    foreach ($requiredFile in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'README.md', 'LICENSE', 'SECURITY.md', 'docs/usage.md', 'docs/report-example.md', 'scripts/build-release.ps1')) {
+    foreach ($requiredFile in @('Invoke-WindowsDiagnostics.ps1', 'VERSION', 'README.md', 'LICENSE', 'SECURITY.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs/usage.md', 'docs/report-example.md', 'docs/module-authoring.md', 'docs/release-verification.md', ('docs/releases/' + $version + '.md'), 'scripts/build-release.ps1')) {
         Assert-True ($entries -contains $requiredFile) "Archive is missing: $requiredFile"
     }
     foreach ($requiredDirectory in @('modules/', 'scripts/')) {
@@ -109,6 +109,8 @@ try {
     }
     Assert-Equal 0 @($entries | Where-Object { $_ -match '(^|/)(WindowsDiagnostics(?:Report|Comparison|Incident)-.*\.(txt|md)|WindowsDiagnosticsSnapshot-.*\.json|.*\.(tmp|temp))$' }).Count 'Archive contains generated reports, snapshots, or temporary files.'
     Assert-True ($entries -contains 'VERSION') 'Archive has an extra top-level wrapper directory.'
+
+    & (Join-Path $PSScriptRoot 'release-package.tests.ps1') -ArchivePath $archivePath -SourceRoot $isolatedRepositoryRoot
 
     $extractedRoot = Join-Path -Path $temporaryRoot -ChildPath 'extracted'
     Expand-Archive -LiteralPath $archivePath -DestinationPath $extractedRoot

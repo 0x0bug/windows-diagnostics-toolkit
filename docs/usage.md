@@ -276,7 +276,7 @@ After collection completes, the result screen displays:
   <img src="https://wdt.digital/assets/tui-result-real.png" alt="Windows Diagnostics Toolkit result screen after collection" width="100%">
 </p>
 
-`WARN` represents diagnostic state that deserves review. It does not change the process exit code. A non-zero exit code means a module failed to execute.
+`WARN` represents diagnostic state that deserves review. It does not change the process exit code. A non-zero exit code indicates an execution, output I/O, or requested structured-data failure; it is not a diagnosis of Windows health.
 
 ## Command-line mode
 
@@ -315,8 +315,8 @@ Reports are written to the current directory unless an explicit directory is pro
 Generated filenames:
 
 ```text
-WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.txt
-WindowsDiagnosticsReport-YYYYMMDD-HHMMSS.md
+WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.txt
+WindowsDiagnosticsReport-YYYYMMDD-HHMMSS-<GUID>.md
 ```
 
 See [Built-in Diagnostic Module Authoring](module-authoring.md) for the trusted package and manifest contract.
@@ -355,11 +355,11 @@ Findings and collection metadata use these meanings:
 - `Partial`: the module started but timed out or returned a non-zero exit code;
 - `Indeterminate`: available signals do not justify a positive or negative diagnosis.
 
-Module completeness in this release is execution-only: `Success` maps to `Complete`; non-zero exit and timeout map to `Partial`; launch error and cancellation map to `Unavailable`. It does not infer source availability from finding-code names. Overall collection is `Unavailable` only when every module is unavailable, `Complete` only when every module succeeds, and `Partial` otherwise.
+Module completeness describes execution and output capture: `Success` with complete captured output maps to `Complete`; successful execution with incomplete output, non-zero exit, and timeout map to `Partial`; launch error and cancellation map to `Unavailable`. It does not infer source availability from finding-code names. Overall collection is `Unavailable` only when every module is unavailable, `Complete` only when every module is complete, and `Partial` otherwise. A completed process does not establish that every Windows data source was available.
 
 Overall severity follows `ERROR` > `WARN` > `OK`.
 
-Finding severity does not determine the wrapper exit code. The wrapper returns a non-zero exit code when one or more diagnostic modules fail to execute.
+Finding severity does not determine the wrapper exit code. Module execution failures return a non-zero code. A requested snapshot or incident action also fails when its required machine-data protocol is missing or damaged, even if the child process exited successfully. Valid unavailable source data remains explicit and does not by itself mean execution failed. Invalid arguments and output read/write failures also fail the action. An ordinary text report can therefore have `Partial` captured output with a successful child exit; inspect completeness as well as the exit code.
 
 Internal finding protocol markers are removed before TXT and Markdown reports are written.
 

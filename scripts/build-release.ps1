@@ -29,8 +29,13 @@ $releasePaths = @(
     'README.md',
     'LICENSE',
     'SECURITY.md',
+    'CONTRIBUTING.md',
+    'CODE_OF_CONDUCT.md',
     'docs\usage.md',
-    'docs\report-example.md'
+    'docs\report-example.md',
+    'docs\module-authoring.md',
+    'docs\release-verification.md',
+    ('docs\releases\' + $version + '.md')
 )
 
 try {
