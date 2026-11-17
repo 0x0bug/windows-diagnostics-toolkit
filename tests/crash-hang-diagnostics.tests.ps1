@@ -59,6 +59,7 @@ foreach ($forbiddenText in @('Get-Content', 'Get-FileHash', 'CommandLine')) {
 Assert-True -Condition ($scriptSource -match "MaxEvents = 50") -Message 'Crash diagnostics must default to 50 events.'
 Assert-True -Condition ($scriptSource -match "MaxDumpFiles = 20") -Message 'Crash diagnostics must default to 20 dump files.'
 
+. (Join-Path $repositoryRoot 'scripts\diagnostic-data.ps1')
 Import-TestFunctions $crashScript @('ConvertTo-CrashRecord','Merge-DuplicateCrashRecords','Group-CrashRecords','Get-CrashGroupSeverity')
 $nowUtc = ([datetimeoffset](Get-Date)).UtcDateTime
 $eventPathRecord = ConvertTo-CrashRecord ([pscustomobject]@{ ProviderName='Application Error'; Id=1000; TimeCreated=$nowUtc; Properties=@([pscustomobject]@{Value='C:\Program Files\Fixture [x]\fixture.exe'}) }) EventLog
@@ -87,7 +88,27 @@ $fallbackWerEvent = $werEventRecord.PSObject.Copy()
 $fallbackWerEvent.ReportId = ''
 $fallbackWerEvent.TimeCreated = $bucketStart.AddMinutes(4)
 $fallbackDeduplicated = @(Merge-DuplicateCrashRecords @($fallbackApplicationEvent, $fallbackWerEvent) $cutoffUtc)
-Assert-Equal 1 $fallbackDeduplicated.Count 'Records without ReportId in the same deterministic five-minute bucket must deduplicate.'
+Assert-Equal 2 $fallbackDeduplicated.Count 'Nearby records without a shared report id must remain separate.'
+$fallbackGroup = @(Group-CrashRecords $fallbackDeduplicated)[0]
+Assert-True $fallbackGroup.PossibleDuplicateReporting 'Nearby compatible records from different sources must remain ambiguous.'
+Assert-Equal 1 $fallbackGroup.MinimumIncidentCount 'Ambiguous evidence must not prove repeated incidents.'
+
+$event = [pscustomobject]@{ProviderName='Application Error'; LogName='Application'; Id=1000; RecordId=120; Component='fixture.exe'; FailureCode='0xc0000005'; TimeCreated=$nowUtc.AddDays(-2)}
+$firstRecord = ConvertTo-CrashRecord $event EventLog
+$exactCopy = ConvertTo-CrashRecord $event EventLog
+$event.RecordId = 121
+$event.TimeCreated = $event.TimeCreated.AddMinutes(2)
+$secondRecord = ConvertTo-CrashRecord $event EventLog
+$sameSourceRecords = @(Merge-DuplicateCrashRecords @($firstRecord, $exactCopy, $secondRecord) $cutoffUtc)
+Assert-Equal 2 $sameSourceRecords.Count 'Only the identical Event Log record may collapse.'
+$sameSourceGroup = @(Group-CrashRecords $sameSourceRecords)[0]
+Assert-Equal 2 $sameSourceGroup.MinimumIncidentCount 'Independent nearby records from one source must count as two.'
+Assert-Equal 'WARN' (Get-CrashGroupSeverity $sameSourceGroup $nowUtc) 'Repeated older failures must remain a warning.'
+
+$conflictingReport = $werEventRecord.PSObject.Copy()
+$conflictingReport.FailureCode = '0xe0434352'
+Assert-Equal 2 @(Merge-DuplicateCrashRecords @($applicationEventRecord, $conflictingReport) $cutoffUtc).Count 'A report id with conflicting failure data must not merge.'
+
 $differentFailureEvent = $fallbackWerEvent.PSObject.Copy()
 $differentFailureEvent.FailureCode = '0xe0434352'
 $differentFailureDeduplication = @(Merge-DuplicateCrashRecords @($fallbackApplicationEvent, $differentFailureEvent) $cutoffUtc)

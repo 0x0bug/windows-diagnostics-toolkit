@@ -101,4 +101,22 @@ $hostile=New-ComparisonFixture -Facts @((New-HotFixFact -Key 'fixture```|header'
 $markdown=@(Get-WdtSnapshotComparisonLines (Compare-WdtSnapshots (New-ComparisonFixture) $hostile) -Markdown)
 Assert-Equal '````text' $markdown[2] 'Markdown output did not fence untrusted backtick runs.'
 Assert-Equal '````' $markdown[-1] 'Markdown fence was not closed.'
+$multiSource = New-ComparisonFixture -ModuleId Crashes -Facts @($crash) -Evidence @($evidence)
+$multiSource.Modules[0].Data.Sources += New-WdtDataSource -Id crash-source-2 -Kind History -Scope 'Windows Error Reporting/1001'
+$multiSource.Modules[0].Data.Facts += New-WdtDataFact -Id f2 -Type CrashObservation -Key $crash.Key -Comparison Windowed -Values $crash.Values -SourceIds @('crash-source-2')
+$reordered = $multiSource | ConvertTo-Json -Depth 16 | ConvertFrom-Json
+[array]::Reverse($reordered.Modules[0].Data.Facts)
+Assert-Equal WindowedObservations (Get-State $multiSource $reordered) 'Observation comparison must be independent of fact order.'
+
+$incompleteSource = $multiSource | ConvertTo-Json -Depth 16 | ConvertFrom-Json
+$incompleteSource.Modules[0].Data.Sources[1].Availability = 'Unavailable'
+$incompleteSource.Modules[0].Data.Sources[1].QueryComplete = $false
+$incompleteSource.Modules[0].DataStatus = 'Partial'
+$incompleteSource.Modules[0].Data.Facts = @($incompleteSource.Modules[0].Data.Facts[0])
+Assert-Equal NotComparable (Get-State $multiSource $incompleteSource) 'The shared first fact must not hide a missing later source.'
+$comparableEmptySource = $multiSource | ConvertTo-Json -Depth 16 | ConvertFrom-Json
+$comparableEmptySource.Modules[0].Data.Facts = @($comparableEmptySource.Modules[0].Data.Facts[0])
+$counts = (Compare-WdtSnapshots $multiSource $comparableEmptySource).Differences[0]
+Assert-Equal WindowedObservations $counts.State 'A complete query returning zero matching facts from one source must remain comparable.'
+Assert-Equal 1 $counts.AfterValues.Count 'A successfully queried source with no matched fact must not inflate the count.'
 Write-Host 'Snapshot comparison tests passed.'

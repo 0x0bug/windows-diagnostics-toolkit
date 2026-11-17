@@ -158,7 +158,7 @@ with a context it protects nested values, errors, and evidence identity fields.
 Any fact whose key or string values change becomes SnapshotLocal with no key.
 Existing privacy token text is never promoted into a semantic key. The caller
 must project before writing any artifact and must not serialize the redaction
-context. Crashes exposes individual records before legacy five-minute merging;
+context. Crashes exposes individual records before the ordinary report groups them;
 new incident consumers must implement conservative correlation on those records.
 
 The incident consumer in `scripts/incident.ps1` exposes

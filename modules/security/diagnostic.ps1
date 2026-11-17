@@ -285,6 +285,14 @@ function ConvertTo-BitLockerVolumeStatus {
         return 'DecryptionInProgress'
     }
 
+    if ($text -match '^(4|EncryptionPaused)$') {
+        return 'EncryptionPaused'
+    }
+
+    if ($text -match '^(5|DecryptionPaused)$') {
+        return 'DecryptionPaused'
+    }
+
     return $text
 }
 
@@ -300,6 +308,7 @@ function Get-BitLockerVolumes {
                             ProtectionStatus = ConvertTo-BitLockerProtectionStatus -Value $_.ProtectionStatus
                             VolumeStatus     = ConvertTo-BitLockerVolumeStatus -Value $_.VolumeStatus
                             Source           = 'Get-BitLockerVolume'
+                            Error            = $null
                         }
                     })
                 Error   = $null
@@ -314,13 +323,33 @@ function Get-BitLockerVolumes {
         $cimVolumes = @(Get-CimInstance -Namespace 'root\CIMV2\Security\MicrosoftVolumeEncryption' -ClassName 'Win32_EncryptableVolume' -ErrorAction Stop)
         $volumes = New-Object System.Collections.Generic.List[object]
         foreach ($volume in $cimVolumes) {
-            $protection = Invoke-CimMethod -InputObject $volume -MethodName 'GetProtectionStatus' -ErrorAction Stop
-            $conversion = Invoke-CimMethod -InputObject $volume -MethodName 'GetConversionStatus' -ErrorAction Stop
+            $protectionStatus = $null
+            $conversionStatus = $null
+            $methodErrors = @()
+            try {
+                $protection = Invoke-CimMethod -InputObject $volume -MethodName 'GetProtectionStatus' -ErrorAction Stop
+                if ($null -eq $protection.ReturnValue -or $protection.ReturnValue -ne 0) {
+                    throw ('Unexpected CIM return code: {0}' -f $protection.ReturnValue)
+                }
+                $protectionStatus = $protection.ProtectionStatus
+            }
+            catch { $methodErrors += ('GetProtectionStatus: {0}' -f $_.Exception.Message) }
+
+            try {
+                $conversion = Invoke-CimMethod -InputObject $volume -MethodName 'GetConversionStatus' -ErrorAction Stop
+                if ($null -eq $conversion.ReturnValue -or $conversion.ReturnValue -ne 0) {
+                    throw ('Unexpected CIM return code: {0}' -f $conversion.ReturnValue)
+                }
+                $conversionStatus = $conversion.ConversionStatus
+            }
+            catch { $methodErrors += ('GetConversionStatus: {0}' -f $_.Exception.Message) }
+
             $volumes.Add([pscustomobject]@{
                     MountPoint       = ConvertTo-SafeText -Value $volume.DeviceID
-                    ProtectionStatus = ConvertTo-BitLockerProtectionStatus -Value $protection.ProtectionStatus
-                    VolumeStatus     = ConvertTo-BitLockerVolumeStatus -Value $conversion.ConversionStatus
+                    ProtectionStatus = ConvertTo-BitLockerProtectionStatus -Value $protectionStatus
+                    VolumeStatus     = ConvertTo-BitLockerVolumeStatus -Value $conversionStatus
                     Source           = 'Win32_EncryptableVolume (CIM)'
+                    Error            = $methodErrors -join '; '
                 })
         }
 
@@ -438,11 +467,16 @@ if ($null -ne $bitLocker.Error -or $bitLocker.Volumes.Count -eq 0) {
 }
 else {
     $unprotectedVolumes = New-Object System.Collections.Generic.List[string]
+    $partialVolumeCount = 0
     foreach ($volume in $bitLocker.Volumes) {
         Write-Host ('Volume            : {0}' -f $volume.MountPoint)
         Write-Host ('Protection status : {0}' -f $volume.ProtectionStatus)
         Write-Host ('Volume status     : {0}' -f $volume.VolumeStatus)
         Write-Host ('Source            : {0}' -f $volume.Source)
+        if (-not [string]::IsNullOrWhiteSpace($volume.Error)) {
+            $partialVolumeCount++
+            Write-Host ('Collection note   : {0}' -f (ConvertTo-SafeText -Value $volume.Error))
+        }
         Write-Host ''
 
         if ($volume.ProtectionStatus -eq 'Off') {
@@ -450,6 +484,9 @@ else {
         }
     }
 
+    if ($partialVolumeCount -gt 0) {
+        Write-WdtFinding -Severity WARN -Code 'SECURITY_BITLOCKER_PARTIAL' -Message 'BitLocker data could not be fully collected for one or more volumes.' -Evidence ('Affected volumes: {0}' -f $partialVolumeCount)
+    }
     if ($unprotectedVolumes.Count -gt 0) {
         Write-WdtFinding -Severity WARN -Code 'SECURITY_BITLOCKER_NOT_PROTECTED' -Message 'One or more BitLocker volumes are not protected.' -Evidence ($unprotectedVolumes -join ', ')
     }

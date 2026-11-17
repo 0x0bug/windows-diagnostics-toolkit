@@ -52,7 +52,9 @@ stand in for a complete empty inventory. A date-quality change is metadata,
 not proof that an update was reinstalled.
 
 Windowed groups show evidence-observation counts and first/last known times,
-with snapshot/module/evidence references. Multiple sources can describe one
+with snapshot/module/evidence references. Every contributing source must have
+matching scope and a complete query in both snapshots for the counts to be
+comparable. A complete source may return zero matching observations. Multiple sources can describe one
 incident; these counts have not undergone incident correlation. Window
 movement, unknown retention, caps, and missing sources limit comparisons.
 Absence in the after window does not establish resolution. Count changes,
@@ -266,8 +268,8 @@ While diagnostics run, the TUI replaces the menu with a progress screen. Report-
 
 After collection completes, the result screen displays:
 
-- whether collection completed;
-- TXT and optional Markdown report paths;
+- whether collection completed and whether captured output was incomplete;
+- TXT and optional Markdown report paths, masked when Privacy Mode is enabled;
 - `WARN` and `ERROR` finding counts;
 - elapsed time;
 - controls for returning to the menu or exiting.
@@ -305,7 +307,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 ### Output directory
 
-Reports are written to the current directory unless an explicit directory is provided:
+CLI reports default to the current directory. The TUI defaults to the
+`.\WindowsDiagnosticsReports` subdirectory. Both modes accept a different
+filesystem directory:
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -System -Network `
@@ -365,11 +369,13 @@ Each combined report starts with `Findings Summary`.
 
 Findings and collection metadata use these meanings:
 
-- `OK`: module completed and emitted no warning or error findings;
-- `WARN`: state should be reviewed, but collection completed;
-- `ERROR`: diagnostic state is considered serious.
-- `Partial`: the module started but timed out or returned a non-zero exit code;
-- `Indeterminate`: available signals do not justify a positive or negative diagnosis.
+- `OK` means a module completed with captured output and emitted no warning or error findings.
+- `WARN` means a diagnostic signal or a collection limitation needs review.
+- `ERROR` means a serious finding or execution failure occurred.
+- `Indeterminate` means available signals do not justify a positive or negative diagnosis.
+
+`MODULE_OUTPUT_INCOMPLETE` identifies an incomplete capture after a successful
+module exit. The report retains captured output and the TUI flags the partial result.
 
 Module completeness describes execution and output capture: `Success` with complete captured output maps to `Complete`; successful execution with incomplete output, non-zero exit, and timeout map to `Partial`; launch error and cancellation map to `Unavailable`. It does not infer source availability from finding-code names. Overall collection is `Unavailable` only when every module is unavailable, `Complete` only when every module is complete, and `Partial` otherwise. A completed process does not establish that every Windows data source was available.
 
@@ -393,6 +399,8 @@ pwsh -NoProfile -File .\scripts\system-info.ps1
 ### Security Posture
 
 Reads Defender, Windows Firewall, Secure Boot, TPM, and BitLocker status. Recovery keys, key protectors, and hardening changes are not requested.
+The BitLocker CIM fallback retains successful fields per volume. A failed
+method includes its collection note and a `SECURITY_BITLOCKER_PARTIAL` finding.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -Security
@@ -433,7 +441,9 @@ pwsh -NoProfile -File .\scripts\network-check.ps1 `
   -DnsTestName www.microsoft.com -HttpsEndpoint https://www.microsoft.com/ -IcmpTarget 1.1.1.1 -TimeoutSeconds 3
 ```
 
-The wrapper exposes the same probes as `-NetworkDnsTestName`, `-NetworkHttpsEndpoint`, and `-NetworkIcmpTarget`. DNS uses the system resolver; TCP opens a connection to the HTTPS endpoint host/port without sending user data or an HTTP request; ICMP is optional evidence and cannot by itself prove internet failure. Results are `Reachable`, `Unreachable`, `BlockedOrFiltered`, `Indeterminate`, or `NotTested`. Use `-NoExternalNetworkTests` to skip DNS, external TCP, and external ICMP probes. Local adapter, route, gateway, and proxy collection still runs.
+The wrapper exposes the same probes as `-NetworkDnsTestName`, `-NetworkHttpsEndpoint`, and `-NetworkIcmpTarget`. DNS uses the system resolver; TCP opens a connection to the HTTPS endpoint host/port without sending user data or an HTTP request; ICMP is optional evidence and cannot by itself prove internet failure. Results are `Reachable`, `Unreachable`, `BlockedOrFiltered`, `Indeterminate`, or `NotTested`. Use `-NoExternalNetworkTests` to skip DNS, external TCP, and external ICMP probes. Local adapter, route, gateway, and proxy collection still runs. Gateway checks
+cover IPv4 and IPv6 when available. The CIM route fallback covers IPv4. When
+that fallback finds no default route, the overall route state is `Partial`.
 
 The module only uses the read-only `netsh.exe winhttp show proxy` form.
 
@@ -479,7 +489,11 @@ pwsh -NoProfile -File .\scripts\disk-health.ps1 `
 
 ### Crash and Hang Diagnostics
 
-Reads Application Error, Windows Error Reporting, Application Hang, BugCheck, available Reliability Monitor records, and dump-file metadata. Event and reliability evidence for the same application failure is deduplicated, then repeated failures are grouped by application, crash or hang type, and failure code when available. Dump contents are never read.
+Reads Application Error, Windows Error Reporting, Application Hang, BugCheck, available Reliability Monitor records, and dump-file metadata. Records are merged when they refer to the same Event Log record or share a
+valid report ID and compatible failure details. Nearby records from different
+sources without confirmed shared identity remain visible and are flagged as
+possible duplicate reporting. The report groups remaining records by component,
+failure type and code. Ambiguous records alone do not establish repeated failures. Dump contents are never read.
 
 The default lookback is 7 days. A single application crash older than 24 hours remains context; recent or repeated failures can create `WARN`, while `ERROR` is reserved for repeated recent BugChecks. If Reliability Monitor is unavailable, Event Log remains the assessment fallback. Individual unavailable sources remain context; `CRASH_ASSESSMENT_UNAVAILABLE` appears only when all four crash Event Log sources and Reliability Monitor are unavailable. Dump metadata never substitutes for those assessment sources.
 

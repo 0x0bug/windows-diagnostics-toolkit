@@ -41,6 +41,22 @@ function Test-WdtSnapshotFactSourcesMatch {
     return $true
 }
 
+function Test-WdtSnapshotObservationSourcesMatch {
+    param($BeforeModule, $AfterModule, [object[]]$BeforeFacts, [object[]]$AfterFacts)
+
+    $ids = @((@($BeforeFacts) + @($AfterFacts)) | ForEach-Object { $_.SourceIds } | Sort-Object -Unique -CaseSensitive)
+    foreach ($id in $ids) {
+        $beforeSource = Get-WdtSnapshotSource $BeforeModule $id
+        $afterSource = Get-WdtSnapshotSource $AfterModule $id
+        if (-not (Test-WdtSnapshotSourceMatch $beforeSource $afterSource)) { return $false }
+        foreach ($source in @($beforeSource, $afterSource)) {
+            if ($source.Availability -ne 'Available' -or -not $source.QueryComplete -or $source.Truncated) { return $false }
+        }
+    }
+    return ($BeforeModule.Status -eq 'Success' -and $BeforeModule.OutputComplete -and
+        $AfterModule.Status -eq 'Success' -and $AfterModule.OutputComplete)
+}
+
 function Get-WdtSnapshotEvidenceRefs {
     param($Snapshot,[string]$ModuleId,[object[]]$Facts)
     return @($Facts | ForEach-Object { $_.EvidenceIds } | Sort-Object -Unique | ForEach-Object { '{0}/{1}/{2}' -f $Snapshot.SnapshotId,$ModuleId,$_ })
@@ -121,7 +137,9 @@ function Compare-WdtSnapshots {
                 $reason='Observations in the selected windows; counts are not a severity verdict. Retention is unknown.'
                 if ($bf.Count -eq 0) { $reason='Newly observed signature in the after window; prior absence does not establish when the issue began.' }
                 if ($af.Count -eq 0) { $reason='Not observed in the after window; window movement, unknown retention, and source coverage limit interpretation.' }
-                if ($bf.Count -gt 0 -and $af.Count -gt 0 -and -not (Test-WdtSnapshotFactSourcesMatch $beforeModule $afterModule $bf[0] $af[0])) { $state='NotComparable';$reason='Observation source scopes or query filters differ.' }
+                if (-not (Test-WdtSnapshotObservationSourcesMatch $beforeModule $afterModule $bf $af)) {
+                    $state='NotComparable';$reason='At least one contributing source has different scope or filters, or its capture is incomplete or unavailable.'
+                }
             }
             elseif ($bf.Count -gt 1 -or $af.Count -gt 1) { $state='NotComparable';$reason='Multiple configuration or inventory facts share a key.' }
             elseif ($bf.Count -eq 0) {

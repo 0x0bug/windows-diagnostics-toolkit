@@ -70,7 +70,7 @@ foreach ($staleCopy in @('planned `v0.1.0-beta`', 'until that beta is published'
     Assert-True ($readme.IndexOf($staleCopy, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) "README contains stale prerelease copy: $staleCopy"
     Assert-True ($usage.IndexOf($staleCopy, [System.StringComparison]::OrdinalIgnoreCase) -lt 0) "Usage guide contains stale prerelease copy: $staleCopy"
 }
-Assert-True ($readme.Contains('Running without switches opens the interactive TUI.')) 'README does not document the TUI-first default.'
+Assert-True ($readme.Contains('Running without switches opens the interactive TUI when terminal input is available.')) 'README must document the interactive input requirement for its TUI-first default.'
 Assert-True ($readme.Contains('.\Invoke-WindowsDiagnostics.ps1 -Module System,Network')) 'README is missing the generic module selector example.'
 Assert-True ($usage.Contains('.\Invoke-WindowsDiagnostics.ps1 -Module Events,Updates')) 'Usage guide is missing the generic module selector example.'
 Assert-True ($readme.Contains('[Built-in module authoring](docs/module-authoring.md)')) 'README does not link the module authoring guide.'

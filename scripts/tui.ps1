@@ -1,6 +1,8 @@
 [CmdletBinding()]
 param()
 
+. $PSScriptRoot\report-common.ps1
+
 function Get-WdtRecommendedSelection {
     param([Parameter(Mandatory = $true)]$RegistrySnapshot)
     return @($RegistrySnapshot.Modules | Where-Object { $_.Recommended } | ForEach-Object { $_.Id })
@@ -827,16 +829,19 @@ function Get-WdtTuiRunningLayout {
 function Get-WdtTuiRunResultLayout {
     param([Parameter(Mandatory = $true)]$Result, [int]$Width = 80)
 
-    $isSuccess = $Result.ExitCode -eq 0
-    $status = if ($isSuccess) { 'Diagnostics completed successfully.' } else { 'Diagnostics completed with partial failures.' }
+    $isSuccess = $Result.ExitCode -eq 0 -and $Result.Completeness -eq 'Complete'
+    $status = if ($isSuccess) { 'Diagnostics completed successfully.' }
+    elseif ($Result.ExitCode -eq 0) { 'Diagnostics completed with incomplete output.' }
+    elseif ($Result.Completeness -eq 'Unavailable') { 'Diagnostic collection was unavailable.' }
+    else { 'Diagnostics completed with partial failures.' }
     $statusColor = if ($isSuccess) { 'Green' } else { 'Yellow' }
     $lines = @(
         (New-WdtTuiBorderLine -Width $Width),
         (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text $status -Width $Width) -Color $statusColor),
-        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('TXT: {0}' -f $Result.TextReportPath) -Width $Width) -Color 'DarkGray')
+        (New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('TXT: {0}' -f $Result.DisplayTextReportPath) -Width $Width) -Color 'DarkGray')
     )
-    if (-not [string]::IsNullOrWhiteSpace($Result.MarkdownReportPath)) {
-        $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Markdown: {0}' -f $Result.MarkdownReportPath) -Width $Width) -Color 'DarkGray'
+    if (-not [string]::IsNullOrWhiteSpace($Result.DisplayMarkdownReportPath)) {
+        $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Markdown: {0}' -f $Result.DisplayMarkdownReportPath) -Width $Width) -Color 'DarkGray'
     }
     $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('WARN: {0} | ERROR: {1}' -f $Result.WarningCount, $Result.ErrorCount) -Width $Width) -Color $(if ($Result.ErrorCount -gt 0) { 'Red' } elseif ($Result.WarningCount -gt 0) { 'Yellow' } else { 'Green' })
     $lines += New-WdtTuiTextLine -Text (Format-WdtTuiText -Text ('Elapsed: {0}' -f $Result.ElapsedTime) -Width $Width) -Color 'DarkGray'
@@ -1243,7 +1248,7 @@ function Invoke-WdtInteractiveSession {
                     continue
                 }
                 try {
-                    $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($path)
+                    $resolvedPath = Resolve-WdtFilesystemPath -Path $path
                     $state = Update-WdtTuiState -State $state -Action SetOutputDirectory -Value $resolvedPath
                 }
                 catch {
@@ -1252,15 +1257,6 @@ function Invoke-WdtInteractiveSession {
                 continue
             }
             if ($state.ExitRequested -or $state.ActionRequested -ne 'Run') { continue }
-
-            try {
-                $resolvedPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($state.OutputDirectory)
-                $state = Update-WdtTuiState -State $state -Action SetOutputDirectory -Value $resolvedPath
-            }
-            catch {
-                $state.ErrorMessage = ('Invalid output directory: ' + $_.Exception.Message)
-                continue
-            }
 
             $reportParameters = ConvertTo-WdtReportParameters `
                 -State $state `

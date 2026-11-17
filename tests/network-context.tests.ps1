@@ -40,7 +40,8 @@ Assert-True -Condition (-not $scriptSource.Contains('tunnel')) -Message 'Network
 
 $previousProtocolMode = $env:WDT_FINDING_PROTOCOL
 try {
-    $fixtureOutput = @(& {
+    $runNetworkFixture = {
+            param([switch]$UseCimIPv4Routes)
             function Get-Command {
                 [CmdletBinding()]
                 param([string]$Name)
@@ -69,7 +70,8 @@ try {
                 [pscustomobject]@{
                     IPv4Address        = @([pscustomobject]@{ IPAddress = '192.0.2.10' })
                     IPv6Address        = @([pscustomobject]@{ IPAddress = '2001:db8::10' })
-                    IPv4DefaultGateway = @([pscustomobject]@{ NextHop = '192.0.2.1' })
+                    IPv4DefaultGateway = if (-not $UseCimIPv4Routes) { [pscustomobject]@{ NextHop = '192.0.2.1' } }
+                    IPv6DefaultGateway = [pscustomobject]@{ NextHop = '2001:db8::1' }
                     DNSServer          = [pscustomobject]@{ ServerAddresses = @('192.0.2.53') }
                 }
             }
@@ -94,6 +96,10 @@ try {
                     }
                 }
 
+                if ($ClassName -eq 'Win32_IP4RouteTable' -and $UseCimIPv4Routes) {
+                    return [pscustomobject]@{Destination='192.0.2.0'; Mask='255.255.255.0'; NextHop='0.0.0.0'; InterfaceIndex=7; Metric1=10}
+                }
+
                 throw "Unexpected CIM class: $ClassName"
             }
 
@@ -103,6 +109,7 @@ try {
             }
 
             function Get-NetRoute {
+                if ($UseCimIPv4Routes) { throw 'Primary route source unavailable.' }
                 $routes = New-Object System.Collections.Generic.List[object]
                 $routes.Add([pscustomobject]@{ DestinationPrefix = '0.0.0.0/0'; AddressFamily = 'IPv4'; NextHop = '192.0.2.1'; InterfaceAlias = 'Fixture Ethernet'; InterfaceIndex = 7; RouteMetric = 5; State = 'Alive' })
                 $routes.Add([pscustomobject]@{ DestinationPrefix = '::/0'; AddressFamily = 'IPv6'; NextHop = '2001:db8::1'; InterfaceAlias = 'Fixture Ethernet'; InterfaceIndex = 7; RouteMetric = 5; State = 'Alive' })
@@ -125,8 +132,10 @@ try {
             function Resolve-DnsName { return [pscustomobject]@{ IPAddress = '192.0.2.53' } }
 
             $env:WDT_FINDING_PROTOCOL = '1'
-            & $networkScript -DnsTestName 'fixture.example' -InternetTestHost '192.0.2.200' 6>&1 | ForEach-Object { [string]$_ }
-        })
+            & $networkScript -DnsTestName 'fixture.example' -HttpsEndpoint 'http://example.invalid/' -InternetTestHost '192.0.2.200' 6>&1 | ForEach-Object { [string]$_ }
+        }
+    $fixtureOutput = @(& $runNetworkFixture)
+    $ipv4FallbackOutput = @(& $runNetworkFixture -UseCimIPv4Routes)
 
     $unavailableOutput = @(& {
             function Get-Command {
@@ -269,6 +278,12 @@ foreach ($sensitiveValue in @('fixtureuser', 'fixturepassword', 'fixturetoken'))
     Assert-True -Condition (-not (Test-ContainsLiteral -Text $fixtureText -Value $sensitiveValue)) -Message ("Proxy credential or sensitive query value leaked: {0}" -f $sensitiveValue)
 }
 Assert-True -Condition $fixtureText.Contains('NETWORK_WINHTTP_PROXY_UNAVAILABLE') -Message 'Unavailable WinHTTP proxy source did not emit a WARN finding.'
+
+$ipv4FallbackText = $ipv4FallbackOutput -join "`n"
+Assert-True -Condition $ipv4FallbackText.Contains('Default route state: Partial') -Message 'IPv4-only route data must not imply the absence of an IPv6 default route.'
+Assert-True -Condition $ipv4FallbackText.Contains('Overall reachability: Indeterminate') -Message 'An incomplete route source and inconclusive probes must remain indeterminate.'
+Assert-True -Condition $ipv4FallbackText.Contains('2001:db8::1: Reachable') -Message 'The IPv6 gateway must be collected and checked.'
+Assert-True -Condition ($ipv4FallbackText -notmatch 'NETWORK_NO_GATEWAY|NETWORK_CONNECTIVITY_UNREACHABLE') -Message 'The IPv6 fixture must not report a missing gateway or unavailable connectivity.'
 
 $unavailableText = $unavailableOutput -join "`n"
 foreach ($code in @('NETWORK_ADAPTERS_UNAVAILABLE', 'NETWORK_ROUTES_UNAVAILABLE', 'NETWORK_WININET_PROXY_UNAVAILABLE', 'NETWORK_WINHTTP_PROXY_UNAVAILABLE')) {

@@ -262,19 +262,22 @@ function ConvertTo-CrashRecord {
     elseif ([string]::IsNullOrWhiteSpace($failure) -or $failure -match '[\\/]') { $failure = 'Unknown' }
     if ($failure.Length -gt 80) { $failure = $failure.Substring(0, 80) }
 
-    $reportId = if ($null -ne $InputObject.PSObject.Properties['ReportId']) { [string]$InputObject.ReportId } else { '' }
-    if ([string]::IsNullOrWhiteSpace($reportId) -and $message -match '(?im)Report Id:\s*(?<Id>[0-9a-f-]{36})') { $reportId = $matches['Id'] }
-    if ([string]::IsNullOrWhiteSpace($reportId)) {
-        $reportIndex = if ($provider -eq 'Application Error') { 12 } elseif ($provider -eq 'Application Hang') { 6 } elseif ($provider -eq 'Microsoft-Windows-WER-SystemErrorReporting') { 2 } else { -1 }
-        if ($reportIndex -ge 0 -and $values.Count -gt $reportIndex) { $reportId = $values[$reportIndex] }
+    $reportId = Get-WdtFailureReportIdentity $InputObject.ReportId
+    if ($null -eq $reportId -and $message -match '(?im)Report Id:\s*(?<Id>[0-9a-f-]{36})') {
+        $reportId = Get-WdtFailureReportIdentity $matches['Id']
     }
-    if ([string]::IsNullOrWhiteSpace($reportId)) {
-        foreach ($value in $values) {
-            $guid = [guid]::Empty
-            if ([System.Guid]::TryParse([string]$value, [ref]$guid)) { $reportId = $guid.ToString('D'); break }
+    if ($null -eq $reportId) {
+        $reportIndex = switch ($provider) {
+            'Application Error' { 12 }
+            'Application Hang' { 6 }
+            'Windows Error Reporting' { 19 }
+            'Microsoft-Windows-WER-SystemErrorReporting' { 2 }
+            default { -1 }
+        }
+        if ($reportIndex -ge 0 -and $values.Count -gt $reportIndex) {
+            $reportId = Get-WdtFailureReportIdentity $values[$reportIndex]
         }
     }
-    $reportId = $reportId.Trim().Trim('{').Trim('}').ToLowerInvariant()
 
     $source = if ($null -ne $InputObject.PSObject.Properties['Source'] -and -not [string]::IsNullOrWhiteSpace([string]$InputObject.Source)) {
         ([string]$InputObject.Source).Trim()
@@ -290,6 +293,7 @@ function ConvertTo-CrashRecord {
     return [pscustomobject][ordered]@{
         TimeCreated = $time; Component = $component; Kind = $kind; FailureCode = $failure
         ReportId = $reportId; Source = $source; Evidence = $evidence
+        LogName = [string]$InputObject.LogName; Provider = $provider; EventId = $id; RecordId = [string]$InputObject.RecordId
     }
 }
 
@@ -300,47 +304,61 @@ function Merge-DuplicateCrashRecords {
     )
 
     $Cutoff = ([datetimeoffset]$Cutoff).UtcDateTime
-    $bucketTicks = ([timespan]'00:05:00').Ticks
-    $merged = @{}
+    $merged = New-Object System.Collections.Generic.List[object]
+    $byRecord = @{}
+    $byReport = @{}
 
     foreach ($record in @($Records | Sort-Object TimeCreated, Source)) {
-        $time = [datetime]$record.TimeCreated
-        $time = ([datetimeoffset]$time).UtcDateTime
+        $time = ([datetimeoffset]([datetime]$record.TimeCreated)).UtcDateTime
         if ($time -lt $Cutoff -or [string]$record.Kind -notin @('Crash', 'Hang', 'BugCheck')) { continue }
 
         $component = if ([string]::IsNullOrWhiteSpace([string]$record.Component)) { 'Unknown application' } else { [string]$record.Component }
-        $reportId = ([string]$record.ReportId).Trim().ToLowerInvariant()
+        $reportId = Get-WdtFailureReportIdentity $record.ReportId
         $failure = if ([string]::IsNullOrWhiteSpace([string]$record.FailureCode)) { 'Unknown' } else { [string]$record.FailureCode }
-        $key = if (-not [string]::IsNullOrWhiteSpace($reportId)) { 'report|' + $reportId }
-        else {
-            $bucket = [long][math]::Floor($time.Ticks / [double]$bucketTicks)
-            'incident|{0}|{1}|{2}|{3}' -f $component.ToLowerInvariant(), ([string]$record.Kind).ToLowerInvariant(), $failure.ToLowerInvariant(), $bucket
+        $recordId = Get-WdtEventRecordIdentity @{
+            TimePrecision = 'Instant'; TimestampUtc = $time; LogName = $record.LogName
+            Provider = $record.Provider; EventId = $record.EventId; RecordId = $record.RecordId
+        }
+        $recordSources = if ($null -ne $record.PSObject.Properties['Sources']) { @($record.Sources) } else { @($record.Source) }
+        $existing = $null
+        if ($null -ne $recordId -and $byRecord.ContainsKey($recordId)) {
+            $existing = $byRecord[$recordId]
+        }
+        elseif ($null -ne $reportId -and $byReport.ContainsKey($reportId)) {
+            $candidates = @($byReport[$reportId] | Where-Object { Test-WdtFailureCompatible $_ $record })
+            if ($candidates.Count -eq 1) { $existing = $candidates[0] }
         }
 
-        $recordSources = if ($null -ne $record.PSObject.Properties['Sources']) { @($record.Sources) } else { @($record.Source) }
-        if (-not $merged.ContainsKey($key)) {
+        if ($null -eq $existing) {
             $sources = @($recordSources | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
-            $merged[$key] = [pscustomobject][ordered]@{
+            $existing = [pscustomobject][ordered]@{
                 TimeCreated = $time; Component = $component; Kind = [string]$record.Kind; FailureCode = $failure
                 ReportId = $reportId; Source = $sources -join ', '; Sources = $sources
-                Evidence = [string]$record.Evidence; DedupKey = $key
+                Evidence = [string]$record.Evidence; DedupKey = $merged.Count
             }
-            continue
+            $merged.Add($existing)
         }
-
-        $existing = $merged[$key]
-        $sources = @(@($existing.Sources) + $recordSources | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
-        $existing.Sources = $sources
-        $existing.Source = $sources -join ', '
-        if ($existing.FailureCode -eq 'Unknown' -and $failure -ne 'Unknown') { $existing.FailureCode = $failure }
-        if ($existing.Component -eq 'Unknown application' -and $component -ne 'Unknown application') { $existing.Component = $component }
-        if ($time -ge $existing.TimeCreated) {
+        else {
+            $sources = @(@($existing.Sources) + $recordSources | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
+            $existing.Sources = $sources
+            $existing.Source = $sources -join ', '
+            if ($existing.FailureCode -eq 'Unknown' -and $failure -ne 'Unknown') { $existing.FailureCode = $failure }
+            if ($existing.Component -eq 'Unknown application' -and $component -ne 'Unknown application') { $existing.Component = $component }
             $existing.TimeCreated = $time
             if (-not [string]::IsNullOrWhiteSpace([string]$record.Evidence)) { $existing.Evidence = [string]$record.Evidence }
         }
+
+        if ($null -ne $recordId) { $byRecord[$recordId] = $existing }
+        if ($null -ne $reportId) {
+            if ($null -eq $existing.ReportId) { $existing.ReportId = $reportId }
+            if ($existing.ReportId -eq $reportId) {
+                if (-not $byReport.ContainsKey($reportId)) { $byReport[$reportId] = New-Object System.Collections.Generic.List[object] }
+                if (-not $byReport[$reportId].Contains($existing)) { $byReport[$reportId].Add($existing) }
+            }
+        }
     }
 
-    return @($merged.Values | Sort-Object TimeCreated -Descending)
+    return @($merged.ToArray() | Sort-Object TimeCreated -Descending)
 }
 
 function Group-CrashRecords {
@@ -361,16 +379,27 @@ function Group-CrashRecords {
                 Component = [string]$record.Component; Kind = [string]$record.Kind; FailureCode = $failure; Count = 0
                 FirstOccurrence = [datetime]$record.TimeCreated; LastOccurrence = [datetime]$record.TimeCreated
                 MostRecentEvidence = [string]$record.Evidence; Source = ''; Sources = @()
+                MostRecentReportId = $null; MostRecentSources = @(); MinimumIncidentCount = 0
+                PossibleDuplicateReporting = $false
             }
         }
         $group = $groups[$key]
+        $groupSources = if ($null -ne $record.PSObject.Properties['Sources']) { @($record.Sources) } else { @($record.Source) }
+        $sharesSource = @($groupSources | Where-Object { $_ -in $group.MostRecentSources }).Count -gt 0
+        if ($group.Count -gt 0 -and -not $sharesSource -and ($record.TimeCreated - $group.LastOccurrence).TotalMinutes -le 5 -and
+            ([string]::IsNullOrWhiteSpace($record.ReportId) -or [string]::IsNullOrWhiteSpace($group.MostRecentReportId))) {
+            $group.PossibleDuplicateReporting = $true
+        }
+        else { $group.MinimumIncidentCount++ }
+
         $group.Count++
         if ($record.TimeCreated -lt $group.FirstOccurrence) { $group.FirstOccurrence = $record.TimeCreated }
         if ($record.TimeCreated -ge $group.LastOccurrence) {
             $group.LastOccurrence = $record.TimeCreated
             $group.MostRecentEvidence = [string]$record.Evidence
+            $group.MostRecentReportId = $record.ReportId
+            $group.MostRecentSources = $groupSources
         }
-        $groupSources = if ($null -ne $record.PSObject.Properties['Sources']) { @($record.Sources) } else { @($record.Source) }
         $group.Sources = @(@($group.Sources) + $groupSources | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Sort-Object -Unique)
         $group.Source = $group.Sources -join ', '
     }
@@ -387,9 +416,9 @@ function Get-CrashGroupSeverity {
     $Now = ([datetimeoffset]$Now).UtcDateTime
     $lastOccurrence = ([datetimeoffset]([datetime]$Group.LastOccurrence)).UtcDateTime
     $recent = $lastOccurrence -ge $Now.AddHours(-24) -and $lastOccurrence -le $Now
-    if ($Group.Kind -eq 'BugCheck' -and $Group.Count -ge 2 -and $recent) { return 'ERROR' }
-    if ($Group.Kind -eq 'BugCheck' -and ($Group.Count -ge 2 -or $recent)) { return 'WARN' }
-    if ($Group.Kind -in @('Crash', 'Hang') -and ($Group.Count -ge 2 -or $recent)) { return 'WARN' }
+    if ($Group.Kind -eq 'BugCheck' -and $Group.MinimumIncidentCount -ge 2 -and $recent) { return 'ERROR' }
+    if ($Group.Kind -eq 'BugCheck' -and ($Group.MinimumIncidentCount -ge 2 -or $recent)) { return 'WARN' }
+    if ($Group.Kind -in @('Crash', 'Hang') -and ($Group.MinimumIncidentCount -ge 2 -or $recent)) { return 'WARN' }
     return 'None'
 }
 
@@ -502,13 +531,14 @@ foreach ($group in @($applicationGroups | Select-Object -First $MaxEvents)) {
     Write-Host ('Last occurrence      : {0:u}' -f $group.LastOccurrence)
     Write-Host ('Sources              : {0}' -f $group.Source)
     Write-Host ('Most recent evidence : {0}' -f $group.MostRecentEvidence)
+    if ($group.PossibleDuplicateReporting) { Write-Host 'Nearby records lack a confirmed shared identity; possible duplicates are included in the count.' }
     Write-Host ''
 }
 $applicationFindings = @($applicationGroups | Where-Object { (Get-CrashGroupSeverity $_ $nowUtc) -eq 'WARN' })
 if ($applicationFindings.Count -gt 0) {
     $latest = $applicationFindings | Sort-Object LastOccurrence -Descending | Select-Object -First 1
-    $count = ($applicationFindings | Measure-Object Count -Sum).Sum
-    Write-WdtFinding -Severity WARN -Code 'CRASH_APPLICATION_FAILURES_DETECTED' -Message 'Recent or repeated application crash or hang groups were found.' -Evidence ('Groups={0}; Incidents={1}; MostRecentComponent={2}; Kind={3}; FailureCode={4}; Last={5:u}' -f $applicationFindings.Count, $count, $latest.Component, $latest.Kind, $latest.FailureCode, $latest.LastOccurrence)
+    $count = ($applicationFindings | Measure-Object MinimumIncidentCount -Sum).Sum
+    Write-WdtFinding -Severity WARN -Code 'CRASH_APPLICATION_FAILURES_DETECTED' -Message 'Recent or repeated application crash or hang groups were found.' -Evidence ('Groups={0}; MinimumIncidents={1}; MostRecentComponent={2}; Kind={3}; FailureCode={4}; Last={5:u}' -f $applicationFindings.Count, $count, $latest.Component, $latest.Kind, $latest.FailureCode, $latest.LastOccurrence)
 }
 
 Write-Section 'BugCheck Events'
@@ -520,15 +550,16 @@ foreach ($group in @($bugCheckGroups | Select-Object -First $MaxEvents)) {
     Write-Host ('Last occurrence      : {0:u}' -f $group.LastOccurrence)
     Write-Host ('Sources              : {0}' -f $group.Source)
     Write-Host ('Most recent evidence : {0}' -f $group.MostRecentEvidence)
+    if ($group.PossibleDuplicateReporting) { Write-Host 'Nearby records lack a confirmed shared identity; possible duplicates are included in the count.' }
     Write-Host ''
 }
 $bugCheckFindings = @($bugCheckGroups | Where-Object { (Get-CrashGroupSeverity $_ $nowUtc) -ne 'None' })
 if ($bugCheckFindings.Count -gt 0) {
     $severity = if (@($bugCheckFindings | Where-Object { (Get-CrashGroupSeverity $_ $nowUtc) -eq 'ERROR' }).Count -gt 0) { 'ERROR' } else { 'WARN' }
     $latest = $bugCheckFindings | Sort-Object LastOccurrence -Descending | Select-Object -First 1
-    $count = ($bugCheckFindings | Measure-Object Count -Sum).Sum
+    $count = ($bugCheckFindings | Measure-Object MinimumIncidentCount -Sum).Sum
     $message = if ($severity -eq 'ERROR') { 'Repeated recent Windows BugCheck events were found.' } else { 'A recent or repeated Windows BugCheck event was found.' }
-    Write-WdtFinding -Severity $severity -Code 'CRASH_BUGCHECK_DETECTED' -Message $message -Evidence ('Groups={0}; Incidents={1}; StopCode={2}; Last={3:u}' -f $bugCheckFindings.Count, $count, $latest.FailureCode, $latest.LastOccurrence)
+    Write-WdtFinding -Severity $severity -Code 'CRASH_BUGCHECK_DETECTED' -Message $message -Evidence ('Groups={0}; MinimumIncidents={1}; StopCode={2}; Last={3:u}' -f $bugCheckFindings.Count, $count, $latest.FailureCode, $latest.LastOccurrence)
 }
 
 Write-Section 'Recent Dump Metadata'

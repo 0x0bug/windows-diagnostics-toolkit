@@ -258,4 +258,19 @@ Assert-Equal 'Unicode' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -O
 Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $true -OutputEncodingWebName 'utf-8' -Override '') 'Redirected output must select the ASCII logo.'
 Assert-Equal 'Ascii' (Get-WdtTuiLogoModeDecision -IsOutputRedirected $false -OutputEncodingWebName 'ibm866' -Override '') 'An OEM encoding must select the ASCII logo.'
 
+$privateResult = [pscustomobject]@{
+    ExitCode=0; Completeness='Partial'; WarningCount=1; ErrorCount=0; ElapsedTime=[timespan]::Zero
+    TextReportPath='C:\Users\FixtureUser\report.txt'; MarkdownReportPath='C:\Users\FixtureUser\report.md'
+    DisplayTextReportPath='C:\Users\<USER-1>\report.txt'; DisplayMarkdownReportPath='C:\Users\<USER-1>\report.md'
+}
+$resultLayout = Get-WdtTuiRunResultLayout $privateResult -Width 100
+$resultText = (Get-PlainLayoutLines $resultLayout) -join "`n"
+Assert-Equal 'Warning' $resultLayout.Mode 'A successful exit with partial output must not use the success layout.'
+Assert-True ($resultText.Contains('incomplete output')) 'The result screen must explain the partial capture.'
+Assert-True ($resultText.Contains('<USER-1>') -and -not $resultText.Contains('FixtureUser')) 'The result screen must use the same privacy-safe paths as the report.'
+$rejected = $false
+try { Resolve-WdtFilesystemPath -Path 'Env:WdtFixture' | Out-Null } catch { $rejected = $true }
+Assert-True $rejected 'A non-filesystem provider must not be treated as a relative directory.'
+Assert-Equal (Join-Path (Get-Location).Path 'WdtFixture') (Resolve-WdtFilesystemPath 'WdtFixture') 'A normal relative output path must resolve in the current directory.'
+
 Write-Host 'TUI snapshot, dynamic viewport, layout, and parameter conversion tests passed.'

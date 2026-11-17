@@ -20,7 +20,7 @@ The bootstrap downloads the fixed `v0.2.0-beta.2` release, verifies the ZIP's SH
 
 SHA-256 verification protects the downloaded release ZIP, not `run.ps1`. Inspect the bootstrap first on sensitive systems; see [installation and source review](docs/usage.md#installation).
 
-Running without switches opens the interactive TUI. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default.
+Running without switches opens the interactive TUI when terminal input is available. Recommended diagnostics, Privacy Mode, and Markdown export are enabled by default.
 
 ## What it checks
 

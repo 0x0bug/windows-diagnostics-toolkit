@@ -8,6 +8,14 @@ This page shows illustrative anonymized excerpts of the TXT and Markdown report 
 
 Privacy Mode assigns stable typed tokens within one report and resets the token map before the next report. Process, application, and dump-file names remain visible because they are diagnostically useful.
 
+If a module exits successfully with incomplete capture, the report displays
+`Collection completeness: Partial` when the overall collection is partial.
+The findings summary can include:
+
+```text
+[WARN] System Information / MODULE_OUTPUT_INCOMPLETE - The diagnostic exited successfully, but some output could not be captured.
+```
+
 ## TXT report
 
 ```text
