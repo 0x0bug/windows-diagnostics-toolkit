@@ -161,13 +161,13 @@ Administrator rights are optional. Some Windows data sources expose less detail 
 
 ## Installation
 
-The public `v0.2.0-beta.2` prerelease is available through the fixed-release bootstrap:
+The public `v0.2.0-beta.3` prerelease is available through the fixed-release bootstrap:
 
 ```powershell
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The bootstrap downloads the `v0.2.0-beta.2` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
+The bootstrap downloads the `v0.2.0-beta.3` ZIP and its `.sha256` file from the [GitHub prerelease](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.3). It verifies the ZIP before extraction and launches it in a child PowerShell process only when the hash matches. A mismatch stops the bootstrap before anything is extracted or executed, and no files are installed permanently.
 
 The repository bootstrap sets `Invoke-WebRequest -TimeoutSec 60` for each ZIP and checksum request. It also sets `OperationTimeoutSeconds` to 60 when that parameter is supported. That stream read timeout limits inactivity between reads; it is not an overall download deadline. A timeout stops the bootstrap before extraction or execution and removes its temporary directory.
 
