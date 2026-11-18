@@ -1,9 +1,9 @@
 & {
 $ErrorActionPreference = 'Stop'
 
-$wdtVersion = '0.2.0-beta.2'
-$wdtArchiveName = 'windows-diagnostics-toolkit-v0.2.0-beta.2.zip'
-$wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.2'
+$wdtVersion = '0.2.0-beta.3'
+$wdtArchiveName = 'windows-diagnostics-toolkit-v0.2.0-beta.3.zip'
+$wdtReleaseBaseUri = 'https://github.com/0x0bug/windows-diagnostics-toolkit/releases/download/v0.2.0-beta.3'
 $wdtArchiveUri = "$wdtReleaseBaseUri/$wdtArchiveName"
 $wdtChecksumUri = "$wdtArchiveUri.sha256"
 

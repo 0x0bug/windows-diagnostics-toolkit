@@ -1,7 +1,7 @@
 # Windows Diagnostics Toolkit
 
 [![PowerShell Validation](https://github.com/0x0bug/windows-diagnostics-toolkit/actions/workflows/powershell-validation.yml/badge.svg)](https://github.com/0x0bug/windows-diagnostics-toolkit/actions/workflows/powershell-validation.yml)
-[![Release](https://img.shields.io/badge/release-v0.2.0--beta.2-orange)](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.2)
+[![Release](https://img.shields.io/badge/release-v0.2.0--beta.3-orange)](https://github.com/0x0bug/windows-diagnostics-toolkit/releases/tag/v0.2.0-beta.3)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 Read-only Windows diagnostics for PowerShell. WDT collects system state and recent failure evidence into a local support report, with a findings summary and optional Privacy Mode.
@@ -16,7 +16,7 @@ Requires Windows 10/11 and Windows PowerShell 5.1 or PowerShell 7+. No third-par
 irm https://wdt.digital/run.ps1 | iex
 ```
 
-The bootstrap downloads the fixed `v0.2.0-beta.2` release, verifies the ZIP's SHA-256, and runs it from a temporary folder without installation.
+The bootstrap downloads the fixed `v0.2.0-beta.3` release, verifies the ZIP's SHA-256, and runs it from a temporary folder without installation.
 
 SHA-256 verification protects the downloaded release ZIP, not `run.ps1`. Inspect the bootstrap first on sensitive systems; see [installation and source review](docs/usage.md#installation).
 

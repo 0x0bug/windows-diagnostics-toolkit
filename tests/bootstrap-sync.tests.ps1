@@ -23,7 +23,7 @@ $canonicalHash = (Get-FileHash -LiteralPath $canonicalBootstrap -Algorithm SHA25
 
 # The byte-for-byte bootstrap guarantee requires a repository-owned EOL policy:
 # without it, core.autocrlf=true checkouts produce CRLF and a different SHA-256.
-$expectedCanonicalBootstrapSha256 = '18f2d6920bca1d83a50a5337205585c8831a6a0ead3203e9b2d4ca853b882e95'
+$expectedCanonicalBootstrapSha256 = '3b9ff3cb42cadebc33371f0d19a1d85909d18b0ffbfcb66c6004e56ba2701037'
 $gitAttributesPath = Join-Path -Path $repositoryRoot -ChildPath '.gitattributes'
 Assert-True (Test-Path -LiteralPath $gitAttributesPath -PathType Leaf) 'Repository root is missing .gitattributes; the PowerShell LF policy must be repository-owned.'
 $gitAttributesLines = @(Get-Content -LiteralPath $gitAttributesPath)

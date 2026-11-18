@@ -20,7 +20,7 @@ The findings summary can include:
 
 ```text
 Windows Diagnostics Toolkit - Support Report
-Toolkit version : 0.2.0-beta.2
+Toolkit version : 0.2.0-beta.3
 Created at    : 2026-07-12 10:15:30 +02:00
 Computer name : <HOST-1>
 Mode          : read-only
@@ -154,7 +154,7 @@ Indicators found: None
 ````markdown
 # Windows Diagnostics Toolkit - Support Report
 
-- Toolkit version: `0.2.0-beta.2`
+- Toolkit version: `0.2.0-beta.3`
 - Created at: `2026-07-12 10:15:30 +02:00`
 - Computer name: `<HOST-1>`
 - Mode: `read-only`
