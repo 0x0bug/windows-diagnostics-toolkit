@@ -46,7 +46,7 @@ Registry snapshots, definitions, argument lists, option bindings, and script-pat
 `OptionBindings` maps a supported WDT core option to an actual parameter in the entrypoint's top-level `param()` block. Target names are matched case-insensitively, duplicate targets are rejected, and target types must be compatible:
 
 - Boolean sources bind to `[switch]` parameters whose default is absent or `$false`.
-- String sources bind to `[string]` parameters.
+- String sources bind to `[string]` parameters. The optional `NetworkWebServiceUrl` source is omitted when callers do not supply a service target.
 - Integer sources bind to `[int]` parameters.
 
 Aliases and parameters declared only inside nested functions are not valid targets. Adding a new core option requires a separate, justified core change; a manifest cannot invent one.

@@ -32,7 +32,11 @@ param(
     [string]$IncidentSymptom,
     [string]$IncidentAt,
     [int]$IncidentBeforeMinutes = 30,
-    [int]$IncidentAfterMinutes = 30
+    [int]$IncidentAfterMinutes = 30,
+    [switch]$RecordPerformance,
+    [ValidateRange(60, 120)]
+    [int]$RecordingSeconds = 60,
+    [string]$NetworkWebServiceUrl
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,6 +73,12 @@ $coreOptionValues['NoExternalNetworkTests'] = [bool]$NoExternalNetworkTests
 $coreOptionValues['NetworkDnsTestName'] = $NetworkDnsTestName
 $coreOptionValues['NetworkHttpsEndpoint'] = $NetworkHttpsEndpoint
 $coreOptionValues['NetworkIcmpTarget'] = $NetworkIcmpTarget
+if ($PSBoundParameters.ContainsKey('NetworkWebServiceUrl')) {
+    if ($null -eq (ConvertTo-WdtWebServiceUri -Value $NetworkWebServiceUrl)) {
+        throw 'Enter an absolute HTTP or HTTPS service URL without credentials or a fragment.'
+    }
+    $coreOptionValues['NetworkWebServiceUrl'] = $NetworkWebServiceUrl
+}
 $coreOptions = New-Object 'System.Collections.ObjectModel.ReadOnlyDictionary[string,object]' $coreOptionValues
 
 function Get-CurrentPowerShellPath {
@@ -99,6 +109,7 @@ if (-not (Test-Path -LiteralPath $processRunnerPath -PathType Leaf)) {
 . $PSScriptRoot\scripts\snapshot.ps1
 . $PSScriptRoot\scripts\snapshot-compare.ps1
 . $PSScriptRoot\scripts\incident.ps1
+. $PSScriptRoot\scripts\performance-recording.ps1
 
 function Get-WdtCollectionCompleteness {
     param([Parameter(Mandatory = $true)][object[]]$Results)
@@ -534,8 +545,72 @@ function Invoke-WdtSnapshotComparison {
     }
 }
 
+function Write-WdtInvestigationFiles {
+    param(
+        [string]$Directory,
+        [string]$Prefix,
+        [string]$Title,
+        [string[]]$TextLines,
+        [bool]$ExportMarkdown,
+        $Context
+    )
+
+    $paths = Get-WdtUniqueReportPaths -OutputDirectory $Directory -ExportMarkdown $ExportMarkdown -Prefix $Prefix
+    $textReportPath = $paths.TextPath
+    $markdownReportPath = $null
+    try {
+        [System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)
+        if ($ExportMarkdown) {
+            $markdownReportPath = $paths.MarkdownPath
+            $fence = Get-WdtMarkdownFence -ContentLines $TextLines
+            $markdownLines = @(('# ' + $Title), '', ($fence + 'text')) + $TextLines + @($fence)
+            [System.IO.File]::WriteAllLines($markdownReportPath, $markdownLines, [System.Text.Encoding]::UTF8)
+        }
+    }
+    catch { throw "Could not write WDT $Title report." }
+
+    return [pscustomobject]@{
+        TextReportPath = $textReportPath
+        MarkdownReportPath = $markdownReportPath
+        DisplayTextReportPath = Protect-WdtDataString $textReportPath $Context
+        DisplayMarkdownReportPath = if ($ExportMarkdown) { Protect-WdtDataString $markdownReportPath $Context }
+    }
+}
+
+function Invoke-WdtRecordingReport {
+    param(
+        [ValidateRange(60, 120)][int]$DurationSeconds = 60,
+        [string]$OutputDirectory,
+        [bool]$PrivacyMode,
+        [bool]$ExportMarkdown,
+        [switch]$InteractiveMarker,
+        [bool]$SuppressConsoleOutput
+    )
+
+    $startedAt = Get-Date
+    $directory = Initialize-WdtOutputDirectory -OutputDirectory $OutputDirectory
+    $recording = Invoke-WdtPerformanceRecording -DurationSeconds $DurationSeconds -InteractiveMarker:$InteractiveMarker -Quiet:$SuppressConsoleOutput
+    $context = if ($PrivacyMode) { New-WdtRedactionContext }
+    $lines = @(Format-WdtPerformanceRecording -Recording $recording -PrivacyMode:$PrivacyMode -Context $context)
+    $files = Write-WdtInvestigationFiles -Directory $directory -Prefix 'WindowsDiagnosticsRecording' -Title 'Performance Recording' -TextLines $lines -ExportMarkdown $ExportMarkdown -Context $context
+    if (-not $SuppressConsoleOutput) {
+        Write-Host ('TXT recording written: {0}' -f $files.DisplayTextReportPath)
+        if ($ExportMarkdown) { Write-Host ('Markdown recording written: {0}' -f $files.DisplayMarkdownReportPath) }
+    }
+    return [pscustomobject]@{
+        ExitCode = $recording.ExitCode
+        Completeness = $recording.Completeness
+        ElapsedTime = (Get-Date) - $startedAt
+        TextReportPath = $files.TextReportPath
+        MarkdownReportPath = $files.MarkdownReportPath
+        DisplayTextReportPath = $files.DisplayTextReportPath
+        DisplayMarkdownReportPath = $files.DisplayMarkdownReportPath
+    }
+}
+
 function Invoke-WdtIncident {
-    param($Window,[string]$OutputDirectory,[bool]$PrivacyMode,[bool]$ExportMarkdown,[int]$ModuleTimeoutSeconds=180)
+    param($Window,[string]$OutputDirectory,[bool]$PrivacyMode,[bool]$ExportMarkdown,[int]$ModuleTimeoutSeconds=180,[bool]$SuppressConsoleOutput=$false)
+    $startedAt = Get-Date
     $window=Assert-WdtIncidentWindow $Window
     $checks=@(Resolve-WdtModuleSelection -Registry $registrySnapshot -ModuleIds @('Crashes','Events','Updates'))
     $resolvedOutputDirectory=Initialize-WdtOutputDirectory -OutputDirectory $OutputDirectory
@@ -552,20 +627,40 @@ function Invoke-WdtIncident {
     $textLines=@(Get-WdtIncidentLines -Incident $incident)
     # Only projected diagnostic text reaches disk; captured legacy output stays
     # in memory and is not a source of incident facts or a second report.
-    try {
-        $paths=Get-WdtUniqueReportPaths -OutputDirectory $resolvedOutputDirectory -ExportMarkdown $ExportMarkdown -Prefix 'WindowsDiagnosticsIncident'
-        $textReportPath=$paths.TextPath; $markdownReportPath=$paths.MarkdownPath
-        [System.IO.File]::WriteAllLines($textReportPath, $textLines, [System.Text.Encoding]::UTF8)
-        if ($ExportMarkdown) {
-            $fence=Get-WdtMarkdownFence -ContentLines $textLines
-            $markdownLines=@('# Incident Investigation','',($fence+'text'))+$textLines+@($fence)
-            [System.IO.File]::WriteAllLines($markdownReportPath, $markdownLines, [System.Text.Encoding]::UTF8)
-        }
-    } catch { throw 'Could not write WDT incident report.' }
-    Write-Host ('TXT incident written: {0}' -f (Protect-WdtDataString $textReportPath $context))
-    if ($ExportMarkdown) { Write-Host ('Markdown incident written: {0}' -f (Protect-WdtDataString $markdownReportPath $context)) }
-    if ($incident.ExitCode -ne 0) { Write-Warning 'Incident collection had an execution or machine-data protocol failure. Review source coverage and limitations.' }
-    return [pscustomobject]@{ExitCode=$incident.ExitCode;TextReportPath=$textReportPath;MarkdownReportPath=$(if ($ExportMarkdown) { $markdownReportPath } else { $null });Incident=$incident}
+    $files = Write-WdtInvestigationFiles -Directory $resolvedOutputDirectory -Prefix 'WindowsDiagnosticsIncident' -Title 'Incident Investigation' -TextLines $textLines -ExportMarkdown $ExportMarkdown -Context $context
+    if (-not $SuppressConsoleOutput) {
+        Write-Host ('TXT incident written: {0}' -f $files.DisplayTextReportPath)
+        if ($ExportMarkdown) { Write-Host ('Markdown incident written: {0}' -f $files.DisplayMarkdownReportPath) }
+        if ($incident.ExitCode -ne 0) { Write-Warning 'Incident collection had an execution or machine-data protocol failure. Review source coverage and limitations.' }
+    }
+    $completeness = 'Complete'
+    if (@($results | Where-Object { $_.DataStatus -in @('Available', 'Partial') }).Count -eq 0) {
+        $completeness = 'Unavailable'
+    }
+    elseif (@($results | Where-Object { $_.Completeness -ne 'Complete' -or $_.DataStatus -ne 'Available' }).Count -gt 0) {
+        $completeness = 'Partial'
+    }
+    return [pscustomobject]@{
+        ExitCode = $incident.ExitCode
+        Incident = $incident
+        Completeness = $completeness
+        ElapsedTime = (Get-Date) - $startedAt
+        TextReportPath = $files.TextReportPath
+        MarkdownReportPath = $files.MarkdownReportPath
+        DisplayTextReportPath = $files.DisplayTextReportPath
+        DisplayMarkdownReportPath = $files.DisplayMarkdownReportPath
+    }
+}
+
+if ($RecordPerformance -or $PSBoundParameters.ContainsKey('RecordingSeconds')) {
+    if (-not $RecordPerformance) { throw 'RecordingSeconds requires RecordPerformance.' }
+    $recordingAllowed = @('RecordPerformance','RecordingSeconds','OutputDirectory','ExportMarkdown','PrivacyMode','Verbose','Debug','ErrorAction','WarningAction','InformationAction','ErrorVariable','WarningVariable','InformationVariable','OutVariable','OutBuffer','PipelineVariable')
+    foreach ($parameterName in $PSBoundParameters.Keys) {
+        if ($parameterName -notin $recordingAllowed) { throw 'Performance recording runs separately from module selection, incident, snapshot and network options.' }
+    }
+    $recordingResult = Invoke-WdtRecordingReport -DurationSeconds $RecordingSeconds -OutputDirectory $OutputDirectory -PrivacyMode ([bool]$PrivacyMode) -ExportMarkdown ([bool]$ExportMarkdown) -InteractiveMarker:(![System.Console]::IsInputRedirected)
+    if ($recordingResult.ExitCode -ne 0) { exit $recordingResult.ExitCode }
+    return
 }
 
 $hasIncidentRequest=@('IncidentSymptom','IncidentAt','IncidentBeforeMinutes','IncidentAfterMinutes' | Where-Object { $PSBoundParameters.ContainsKey($_) }).Count -gt 0
@@ -609,12 +704,23 @@ if ($missingLegacyIds.Count -gt 0) {
 $moduleIds = if ($PSBoundParameters.ContainsKey('Module')) { @($Module) } else { @() }
 $hasLegacySelection = @($legacySelections.GetEnumerator() | Where-Object { [bool]$_.Value }).Count -gt 0
 $hasExplicitSelection = $moduleIds.Count -gt 0 -or $hasLegacySelection
+if ($PSBoundParameters.ContainsKey('NetworkWebServiceUrl')) {
+    if ($SaveSnapshot) { throw 'A targeted web service check cannot be combined with SaveSnapshot.' }
+    if (-not $All -and -not $hasExplicitSelection) {
+        $moduleIds = @($registrySnapshot.Modules | Where-Object { $_.OptionBindings.ContainsKey('NetworkWebServiceUrl') } | ForEach-Object { $_.Id })
+        $hasExplicitSelection = $true
+    }
+}
 if ($SaveSnapshot -and ($All -or $Interactive -or -not $hasExplicitSelection)) { throw 'SaveSnapshot requires an explicit supported module selection and cannot be combined with All or Interactive.' }
 $selectedDefinitions = @(Resolve-WdtModuleSelection `
         -Registry $registrySnapshot `
         -ModuleIds $moduleIds `
         -LegacySelections $legacySelections `
         -AllRequested:([bool]$All))
+if ($PSBoundParameters.ContainsKey('NetworkWebServiceUrl') -and
+    @($selectedDefinitions | Where-Object { $_.OptionBindings.ContainsKey('NetworkWebServiceUrl') }).Count -eq 0) {
+    throw 'A targeted web service check requires the Network module.'
+}
 if ($SaveSnapshot) { Assert-WdtSnapshotModules @($selectedDefinitions | ForEach-Object { [string]$_.Id }) }
 
 $launchMode = Get-WdtLaunchMode `
@@ -651,7 +757,8 @@ if ($launchMode -eq 'Interactive') {
         -NoExternalNetworkTests ([bool]$NoExternalNetworkTests) `
         -NetworkDnsTestName $NetworkDnsTestName `
         -NetworkHttpsEndpoint $NetworkHttpsEndpoint `
-        -NetworkIcmpTarget $NetworkIcmpTarget
+        -NetworkIcmpTarget $NetworkIcmpTarget `
+        -NetworkWebServiceUrl $NetworkWebServiceUrl
     if ($interactiveExitCode -ne 0) {
         exit $interactiveExitCode
     }

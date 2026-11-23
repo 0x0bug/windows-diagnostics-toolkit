@@ -5,7 +5,8 @@ param(
     [Alias('InternetTestHost')]
     [string]$IcmpTarget = '1.1.1.1',
     [switch]$NoExternalNetworkTests,
-    [int]$TimeoutSeconds = 3
+    [int]$TimeoutSeconds = 3,
+    [string]$WebServiceUrl
 )
 
 $ErrorActionPreference = 'Stop'
@@ -480,6 +481,216 @@ function Test-TcpEndpointConnection {
     finally { $client.Dispose() }
 }
 
+function Read-WdtWebServiceHttpStatus {
+    param([System.IO.Stream]$Stream, [uri]$Uri, [int]$TimeoutMilliseconds)
+
+    $httpClock = [System.Diagnostics.Stopwatch]::StartNew()
+    $authority = if ($Uri.HostNameType -eq 'IPv6') { $Uri.Host } else { $Uri.IdnHost }
+    if (-not $Uri.IsDefaultPort) { $authority = '{0}:{1}' -f $authority, $Uri.Port }
+    $requestText = "GET {0} HTTP/1.1`r`nHost: {1}`r`nConnection: close`r`n`r`n" -f $Uri.PathAndQuery, $authority
+    $requestBytes = [System.Text.Encoding]::ASCII.GetBytes($requestText)
+    try {
+        $writeTask = $Stream.WriteAsync($requestBytes, 0, $requestBytes.Length)
+        if (-not $writeTask.Wait($TimeoutMilliseconds)) { return 'TimedOut' }
+
+        # Read only as far as the final headers. A shared deadline and byte cap
+        # bound partial headers, slow responses and repeated interim 1xx responses.
+        $headerLimit = 16384
+        $responseBuffer = [byte[]]::new(1024)
+        $received = 0
+        $responseText = ''
+        while ($received -lt $headerLimit) {
+            $remaining = $TimeoutMilliseconds - $httpClock.ElapsedMilliseconds
+            if ($remaining -le 0) { return 'TimedOut' }
+
+            $readSize = [Math]::Min($responseBuffer.Length, $headerLimit - $received)
+            $readTask = $Stream.ReadAsync($responseBuffer, 0, $readSize)
+            if (-not $readTask.Wait([int]$remaining)) { return 'TimedOut' }
+            $readCount = $readTask.Result
+            if ($readCount -eq 0) { return 'InvalidResponse' }
+
+            $received += $readCount
+            $responseText += [System.Text.Encoding]::ASCII.GetString($responseBuffer, 0, $readCount)
+            $headerEnd = $responseText.IndexOf("`r`n`r`n", [System.StringComparison]::Ordinal)
+            while ($headerEnd -ge 0) {
+                $headers = $responseText.Substring(0, $headerEnd)
+                if ($headers -cnotmatch '^HTTP/1\.[01] ([1-5][0-9]{2})(?: [^\r\n]*)?(?:\r\n|$)') { return 'InvalidResponse' }
+
+                $status = [int]$Matches[1]
+                if ($status -ge 200 -or $status -eq 101) { return $status }
+
+                $responseText = $responseText.Substring($headerEnd + 4)
+                $headerEnd = $responseText.IndexOf("`r`n`r`n", [System.StringComparison]::Ordinal)
+            }
+        }
+
+        return 'HeadersTooLarge'
+    }
+    catch {
+        return 'TransportFailed'
+    }
+}
+
+function Test-WdtWebService {
+    param([uri]$Uri, [int]$Timeout)
+
+    $timeoutMilliseconds = [int][Math]::Min(1000L * $Timeout, [int]::MaxValue)
+    $hostName = $Uri.IdnHost
+    $result = [pscustomobject]@{
+        Dns  = 'NotTested'
+        Tcp  = 'NotTested'
+        Tls  = if ($Uri.Scheme -eq 'https') { 'NotTested' } else { 'NotApplicable (HTTP)' }
+        Http = 'NotTested'
+    }
+
+    $literalAddress = $null
+    if ($Uri.HostNameType -in @('IPv4', 'IPv6')) {
+        if (-not [System.Net.IPAddress]::TryParse($hostName, [ref]$literalAddress)) {
+            $result.Dns = 'Failed (the IP literal could not be used)'
+            return $result
+        }
+        $addresses = @($literalAddress)
+        $result.Dns = 'NotApplicable (IP literal)'
+    }
+    else {
+        try {
+            $dnsTask = [System.Net.Dns]::GetHostAddressesAsync($hostName)
+            if (-not $dnsTask.Wait($timeoutMilliseconds)) {
+                $result.Dns = 'TimedOut'
+                return $result
+            }
+            $addresses = @($dnsTask.Result)
+            if ($addresses.Count -eq 0) {
+                $result.Dns = 'Failed (no addresses returned)'
+                return $result
+            }
+            $result.Dns = 'Resolved: {0}' -f ($addresses -join ', ')
+        }
+        catch {
+            $result.Dns = 'Failed (system resolver could not resolve the host)'
+            return $result
+        }
+    }
+
+    $tcpClock = [System.Diagnostics.Stopwatch]::StartNew()
+    $client = $null
+    $result.Tcp = 'Unreachable (no resolved address accepted the connection)'
+    foreach ($address in $addresses) {
+        $remaining = $timeoutMilliseconds - $tcpClock.ElapsedMilliseconds
+        if ($remaining -le 0) {
+            $result.Tcp = 'TimedOut'
+            break
+        }
+
+        $candidate = $null
+        try {
+            $candidate = [System.Net.Sockets.TcpClient]::new($address.AddressFamily)
+            $connectTask = $candidate.ConnectAsync($address, $Uri.Port)
+            if (-not $connectTask.Wait([int]$remaining)) {
+                $result.Tcp = 'TimedOut'
+                break
+            }
+            $client = $candidate
+            $candidate = $null
+            $result.Tcp = 'Connected to {0}' -f $address
+            break
+        }
+        catch {
+            # Try the next address within the same connection deadline.
+        }
+        finally {
+            if ($null -ne $candidate) { $candidate.Dispose() }
+        }
+    }
+    if ($null -eq $client) { return $result }
+
+    $tlsStream = $null
+    try {
+        $stream = $client.GetStream()
+        if ($Uri.Scheme -eq 'https') {
+            $result.Tls = 'Failed (handshake or certificate validation)'
+            $tlsStream = [System.Net.Security.SslStream]::new($stream)
+            $tlsHost = if ($Uri.HostNameType -eq 'IPv6') { $Uri.Host.Trim([char[]]'[]') } else { $hostName }
+            # The runtime validates the certificate chain and the URL host. No
+            # callback overrides trust and the probe does not request revocation checks.
+            $tlsTask = $tlsStream.AuthenticateAsClientAsync($tlsHost, $null, [System.Security.Authentication.SslProtocols]::None, $false)
+            if (-not $tlsTask.Wait($timeoutMilliseconds)) {
+                $result.Tls = 'TimedOut'
+                return $result
+            }
+            $result.Tls = 'Established (certificate validated)'
+            $stream = $tlsStream
+        }
+        $result.Http = Read-WdtWebServiceHttpStatus -Stream $stream -Uri $Uri -TimeoutMilliseconds $timeoutMilliseconds
+    }
+    catch {
+        if ($result.Tls -ne 'Failed (handshake or certificate validation)') { $result.Http = 'TransportFailed' }
+    }
+    finally {
+        if ($null -ne $tlsStream) { $tlsStream.Dispose() }
+        $client.Dispose()
+    }
+
+    return $result
+}
+
+function Write-WdtWebServiceProbe {
+    param([AllowEmptyString()][string]$Value, [int]$Timeout, [switch]$Disabled)
+
+    Write-Section 'Web Service Probe'
+    if ($Disabled) {
+        Write-Host 'Web service tests: NotTested (-NoExternalNetworkTests)'
+        return
+    }
+
+    $uri = ConvertTo-WdtWebServiceUri -Value $Value
+    if ($null -eq $uri) {
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_WEB_SERVICE_INVALID_TARGET' -Message 'The web service target must be an absolute HTTP or HTTPS URL without credentials or a fragment.'
+        return
+    }
+    if ($Timeout -le 0) {
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_WEB_SERVICE_INVALID_TIMEOUT' -Message 'The web service probe requires a positive timeout.'
+        return
+    }
+
+    $result = Test-WdtWebService -Uri $uri -Timeout $Timeout
+    $httpText = switch ($result.Http) {
+        401 { 'HTTP 401 Unauthorized'; break }
+        403 { 'HTTP 403 Forbidden'; break }
+        503 { 'HTTP 503 Service Unavailable'; break }
+        { $_ -is [int] -and $_ -ge 300 -and $_ -lt 400 } {
+            'HTTP {0} (redirection response; no follow-up request)' -f $_
+            break
+        }
+        { $_ -is [int] } { 'HTTP {0}' -f $_; break }
+        default { [string]$_ }
+    }
+    $displayHost = if ($uri.HostNameType -eq 'IPv6') { $uri.Host } else { $uri.IdnHost }
+    Write-Host ('Host      : {0}' -f $displayHost)
+    Write-Host ('Port      : {0}' -f $uri.Port)
+    Write-Host ('Protocol  : {0}' -f $uri.Scheme)
+    Write-Host ('DNS       : {0}' -f $result.Dns)
+    Write-Host ('TCP       : {0}' -f $result.Tcp)
+    Write-Host ('TLS       : {0}' -f $result.Tls)
+    Write-Host ('HTTP      : {0}' -f $httpText)
+
+    if ($result.Dns -match '^(Failed|TimedOut)') {
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_WEB_SERVICE_DNS_FAILED' -Message 'Name resolution for the web service did not complete successfully.' -Evidence $result.Dns
+    }
+    elseif ($result.Tcp -match '^(Unreachable|TimedOut)') {
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_WEB_SERVICE_TCP_FAILED' -Message 'A TCP connection to the web service could not be established.' -Evidence $result.Tcp
+    }
+    elseif ($result.Tls -match '^(Failed|TimedOut)') {
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_WEB_SERVICE_TLS_FAILED' -Message 'A validated TLS connection to the web service could not be established.' -Evidence $result.Tls
+    }
+    elseif ($result.Http -isnot [int]) {
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_WEB_SERVICE_HTTP_FAILED' -Message 'The web service did not return a complete HTTP status in the probe.' -Evidence $httpText
+    }
+    elseif ($result.Http -ge 400 -or $result.Http -eq 101) {
+        Write-WdtFinding -Severity WARN -Code 'NETWORK_WEB_SERVICE_HTTP_STATUS' -Message 'The web service responded with an HTTP status that requires attention.' -Evidence $httpText
+    }
+}
+
 function Get-NetworkReachabilityClassification {
     param(
         [bool]$HasAdapter,
@@ -611,8 +822,12 @@ Write-Section 'External Network Tests'
 $dnsResult = 'NotTested'
 $tcpResult = 'NotTested'
 $icmpResult = 'NotTested'
+$hasWebServiceTarget = $PSBoundParameters.ContainsKey('WebServiceUrl')
 if ($NoExternalNetworkTests) {
     Write-Host 'External tests: NotTested (-NoExternalNetworkTests)'
+}
+elseif ($hasWebServiceTarget) {
+    Write-Host 'External tests: NotTested (web service target selected)'
 }
 else {
     $dnsResult = Test-DnsResolution -Name $DnsTestName
@@ -636,8 +851,12 @@ else {
 }
 Write-Host ('Default route state: {0}' -f $defaultRouteState)
 $adapterInventoryState = if (-not $adapterResult.Available) { 'Unavailable' } elseif (-not $adapterResult.Complete) { 'Partial' } else { 'Available' }
-$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -DefaultRouteState $defaultRouteState -DnsStatus $dnsResult -TcpStatus $tcpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests) -AdapterInventoryState $adapterInventoryState
+$classification = Get-NetworkReachabilityClassification -HasAdapter ($adapterConfigurations.Count -gt 0) -DefaultRouteState $defaultRouteState -DnsStatus $dnsResult -TcpStatus $tcpResult -ExternalTestsEnabled (-not $NoExternalNetworkTests -and -not $hasWebServiceTarget) -AdapterInventoryState $adapterInventoryState
 Write-Host ('Overall reachability: {0}' -f $classification)
 if ($classification -eq 'Unreachable') {
     Write-WdtFinding -Severity WARN -Code 'NETWORK_CONNECTIVITY_UNREACHABLE' -Message 'Multiple independent network signals indicate connectivity is unavailable.' -Evidence ("Adapter={0}; AdapterInventory={1}; DefaultRoute={2}; DNS={3}; TCP={4}; ICMP={5}" -f ($adapterConfigurations.Count -gt 0), $adapterInventoryState, $defaultRouteState, $dnsResult, $tcpResult, $icmpResult)
+}
+
+if ($hasWebServiceTarget) {
+    Write-WdtWebServiceProbe -Value $WebServiceUrl -Timeout $TimeoutSeconds -Disabled:$NoExternalNetworkTests
 }

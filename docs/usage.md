@@ -111,6 +111,13 @@ ordinary CLI, TUI, standalone launchers and pinned beta bootstrap retain their
 behavior. Snapshots, offline comparison, and incident reports are included in
 `v0.2.0-beta.1` and later; earlier release packages are unchanged.
 
+In the terminal menu, choose **Investigate an incident**, select the symptom,
+and enter the approximate local time as `yyyy-MM-dd HH:mm`. The menu uses
+the PC's time zone for that date and a 30-minute window on either side.
+For a repeated or skipped local time at a daylight-saving transition, use
+an explicit ISO 8601 instant with seconds and an offset or `Z`. The report
+uses the same evidence rules and output settings as the CLI.
+
 The command writes `WindowsDiagnosticsIncident-<timestamp>-<GUID>.txt` and, with
 `-ExportMarkdown`, matching Markdown. It creates no incident JSON. Privacy is
 applied in memory before artifact writes; identity tokens share one scope across
@@ -149,6 +156,33 @@ failure. Retention remains unknown, including successful queries. Recognized
 signals do not change the process exit code; execution or missing/damaged
 requested machine data does. Valid unavailable sources remain explicit without
 being treated as a failed process or a healthy system.
+
+## Performance recording
+
+Choose **Record performance** in the terminal menu, or run this command from a
+source checkout containing the feature:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -RecordPerformance -RecordingSeconds 90 -PrivacyMode -ExportMarkdown
+```
+
+Use this mode while reproducing a slowdown. The CLI accepts 60 to 120 seconds
+(default 60). In an interactive console press **M** when the symptom occurs.
+The report includes the full timestamped series, peaks for the recording, and
+a separate summary for the ten seconds on either side of the marker. The key
+is timestamped when the collector reads it; a stalled system can delay input.
+
+WDT samples Windows CPU load, available physical memory, disk transfer latency,
+and the most active processes at a target interval of two seconds. Process CPU
+usage derives from two readings of the same process instance; 100% represents
+one logical processor. Disk latency needs two samples with completed transfers.
+A slow provider can leave gaps or finish its last query after the requested duration. Coverage and timestamps show which observations
+were available. A partial recording can contain useful evidence.
+
+TXT and optional Markdown use the `WindowsDiagnosticsRecording-` prefix.
+Privacy Mode replaces process identifiers in these reports. Inline recording
+is a separate command from module collection, incident investigation and snapshot
+comparison. The existing Performance snapshot and `-All` remain quick checks.
 
 ## Requirements
 
@@ -209,6 +243,7 @@ The initial state enables the recommended diagnostics, Privacy Mode, and Markdow
 - toggle Privacy Mode;
 - toggle Markdown report generation;
 - change the output directory;
+- set a target URL for Network, record 60, 90 or 120 seconds of performance, or investigate a past incident;
 - run diagnostics;
 - return to the menu after collection.
 
@@ -218,10 +253,10 @@ The initial state enables the recommended diagnostics, Privacy Mode, and Markdow
 | --- | --- |
 | `Up` / `Down` | Move through menu items |
 | `Space` | Toggle the highlighted module or option |
-| `Enter` | Activate `RUN DIAGNOSTICS`, output directory, or exit |
+| `Enter` | Open or activate the highlighted entry |
 | `A` | Select all diagnostic modules |
 | `R` | Restore the recommended module selection |
-| `Esc` | Exit the TUI |
+| `Esc` | Return from a submenu, or exit from the main menu |
 
 The current selection and cursor position are preserved when the terminal is resized.
 
@@ -390,6 +425,12 @@ Internal finding protocol markers are removed before TXT and Markdown reports ar
 ### System Information
 
 Collects operating system, CPU, memory, GPU, uptime, and system-drive information.
+The Graphics Adapters section distinguishes devices Windows reports present,
+previously enumerated devices reported absent, and unknown presence. It joins
+driver provider, version and problem code to the matching device instance
+when available. A nonzero problem code on a present adapter produces a warning.
+An empty or incomplete inventory cannot establish which hardware was sold
+with the PC. Device instance IDs are used in memory to join records.
 
 ```powershell
 .\Invoke-WindowsDiagnostics.ps1 -System
@@ -446,6 +487,30 @@ cover IPv4 and IPv6 when available. The CIM route fallback covers IPv4. When
 that fallback finds no default route, the overall route state is `Partial`.
 
 The module only uses the read-only `netsh.exe winhttp show proxy` form.
+
+### Targeted web service
+
+In the terminal menu set **Network service URL** and run the Network check.
+From the CLI, a URL alone selects Network. It can also accompany a selection
+that includes Network:
+
+```powershell
+.\Invoke-WindowsDiagnostics.ps1 -NetworkWebServiceUrl 'https://intranet.example/health' -PrivacyMode
+.\scripts\network-check.ps1 -WebServiceUrl 'http://localhost:8080/health'
+```
+
+For this run the supplied target replaces the usual external probes. The report
+shows resolution, TCP, TLS (HTTPS only), and the HTTP/1.1 status in order. IP
+literals skip name resolution. A response such as 401 or 503 confirms that an
+HTTP service replied. Errors at an earlier stage leave later stages untested.
+The probe connects directly and does not use the configured browser proxy,
+follow redirects or supply authentication. HTTPS checks the platform trust chain
+and hostname; revocation is not requested.
+
+The target receives a GET with the supplied path and query. Use a read-only URL;
+keep secrets out of command lines. URLs with embedded credentials or fragments
+are rejected. The report omits path, query, response headers and body.
+`-NoExternalNetworkTests` disables the service check as well.
 
 ### Time Sync Diagnostics
 

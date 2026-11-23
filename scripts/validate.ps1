@@ -201,6 +201,8 @@ function Get-GeneratedFileIssue {
             $item.Name -like 'WindowsDiagnosticsComparison-*.md' -or
             $item.Name -like 'WindowsDiagnosticsIncident-*.txt' -or
             $item.Name -like 'WindowsDiagnosticsIncident-*.md' -or
+            $item.Name -like 'WindowsDiagnosticsRecording-*.txt' -or
+            $item.Name -like 'WindowsDiagnosticsRecording-*.md' -or
             $item.Name -like '*.log' -or
             $item.Name -like '*.tmp' -or
             $item.Name -like '*.bak'

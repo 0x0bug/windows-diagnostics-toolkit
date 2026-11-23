@@ -13,5 +13,6 @@
         NetworkDnsTestName     = 'DnsTestName'
         NetworkHttpsEndpoint   = 'HttpsEndpoint'
         NetworkIcmpTarget      = 'IcmpTarget'
+        NetworkWebServiceUrl   = 'WebServiceUrl'
     }
 }

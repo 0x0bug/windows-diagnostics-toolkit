@@ -25,6 +25,8 @@ WindowsDiagnosticsComparison-*.txt
 WindowsDiagnosticsComparison-*.md
 WindowsDiagnosticsIncident-*.txt
 WindowsDiagnosticsIncident-*.md
+WindowsDiagnosticsRecording-*.txt
+WindowsDiagnosticsRecording-*.md
 
 # Test and coverage output
 coverage/

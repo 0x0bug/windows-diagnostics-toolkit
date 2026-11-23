@@ -68,6 +68,9 @@ Assert-Denied '. $PSScriptRoot\..\..\scripts\process-runner.ps1; Invoke-Diagnost
 Assert-Denied '. $PSScriptRoot\..\..\scripts\process-runner.ps1; Stop-WdtProcessTree -RootProcess $other' '*exact reviewed w32tm query*' 'modules\time\diagnostic.ps1'
 Assert-Allowed '. $PSScriptRoot\scripts\tui.ps1' 'Invoke-WindowsDiagnostics.ps1'
 Assert-Allowed '. $PSScriptRoot\scripts\incident.ps1' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Allowed '. $PSScriptRoot\scripts\performance-recording.ps1' 'Invoke-WindowsDiagnostics.ps1'
+Assert-Allowed '. $PSScriptRoot\report-common.ps1' 'scripts\performance-recording.ps1'
+Assert-Denied '. $PSScriptRoot\performance-recording.ps1' '*approved repository helper*' 'scripts\fixture.ps1'
 Assert-Allowed '. $PSScriptRoot\snapshot.ps1' 'scripts\incident.ps1'
 Assert-Allowed '. $PSScriptRoot\diagnostic-data.ps1' 'scripts\incident.ps1'
 Assert-Allowed '. $PSScriptRoot\report-common.ps1' 'scripts\incident.ps1'
@@ -168,6 +171,22 @@ foreach ($probeMethod in @('$probeStream.WriteByte(0)', '$probeStream.Flush()', 
 Assert-Allowed 'function Wait-WdtTuiEvent { [System.Console]::ReadKey($true) }' 'scripts\tui.ps1'
 Assert-Allowed 'function Wait-WdtTuiEvent { [System.Console]::KeyAvailable }' 'scripts\tui.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { Read-Host ''Output directory'' }' 'scripts\tui.ps1'
+Assert-Allowed 'function Read-WdtTuiField { [System.Console]::CursorVisible = $true; Read-Host $Prompt; [System.Console]::CursorVisible = $false }' 'scripts\tui.ps1'
+Assert-Denied 'function Read-WdtTuiField { Read-Host $Prompt > output.txt }' '*Read-Host is only allowed*' 'scripts\tui.ps1'
+Assert-Denied 'function Read-WdtTuiField { Read-Host $Other }' '*Read-Host is only allowed*' 'scripts\tui.ps1'
+Assert-Denied 'function Read-WdtTuiField { [System.Console]::CursorVisible = $Other }' '*cursor visibility is only allowed*' 'scripts\tui.ps1'
+Assert-Allowed 'function Invoke-WdtInteractiveSession { Resolve-WdtIncidentWindow -Symptom $state.ActionValue -At $timestamp }' 'scripts\tui.ps1'
+Assert-Denied 'function Invoke-WdtInteractiveSession { Resolve-WdtIncidentWindow -Symptom $other -At $timestamp }' '*incident window is only resolved*' 'scripts\tui.ps1'
+foreach ($timeForm in @(
+    '[datetime]::TryParseExact($Text, $format, $culture, [System.Globalization.DateTimeStyles]::None, [ref]$localTime)',
+    '$TimeZone.IsInvalidTime($localTime)',
+    '$TimeZone.IsAmbiguousTime($localTime)',
+    '$TimeZone.GetUtcOffset($localTime)',
+    '[datetimeoffset]::new($localTime, $TimeZone.GetUtcOffset($localTime))'
+)) {
+    Assert-Allowed ('function ConvertTo-WdtTuiIncidentTimestamp { ' + $timeForm + ' }') 'scripts\tui.ps1'
+    Assert-Denied ('function Other { ' + $timeForm + ' }') '*safe allowlist*' 'scripts\tui.ps1'
+}
 Assert-Allowed 'function Show-WdtTuiFrame { Clear-Host; [System.Console]::SetCursorPosition($column, $row) }' 'scripts\tui.ps1'
 Assert-Allowed 'function Complete-WdtTuiConsoleFrame { [System.Console]::SetCursorPosition(0, $anchorRow) }' 'scripts\tui.ps1'
 Assert-Allowed 'function Invoke-WdtInteractiveSession { $old = [System.Console]::CursorVisible; [System.Console]::CursorVisible = $false; [System.Console]::CursorVisible = $old }' 'scripts\tui.ps1'
@@ -284,6 +303,19 @@ Assert-Denied 'function Other { [System.Console]::ReadKey($true) }' '*Static met
 Assert-Denied 'function Wait-WdtTuiEvent { [System.Console]::ReadKey($false) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
 Assert-Denied 'function Wait-WdtTuiEvent { [System.Console]::ReadKey() }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
 Assert-Denied 'function Other { [System.Console]::KeyAvailable }' '*key availability is only allowed*' 'scripts\tui.ps1'
+Assert-Allowed 'function Get-WdtPerformanceMarkerKey { if ([System.Console]::KeyAvailable) { [System.Console]::ReadKey($true) } }' 'scripts\performance-recording.ps1'
+Assert-Denied 'function Other { [System.Console]::KeyAvailable }' '*key availability is only allowed*' 'scripts\performance-recording.ps1'
+Assert-Denied 'function Other { [System.Console]::ReadKey($true) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\performance-recording.ps1'
+Assert-Denied 'function Get-WdtPerformanceMarkerKey { [System.Console]::ReadKey($false) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\performance-recording.ps1'
+Assert-Allowed 'function Invoke-WdtPerformanceRecording { [System.Diagnostics.Stopwatch]::StartNew() }' 'scripts\performance-recording.ps1'
+Assert-Denied 'function Other { [System.Diagnostics.Stopwatch]::StartNew() }' '*Static method is not in the reviewed safe allowlist*' 'scripts\performance-recording.ps1'
+Assert-Allowed 'function Get-WdtPerformanceProcessSnapshot { $process.Dispose() }' 'scripts\performance-recording.ps1'
+Assert-Denied 'function Get-WdtPerformanceProcessSnapshot { $other.Dispose() }' '*Instance method is not in the reviewed safe allowlist*' 'scripts\performance-recording.ps1'
+foreach ($command in @('Invoke-WdtRecordingReport', 'Invoke-WdtIncident')) {
+    Assert-Allowed ('function Invoke-WdtInteractiveSession {{ {0} @reportParameters }}' -f $command) 'scripts\tui.ps1'
+    Assert-Denied ('function Other {{ {0} @reportParameters }}' -f $command) '*only callable from the approved interactive session*' 'scripts\tui.ps1'
+    Assert-Denied ('function Invoke-WdtInteractiveSession {{ {0} @otherParameters }}' -f $command) '*only callable from the approved interactive session*' 'scripts\tui.ps1'
+}
 Assert-Denied 'function Other { [System.Console]::SetCursorPosition(0, 0) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
 Assert-Denied 'function Show-WdtTuiFrame { [System.Console]::SetCursorPosition(0, $row) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'
 Assert-Denied 'function Show-WdtTuiFrame { [System.Console]::SetCursorPosition($row, $column) }' '*Static method is not in the reviewed safe allowlist*' 'scripts\tui.ps1'

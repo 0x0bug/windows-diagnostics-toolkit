@@ -29,7 +29,7 @@ $tokens=$null; $errors=$null
 $ast = [Management.Automation.Language.Parser]::ParseFile($entrypoint,[ref]$tokens,[ref]$errors)
 Assert-Equal 0 @($errors).Count 'Entrypoint parser errors were found.'
 $parameterNames = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath }) -join ','
-$expectedParameterNames = 'All,System,Security,Performance,Network,Time,Disk,Crashes,Events,Services,Updates,OutputDirectory,ExportMarkdown,PrivacyMode,Interactive,ModuleTimeoutSeconds,NoExternalNetworkTests,NetworkDnsTestName,NetworkHttpsEndpoint,NetworkIcmpTarget,Module,SaveSnapshot,BeforeSnapshot,AfterSnapshot,IncidentSymptom,IncidentAt,IncidentBeforeMinutes,IncidentAfterMinutes'
+$expectedParameterNames = 'All,System,Security,Performance,Network,Time,Disk,Crashes,Events,Services,Updates,OutputDirectory,ExportMarkdown,PrivacyMode,Interactive,ModuleTimeoutSeconds,NoExternalNetworkTests,NetworkDnsTestName,NetworkHttpsEndpoint,NetworkIcmpTarget,Module,SaveSnapshot,BeforeSnapshot,AfterSnapshot,IncidentSymptom,IncidentAt,IncidentBeforeMinutes,IncidentAfterMinutes,RecordPerformance,RecordingSeconds,NetworkWebServiceUrl'
 Assert-Equal $expectedParameterNames $parameterNames 'Public parameter order changed; existing implicit positional bindings must remain stable.'
 foreach ($definition in @($ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true))) { . ([scriptblock]::Create($definition.Extent.Text)) }
 $registrySnapshot = Get-WdtModuleRegistry -ModuleRoot (Join-Path $repositoryRoot 'modules')

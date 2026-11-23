@@ -17,6 +17,29 @@ function Get-WdtFindingPrefix {
     return $script:WdtFindingPrefix + $FindingNonce + ':'
 }
 
+function ConvertTo-WdtWebServiceUri {
+    param([AllowEmptyString()][string]$Value)
+
+    # Require an explicit HTTP(S) authority without user information. Reject
+    # fragments, raw spaces, control characters and backslashes before parsing.
+    if ($Value -notmatch '^https?://[^/@?#]+(?:[/?]|$)' -or $Value -match '[\x00-\x20\x7f#\\]') {
+        return $null
+    }
+
+    $uri = $null
+    if (-not [System.Uri]::TryCreate($Value, [System.UriKind]::Absolute, [ref]$uri) -or
+        $uri.HostNameType -notin @('Dns', 'IPv4', 'IPv6') -or $uri.Port -le 0 -or $uri.UserInfo.Length -ne 0) {
+        return $null
+    }
+
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($uri.IdnHost)) { return $uri }
+    }
+    catch [System.UriFormatException] {
+        return $null
+    }
+}
+
 function Protect-WdtSensitiveUrlText {
     param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Text)
 
