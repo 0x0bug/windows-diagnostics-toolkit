@@ -48,6 +48,10 @@ $fixtureServer = {
                 $stream.AuthenticateAsServer($Certificate, $false, [System.Security.Authentication.SslProtocols]::None, $false)
             }
             catch [System.Management.Automation.MethodInvocationException] {
+                $cause = $_.Exception.GetBaseException()
+                if ($cause -is [System.ComponentModel.Win32Exception] -and $cause.NativeErrorCode -eq -2146893042) {
+                    throw 'The TLS fixture could not load its private key in Schannel.'
+                }
                 return
             }
         }
@@ -164,12 +168,20 @@ try {
     $names.AddDnsName('localhost')
     $request.CertificateExtensions.Add($names.Build())
     $certificate = $request.CreateSelfSigned([DateTimeOffset]::UtcNow.AddDays(-1), [DateTimeOffset]::UtcNow.AddDays(1))
+    $serverCertificate = $certificate
     try {
-        $untrusted = Invoke-WebFixture -Response "HTTP/1.1 200 OK`r`n`r`n" -Certificate $certificate
+        if ([System.Environment]::OSVersion.Platform -eq [System.PlatformID]::Win32NT) {
+            # Schannel needs a usable key container. Re-import the PFX with the
+            # default temporary key lifetime without adding a trusted certificate.
+            $pfx = $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Pfx)
+            $serverCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx)
+        }
+        $untrusted = Invoke-WebFixture -Response "HTTP/1.1 200 OK`r`n`r`n" -Certificate $serverCertificate
         Assert-True ($untrusted -match '(?m)^TLS\s+: Failed \(handshake or certificate validation\)$') 'The collector accepted an untrusted server certificate.'
         Assert-True ($untrusted -match '(?m)^HTTP\s+: NotTested$') 'HTTP was incorrectly tested after failed TLS.'
     }
     finally {
+        if (-not [object]::ReferenceEquals($certificate, $serverCertificate)) { $serverCertificate.Dispose() }
         $certificate.Dispose()
     }
 }
