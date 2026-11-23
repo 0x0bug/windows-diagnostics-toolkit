@@ -152,9 +152,13 @@ Assert-True ($slow -match '(?m)^HTTP\s+: TimedOut$') 'The collector did not enfo
 $oversized = Invoke-WebFixture -Response ('HTTP/1.1 200 OK' + "`r`nX-Large: " + ('z' * 17000) + "`r`n`r`n")
 Assert-True ($oversized -match '(?m)^HTTP\s+: HeadersTooLarge$') 'The collector did not cap HTTP response headers.'
 
-$rsa = [System.Security.Cryptography.RSA]::Create()
+$rsa = if ($PSVersionTable.PSEdition -eq 'Desktop') {
+    [System.Security.Cryptography.RSACng]::new(2048)
+}
+else {
+    [System.Security.Cryptography.RSA]::Create(2048)
+}
 try {
-    $rsa.KeySize = 2048
     $request = [System.Security.Cryptography.X509Certificates.CertificateRequest]::new('CN=localhost', $rsa, [System.Security.Cryptography.HashAlgorithmName]::SHA256, [System.Security.Cryptography.RSASignaturePadding]::Pkcs1)
     $names = [System.Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
     $names.AddDnsName('localhost')

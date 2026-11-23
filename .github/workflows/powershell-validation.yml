@@ -25,6 +25,22 @@ jobs:
         shell: powershell
         run: .\scripts\validate.ps1
 
+      - name: Test diagnostic workflows with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          .\tests\performance-recording.tests.ps1
+          .\tests\web-service-probe.tests.ps1
+          .\tests\system-gpu.tests.ps1
+          .\tests\diagnostic-modes.tests.ps1
+
+      - name: Test recordings, web service probes, and display adapters with PowerShell 7
+        shell: pwsh
+        run: |
+          .\tests\performance-recording.tests.ps1
+          .\tests\web-service-probe.tests.ps1
+          .\tests\system-gpu.tests.ps1
+          .\tests\diagnostic-modes.tests.ps1 -RunLiveRecording
+
       - name: Test findings with PowerShell 7
         shell: pwsh
         run: .\tests\report-common.tests.ps1
@@ -88,22 +104,6 @@ jobs:
       - name: Test Performance Snapshot with Windows PowerShell 5.1
         shell: powershell
         run: .\tests\performance-snapshot.tests.ps1
-
-      - name: Test recordings, web service probes, and display adapters with PowerShell 7
-        shell: pwsh
-        run: |
-          .\tests\performance-recording.tests.ps1
-          .\tests\web-service-probe.tests.ps1
-          .\tests\system-gpu.tests.ps1
-          .\tests\diagnostic-modes.tests.ps1 -RunLiveRecording
-
-      - name: Test diagnostic workflows with Windows PowerShell 5.1
-        shell: powershell
-        run: |
-          .\tests\performance-recording.tests.ps1
-          .\tests\web-service-probe.tests.ps1
-          .\tests\system-gpu.tests.ps1
-          .\tests\diagnostic-modes.tests.ps1
 
       - name: Test Crash and Hang Diagnostics with PowerShell 7
         shell: pwsh
