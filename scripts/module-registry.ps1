@@ -98,7 +98,8 @@ function Get-WdtCoreOptionSchema {
         [pscustomobject]@{ Name = 'NoExternalNetworkTests'; Kind = 'Boolean' },
         [pscustomobject]@{ Name = 'NetworkDnsTestName'; Kind = 'String' },
         [pscustomobject]@{ Name = 'NetworkHttpsEndpoint'; Kind = 'String' },
-        [pscustomobject]@{ Name = 'NetworkIcmpTarget'; Kind = 'String' }
+        [pscustomobject]@{ Name = 'NetworkIcmpTarget'; Kind = 'String' },
+        [pscustomobject]@{ Name = 'NetworkWebServiceUrl'; Kind = 'String'; Optional = $true }
     )
 }
 
@@ -732,6 +733,7 @@ function Get-WdtModuleInvocationArguments {
 
         $value = $null
         if (-not (Get-WdtCoreOptionValue -CoreOptions $CoreOptions -Name $source.Name -Value ([ref]$value))) {
+            if ($source.Optional) { continue }
             throw "Core options are missing required source '$($source.Name)' for module '$($Definition.Id)'."
         }
         if ($null -eq $value) {

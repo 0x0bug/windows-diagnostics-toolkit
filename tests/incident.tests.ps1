@@ -240,7 +240,7 @@ foreach ($request in @(
 # privacy before file writes and using the existing dynamic Markdown fence.
 $tokens=$null; $parseErrors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile($entrypoint,[ref]$tokens,[ref]$parseErrors)
-foreach ($name in @('Invoke-WdtIncident','Initialize-WdtOutputDirectory','Get-WdtUniqueReportPaths','Get-WdtMarkdownFence','Get-CurrentPowerShellPath')) {
+foreach ($name in @('Invoke-WdtIncident','Write-WdtInvestigationFiles','Initialize-WdtOutputDirectory','Get-WdtUniqueReportPaths','Get-WdtMarkdownFence','Get-CurrentPowerShellPath')) {
     $definition=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name},$true))[0]
     . ([scriptblock]::Create($definition.Extent.Text))
 }

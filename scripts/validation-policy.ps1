@@ -159,6 +159,8 @@ function Test-WdtAllowedDotSource {
         [pscustomobject]@{ Caller = 'scripts\snapshot.ps1'; Target = 'scripts\diagnostic-data.ps1' },
         [pscustomobject]@{ Caller = 'scripts\snapshot.ps1'; Target = 'scripts\report-common.ps1' },
         [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\incident.ps1' },
+        [pscustomobject]@{ Caller = 'Invoke-WindowsDiagnostics.ps1'; Target = 'scripts\performance-recording.ps1' },
+        [pscustomobject]@{ Caller = 'scripts\performance-recording.ps1'; Target = 'scripts\report-common.ps1' },
         [pscustomobject]@{ Caller = 'scripts\incident.ps1'; Target = 'scripts\snapshot.ps1' },
         [pscustomobject]@{ Caller = 'scripts\incident.ps1'; Target = 'scripts\diagnostic-data.ps1' },
         [pscustomobject]@{ Caller = 'scripts\incident.ps1'; Target = 'scripts\report-common.ps1' }
@@ -728,7 +730,7 @@ function Test-WdtAllowedTuiReportInvocation {
     param($CommandAst, [string]$ScriptPath, [string]$RepositoryRoot)
 
     if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1')) { return $false }
-    if ($CommandAst.GetCommandName() -ine 'Invoke-WdtReport') { return $false }
+    if ($CommandAst.GetCommandName() -notin @('Invoke-WdtReport', 'Invoke-WdtRecordingReport', 'Invoke-WdtIncident')) { return $false }
     if ((Get-WdtEnclosingFunctionName $CommandAst) -cne 'Invoke-WdtInteractiveSession') { return $false }
     if ($CommandAst.Redirections.Count -ne 0 -or $CommandAst.CommandElements.Count -ne 2) { return $false }
 
@@ -779,17 +781,25 @@ function Get-WdtCommandSafetyIssue {
         return New-WdtSafetyIssue $CommandAst 'Import-PowerShellDataFile is only allowed for the exact registry manifest importer form.'
     }
 
-    if ($leaf -eq 'Invoke-WdtReport') {
+    if ($leaf -in @('Invoke-WdtReport', 'Invoke-WdtRecordingReport', 'Invoke-WdtIncident')) {
         if ($leaf -in $LocalFunctionNames) { return }
         if (Test-WdtAllowedTuiReportInvocation $CommandAst $ScriptPath $RepositoryRoot) { return }
         return New-WdtSafetyIssue $CommandAst 'The report runner is only callable from the approved interactive session.'
     }
 
     if ($leaf -eq 'Read-Host') {
-        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
-            (Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-WdtInteractiveSession' -and
-            $CommandAst.Redirections.Count -eq 0) { return }
-        return New-WdtSafetyIssue $CommandAst 'Read-Host is only allowed in Invoke-WdtInteractiveSession without redirection.'
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and $CommandAst.Redirections.Count -eq 0) {
+            $reader = Get-WdtEnclosingFunctionName $CommandAst
+            if ($reader -ceq 'Invoke-WdtInteractiveSession' -or
+                ($reader -ceq 'Read-WdtTuiField' -and (ConvertTo-WdtNormalizedAstText -Ast $CommandAst) -ceq 'Read-Host $Prompt')) { return }
+        }
+        return New-WdtSafetyIssue $CommandAst 'Read-Host is only allowed in reviewed TUI input functions without redirection.'
+    }
+
+    if ($leaf -eq 'Resolve-WdtIncidentWindow' -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1')) {
+        if ((Get-WdtEnclosingFunctionName $CommandAst) -ceq 'Invoke-WdtInteractiveSession' -and
+            (ConvertTo-WdtNormalizedAstText -Ast $CommandAst) -ceq 'Resolve-WdtIncidentWindow -Symptom $state.ActionValue -At $timestamp') { return }
+        return New-WdtSafetyIssue $CommandAst 'The TUI incident window is only resolved from the selected symptom and validated timestamp.'
     }
 
     if ($leaf -eq 'Clear-Host') {
@@ -833,10 +843,60 @@ function Get-WdtCommandSafetyIssue {
     return New-WdtSafetyIssue $CommandAst 'PowerShell command is not in the reviewed read-only allowlist.'
 }
 
+function Test-WdtAllowedWebServiceMember {
+    param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot)
+
+    if (-not (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\network\diagnostic.ps1')) { return $false }
+
+    $form = ConvertTo-WdtNormalizedAstText -Ast $MemberAst
+    switch (Get-WdtEnclosingFunctionName $MemberAst) {
+        'Test-WdtWebService' {
+            return $form -cin @(
+                '[System.Diagnostics.Stopwatch]::StartNew()',
+                '[System.Net.Dns]::GetHostAddressesAsync($hostName)',
+                '$dnsTask.Wait($timeoutMilliseconds)',
+                '[System.Net.Sockets.TcpClient]::new($address.AddressFamily)',
+                '$candidate.ConnectAsync($address, $Uri.Port)',
+                '$connectTask.Wait([int]$remaining)',
+                '$candidate.Dispose()',
+                '$client.GetStream()',
+                '[System.Net.Security.SslStream]::new($stream)',
+                '$tlsStream.AuthenticateAsClientAsync($tlsHost, $null, [System.Security.Authentication.SslProtocols]::None, $false)',
+                '$tlsTask.Wait($timeoutMilliseconds)',
+                '$tlsStream.Dispose()',
+                '$client.Dispose()'
+            )
+        }
+        'Read-WdtWebServiceHttpStatus' {
+            return $form -cin @(
+                '[System.Diagnostics.Stopwatch]::StartNew()',
+                '[System.Text.Encoding]::ASCII.GetBytes($requestText)',
+                '$Stream.WriteAsync($requestBytes, 0, $requestBytes.Length)',
+                '$writeTask.Wait($TimeoutMilliseconds)',
+                '[byte[]]::new(1024)',
+                '$Stream.ReadAsync($responseBuffer, 0, $readSize)',
+                '$readTask.Wait([int]$remaining)',
+                '[System.Text.Encoding]::ASCII.GetString($responseBuffer, 0, $readCount)'
+            )
+        }
+        default { return $false }
+    }
+}
+
 function Get-WdtMemberSafetyIssue {
     param($MemberAst, [string]$ScriptPath, [string]$RepositoryRoot)
     $member = [string]$MemberAst.Member.Value
     $argumentCount = $MemberAst.Arguments.Count
+    if (Test-WdtAllowedWebServiceMember $MemberAst $ScriptPath $RepositoryRoot) { return }
+    if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'ConvertTo-WdtTuiIncidentTimestamp' -and
+        (ConvertTo-WdtNormalizedAstText -Ast $MemberAst) -cin @(
+            '[datetime]::TryParseExact($Text, $format, $culture, [System.Globalization.DateTimeStyles]::None, [ref]$localTime)',
+            '$TimeZone.IsInvalidTime($localTime)',
+            '$TimeZone.IsAmbiguousTime($localTime)',
+            '$TimeZone.GetUtcOffset($localTime)',
+            '[datetimeoffset]::new($localTime, $TimeZone.GetUtcOffset($localTime))'
+        )) { return }
     $isStatic = $MemberAst.Expression -is [System.Management.Automation.Language.TypeExpressionAst]
     if ($isStatic) {
         $typeName = $MemberAst.Expression.TypeName.FullName
@@ -882,10 +942,10 @@ function Get-WdtMemberSafetyIssue {
                 'System.Collections.ObjectModel.ReadOnlyDictionary[string,object]::new'
             )) { return }
         if ($typeName -eq 'System.Console' -and $member -eq 'ReadKey' -and
-            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
-            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Wait-WdtTuiEvent' -and
             $argumentCount -eq 1 -and $MemberAst.Arguments[0].Extent.Text -ceq '$true') {
-            return
+            $keyReader = Get-WdtEnclosingFunctionName $MemberAst
+            if (($keyReader -ceq 'Wait-WdtTuiEvent' -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1')) -or
+                ($keyReader -ceq 'Get-WdtPerformanceMarkerKey' -and (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\performance-recording.ps1'))) { return }
         }
         if ($typeName -eq 'System.Console' -and $member -eq 'SetCursorPosition' -and
             (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\tui.ps1') -and
@@ -925,6 +985,9 @@ function Get-WdtMemberSafetyIssue {
         if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'modules\time\diagnostic.ps1') -and
             $typeName -ceq 'System.Diagnostics.Stopwatch' -and $member -ceq 'StartNew' -and $argumentCount -eq 0 -and
             (Test-WdtAllowedW32tmProcessShape -Ast $MemberAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot)) { return }
+        if ($typeName -ceq 'System.Diagnostics.Stopwatch' -and $member -ceq 'StartNew' -and $argumentCount -eq 0 -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtPerformanceRecording' -and
+            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\performance-recording.ps1')) { return }
         if ((Test-WdtEntrypointPath $ScriptPath $RepositoryRoot) -and
             $typeName -eq 'Security.Principal.WindowsIdentity' -and $member -eq 'GetCurrent' -and
             (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-WdtReport') { return }
@@ -932,6 +995,9 @@ function Get-WdtMemberSafetyIssue {
             if (Test-WdtAllowedParserParseFile -MemberAst $MemberAst -ScriptPath $ScriptPath -RepositoryRoot $RepositoryRoot) { return }
             return New-WdtSafetyIssue $MemberAst 'Parser::ParseFile is only allowed for exact production validation and registry parser forms.'
         }
+        if ((Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\report-common.ps1') -and
+            (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'ConvertTo-WdtWebServiceUri' -and
+            (ConvertTo-WdtNormalizedAstText -Ast $MemberAst) -ceq '[System.Uri]::TryCreate($Value, [System.UriKind]::Absolute, [ref]$uri)') { return }
 
         $safeStaticMethods = @(
             'IO.Path::GetExtension',
@@ -980,6 +1046,9 @@ function Get-WdtMemberSafetyIssue {
     if ((Test-WdtModuleRegistryPath $ScriptPath $RepositoryRoot) -and $member -eq 'AsReadOnly' -and
         $receiver -in @('list', 'moduleList') -and $argumentCount -eq 0) { return }
     if ($member -eq 'Start' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Invoke-DiagnosticScript' -and (Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot)) { return }
+    if ($member -eq 'Dispose' -and $receiver -ceq 'process' -and $argumentCount -eq 0 -and
+        (Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Get-WdtPerformanceProcessSnapshot' -and
+        (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\performance-recording.ps1')) { return }
     if ((Test-WdtProcessRunnerPath $ScriptPath $RepositoryRoot) -and (
             (((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree') -and $member -in @('Kill', 'WaitForExit', 'Dispose')) -or
             ((Get-WdtEnclosingFunctionName $MemberAst) -ceq 'Stop-WdtProcessTree' -and $member -eq 'Stop') -or
@@ -1071,12 +1140,20 @@ function Get-WdtConsolePropertySafetyIssue {
 
     if ($member -eq 'CursorVisible') {
         if ($isTuiScript -and $enclosingFunction -ceq 'Invoke-WdtInteractiveSession') { return }
-        return New-WdtSafetyIssue $MemberAst 'Console cursor visibility is only allowed in Invoke-WdtInteractiveSession.'
+        if ($isTuiScript -and $enclosingFunction -ceq 'Read-WdtTuiField' -and
+            $MemberAst.Parent -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+            (ConvertTo-WdtNormalizedAstText -Ast $MemberAst.Parent) -cin @(
+                '[System.Console]::CursorVisible = $true',
+                '[System.Console]::CursorVisible = $false'
+            )) { return }
+        return New-WdtSafetyIssue $MemberAst 'Console cursor visibility is only allowed in reviewed TUI functions.'
     }
 
     if ($member -eq 'KeyAvailable') {
         if ($isTuiScript -and $enclosingFunction -ceq 'Wait-WdtTuiEvent') { return }
-        return New-WdtSafetyIssue $MemberAst 'Console key availability is only allowed in Wait-WdtTuiEvent.'
+        if ($enclosingFunction -ceq 'Get-WdtPerformanceMarkerKey' -and
+            (Test-WdtScriptPath $ScriptPath $RepositoryRoot 'scripts\performance-recording.ps1')) { return }
+        return New-WdtSafetyIssue $MemberAst 'Console key availability is only allowed in reviewed console input functions.'
     }
 }
 

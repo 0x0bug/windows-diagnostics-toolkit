@@ -37,7 +37,7 @@ Running without switches opens the interactive TUI when terminal input is availa
 | Services | Services, startup entries and scheduled tasks |
 | Updates | Installed updates, failures and reboot indicators |
 
-Reports use TXT with optional Markdown. Advanced workflows include [JSON snapshots and offline comparison](docs/usage.md#structured-snapshots-and-offline-comparison) and [incident timelines](docs/usage.md#incident-investigation-by-symptom-and-time).
+Reports use TXT with optional Markdown. Advanced workflows include [performance recordings](docs/usage.md#performance-recording), [targeted web service checks](docs/usage.md#targeted-web-service), [JSON snapshots and offline comparison](docs/usage.md#structured-snapshots-and-offline-comparison) and [incident timelines](docs/usage.md#incident-investigation-by-symptom-and-time).
 
 ![WDT interactive diagnostics dashboard](https://wdt.digital/assets/tui-wide-real.png)
 
@@ -61,7 +61,7 @@ The bypass applies only to this process. TUI reports default to `.\WindowsDiagno
 
 ## Privacy and safety
 
-WDT writes local reports without changing Windows configuration. There are no automatic fixes, telemetry, or report uploads. Network checks can perform DNS, TCP and ICMP probes; use `-NoExternalNetworkTests` to disable external probes.
+WDT writes local reports without changing Windows configuration. There are no automatic fixes, telemetry, or report uploads. Network checks can perform DNS, TCP and ICMP probes. A targeted web service check also sends a direct HTTP request, with TLS for HTTPS; use `-NoExternalNetworkTests` to disable external probes.
 
 Privacy Mode redacts common identifiers in combined reports. Standalone output is raw. Review reports before sharing: arbitrary sensitive text in Event Log messages may remain.
 

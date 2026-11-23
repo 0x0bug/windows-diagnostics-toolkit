@@ -5,7 +5,8 @@ param(
     [Alias('InternetTestHost')]
     [string]$IcmpTarget = '1.1.1.1',
     [switch]$NoExternalNetworkTests,
-    [int]$TimeoutSeconds = 3
+    [int]$TimeoutSeconds = 3,
+    [string]$WebServiceUrl
 )
 
 $ErrorActionPreference = 'Stop'
