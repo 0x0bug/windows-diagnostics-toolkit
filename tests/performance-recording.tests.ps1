@@ -158,7 +158,7 @@ function Invoke-RecordingFixture {
         [pscustomobject]@{
             CpuPercent = $cpu
             CpuStatus = if ($null -eq $cpu) { 'Unavailable (query failed)' } else { 'Measured' }
-            MemoryAvailableMiB = if ($null -ne $memory) { 3000 }
+            MemoryAvailableMiB = if ($null -ne $memory) { 3000 } else { $null }
             MemoryAvailablePercent = $memory
             MemoryStatus = if ($null -eq $memory) { 'Unavailable (query failed)' } else { 'Measured' }
             DiskRaw = $disk
